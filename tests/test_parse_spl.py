@@ -6,8 +6,9 @@
 
 Відправник/отримувач SPL — **власники** токен-рахунків (`pre/postTokenBalances[accountIndex].owner`,
 індекс — позиція в `accountKeys`), а не самі токен-рахунки. Токен-рахунок, власника якого
-встановити не можна, не пропускається мовчки: він потрапляє в `ParsedTx.unresolved` з причиною
-(T-009 перетворює непорожній `unresolved` на `CorruptRecord`).
+встановити не можна, не пропускається мовчки: він потрапляє в `ParsedTx.unresolved` з причиною,
+а з T-009 `parse_transaction` повертає для такої транзакції `CorruptRecord(reason="unresolved_transfer")`,
+чий `partial` — той самий `ParsedTx` з розібраними сусідами й переліком `unresolved`.
 """
 
 import copy
@@ -17,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from unmask.ingest.model import Asset, Transfer
-from unmask.ingest.parse import ParsedTransfer, ParsedTx, UnresolvedTransfer, parse_transaction
+from unmask.ingest.parse import CorruptRecord, ParsedTransfer, ParsedTx, UnresolvedTransfer, parse_transaction
 
 BASIC = Path(__file__).parent / "fixtures" / "scenarios" / "basic"
 RPC = json.loads((BASIC / "rpc.json").read_text())
@@ -53,6 +54,14 @@ OTHER_PROGRAM = "FdZFJ3hSSzkY22KG3WaVb8zSTnTKWonoRdvmoei3WYus"
 
 def _raw(sig: str) -> dict:
     return copy.deepcopy(RPC["getTransaction"][sig])
+
+
+def _partial(raw: dict) -> ParsedTx:
+    """Транзакція з непорожнім unresolved: з T-009 це CorruptRecord, розібрана частина — у partial."""
+    rec = parse_transaction(raw)
+    assert isinstance(rec, CorruptRecord), rec
+    assert rec.reason == "unresolved_transfer" and rec.partial.unresolved
+    return rec.partial
 
 
 def _spl(tx: ParsedTx) -> list[ParsedTransfer]:
@@ -258,8 +267,8 @@ def test_every_token_delivery_in_basic_buys_parses_from_pool_owner_to_buyer():
 )
 def test_unresolvable_token_account_owner_is_reported_not_silently_skipped(keys, pre, post, reason, account):
     inner = [{"index": 0, "instructions": [_checked(amount="25")]}]
-    tx = parse_transaction(_tx([{"programId": OTHER_PROGRAM, "accounts": [], "data": ""}], inner,
-                               keys=keys + (OTHER_PROGRAM,), pre_tok=pre, post_tok=post, sig="SigUnresolved1"))
+    tx = _partial(_tx([{"programId": OTHER_PROGRAM, "accounts": [], "data": ""}], inner,
+                      keys=keys + (OTHER_PROGRAM,), pre_tok=pre, post_tok=post, sig="SigUnresolved1"))
     assert _spl(tx) == []  # власника не вигадано, токен-рахунок не підставлено як «гаманець»
     (u,) = tx.unresolved
     assert isinstance(u, UnresolvedTransfer)
@@ -274,27 +283,37 @@ def test_resolvable_transfers_kept_alongside_unresolved_one():
     keys = (A, TA, TB, TA2, MINT, TOKEN)
     pre = [_bal(1, A, "100"), _bal(2, B, "0")]
     post = [_bal(1, A, "50"), _bal(2, B, "50")]
-    tx = parse_transaction(_tx([_checked(amount="25"), _checked(source=TA2, amount="5"), _legacy(amount="25")],
-                               keys=keys, pre_tok=pre, post_tok=post))
+    tx = _partial(_tx([_checked(amount="25"), _checked(source=TA2, amount="5"), _legacy(amount="25")],
+                      keys=keys, pre_tok=pre, post_tok=post))
     assert [(t.instruction_path, t.amount) for t in tx.transfers] == [("0", 25), ("2", 25)]
     assert [(u.instruction_path, u.account, u.reason) for u in tx.unresolved] == [("1", TA2, "no_token_balance")]
 
 
 def test_mint_in_instruction_disagreeing_with_token_balance_is_unresolved():
-    tx = parse_transaction(_tx([_checked(mint=USDC)], keys=(A, TA, TB, MINT, USDC, TOKEN), pre_tok=PRE, post_tok=POST))
+    tx = _partial(_tx([_checked(mint=USDC)], keys=(A, TA, TB, MINT, USDC, TOKEN), pre_tok=PRE, post_tok=POST))
     assert tx.transfers == ()
     (u,) = tx.unresolved
     assert u.reason == "mint_mismatch"
     # І між джерелом та призначенням legacy-переказу (mint береться з балансів — мусить збігатись).
     post = (_bal(1, A, "75"), _bal(2, B, "25", mint=USDC))
     pre = (_bal(1, A, "100"), _bal(2, B, "0", mint=USDC))
-    tx = parse_transaction(_tx([_legacy()], keys=(A, TA, TB, MINT, USDC, TOKEN), pre_tok=pre, post_tok=post))
+    tx = _partial(_tx([_legacy()], keys=(A, TA, TB, MINT, USDC, TOKEN), pre_tok=pre, post_tok=post))
     assert tx.transfers == () and [u.reason for u in tx.unresolved] == ["mint_mismatch"]
 
 
 def test_decimals_disagreeing_with_token_balance_is_unresolved():
-    tx = parse_transaction(_tx([_checked(decimals=9)], pre_tok=PRE, post_tok=POST))
+    tx = _partial(_tx([_checked(decimals=9)], pre_tok=PRE, post_tok=POST))
     assert tx.transfers == () and [u.reason for u in tx.unresolved] == ["decimals_mismatch"]
+
+
+def test_legacy_transfer_source_and_destination_decimals_disagree_is_unresolved():
+    # Legacy `transfer` не несе ні mint, ні decimals: єдина перевірка — джерело проти призначення.
+    # Той самий mint, але рахунки звітують різні decimals — суму не можна однозначно масштабувати.
+    pre = (_bal(1, A, "100", decimals=6), _bal(2, B, "0", decimals=9))
+    post = (_bal(1, A, "75", decimals=6), _bal(2, B, "25", decimals=9))
+    tx = _partial(_tx([_legacy()], pre_tok=pre, post_tok=post))
+    assert tx.transfers == ()
+    assert [(u.account, u.reason) for u in tx.unresolved] == [(TB, "decimals_mismatch")]
 
 
 def test_spl_amount_is_exact_int_for_u64_beyond_float_precision():
@@ -308,19 +327,23 @@ def test_spl_amount_is_exact_int_for_u64_beyond_float_precision():
 
 
 @pytest.mark.parametrize("bad", ["1.5", "-25", "", " 25", "2.5e1", "0x19", "２５", 25.0, True, None])
-def test_non_integer_spl_amount_fails_loudly_not_truncated(bad):
-    # Як і для SOL: або точне ціле, або гучна помилка (CorruptRecord — T-009).
-    with pytest.raises((TypeError, ValueError)):
-        parse_transaction(_tx([_checked(amount=bad)], pre_tok=PRE, post_tok=POST))
-    with pytest.raises((TypeError, ValueError)):
-        parse_transaction(_tx([_legacy(amount=bad)], pre_tok=PRE, post_tok=POST))
+def test_non_integer_spl_amount_is_corrupt_not_truncated(bad):
+    # Як і для SOL: або точне ціле, або явний CorruptRecord (контракт T-009; до T-009 — виняток).
+    for ix in (_checked(amount=bad), _legacy(amount=bad)):
+        rec = parse_transaction(_tx([ix], pre_tok=PRE, post_tok=POST))
+        assert isinstance(rec, CorruptRecord)
+        assert (rec.reason, rec.partial) == ("non_integer", None)
+        assert "amount" in rec.detail
 
 
 @pytest.mark.parametrize("bad", ["1.5", "-1", 7.0, None])
-def test_non_integer_token_balance_amount_fails_loudly(bad):
+def test_non_integer_token_balance_amount_is_corrupt(bad):
+    # Баланс — основа token_delta (R-2): неціле значення не округлюється, запис пошкоджений.
     pre = (_bal(1, A, "100"), {**_bal(2, B, "0"), "uiTokenAmount": {"amount": bad, "decimals": 6}})
-    with pytest.raises((TypeError, ValueError)):
-        parse_transaction(_tx([_checked()], pre_tok=pre, post_tok=POST))
+    rec = parse_transaction(_tx([_checked()], pre_tok=pre, post_tok=POST))
+    assert isinstance(rec, CorruptRecord)
+    assert (rec.reason, rec.partial) == ("non_integer", None)
+    assert "preTokenBalances" in rec.detail
 
 
 def test_spl_amount_given_as_json_int_is_accepted():

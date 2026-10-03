@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from unmask.ingest.model import Asset, Transfer
-from unmask.ingest.parse import ParsedTransfer, ParsedTx, parse_transaction
+from unmask.ingest.parse import CorruptRecord, ParsedTransfer, ParsedTx, parse_transaction
 
 BASIC = Path(__file__).parent / "fixtures" / "scenarios" / "basic"
 RPC = json.loads((BASIC / "rpc.json").read_text())
@@ -215,8 +215,16 @@ def test_other_system_instructions_are_not_transfers(type_):
 def test_transfer_typed_instruction_of_other_program_is_not_sol():
     spl = {"program": "spl-token", "programId": TOKEN,
            "parsed": {"type": "transfer", "info": {"source": A, "destination": B, "authority": A, "amount": "5"}}}
-    tx = parse_transaction(_tx([spl], keys=(A, B, TOKEN)))
+    raw = _tx([spl], keys=(A, B, TOKEN))
+    # A і B тут — токен-рахунки; без їхніх балансів переказ був би пошкодженим (T-009), тож вони задані.
+    bal = lambda i, owner, amount: {"accountIndex": i, "mint": OTHER_PROGRAM, "owner": owner,  # noqa: E731
+                                    "uiTokenAmount": {"amount": amount, "decimals": 0}}
+    raw["meta"]["preTokenBalances"] = [bal(0, C, "5"), bal(1, NEW, "0")]
+    raw["meta"]["postTokenBalances"] = [bal(0, C, "0"), bal(1, NEW, "5")]
+    tx = parse_transaction(raw)
+    assert isinstance(tx, ParsedTx)
     assert _sol(tx) == []
+    assert [(t.sender, t.receiver, t.asset) for t in tx.transfers] == [(C, NEW, Asset.spl(OTHER_PROGRAM))]
 
 
 def test_nested_inner_instructions_get_index_dot_position_paths():
@@ -249,10 +257,13 @@ def test_amount_is_exact_int_for_u64_beyond_float_precision():
 
 
 @pytest.mark.parametrize("bad", [1.5e9, 1000000000.0, True, "1000000000", None])
-def test_non_integer_lamports_fail_loudly_not_truncated(bad):
-    # Жодних float/bool/рядків: сума або точне ціле, або гучна помилка (CorruptRecord — T-009).
-    with pytest.raises((TypeError, ValueError)):
-        parse_transaction(_tx([_sys("transfer", source=A, destination=B, lamports=bad)]))
+def test_non_integer_lamports_are_corrupt_not_truncated(bad):
+    # Жодних float/bool/рядків: сума або точне ціле, або явний CorruptRecord (контракт T-009;
+    # до T-009 тут був виняток). Округленого переказу немає ніде — partial відсутній.
+    rec = parse_transaction(_tx([_sys("transfer", source=A, destination=B, lamports=bad)]))
+    assert isinstance(rec, CorruptRecord)
+    assert (rec.signature, rec.reason, rec.partial) == ("SyntheticSig1111", "non_integer", None)
+    assert "lamports" in rec.detail
 
 
 def test_zero_lamport_transfer_is_not_funding():
