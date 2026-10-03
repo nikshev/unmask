@@ -1,0 +1,112 @@
+# Contract: `RpcSource` — джерело ончейн-даних (FR-001-15)
+
+Єдина точка доступу до зовнішнього світу. Ядро збору (`buyers.py`, `funding.py`, `collector.py`, `service.py`) викликає **лише** цей інтерфейс; імпорт `httpx` або будь-якого мережевого модуля поза `rpc/http.py` — дефект ревʼю (принцип IV).
+
+Файл: `src/unmask/ingest/rpc/protocol.py`. Реалізації: `rpc/fixture.py::FixtureRpcSource`, `rpc/http.py::HttpRpcSource`.
+
+## Інтерфейс
+
+```python
+class RpcSource(Protocol):
+    def get_account_info(self, address: str, *, deadline: Deadline) -> AccountInfo | None: ...
+    def get_signatures_for_address(
+        self, address: str, *, before: str | None, until: str | None,
+        limit: int, deadline: Deadline,
+    ) -> list[SignatureInfo]: ...
+    def get_transactions(self, signatures: Sequence[str], *, deadline: Deadline) -> list[RawTransaction | None]: ...
+    def get_token_accounts_by_owner(self, owner: str, *, deadline: Deadline) -> list[TokenAccountInfo]: ...
+    @property
+    def name(self) -> str: ...          # "fixture:<scenario>" | "http"
+```
+
+Типи-значення — `TypedDict`/`Mapping`, що **дослівно** повторюють поле `result` відповідних методів Solana JSON-RPC. Адаптери не перекладають структуру — вони лише транспортують і мапують помилки. Так фікстури, записані з живого RPC, підходять без перетворень.
+
+### `get_account_info(address)` ↔ `getAccountInfo(address, {encoding: "jsonParsed", commitment})`
+
+Повертає `result.value` або `None`, якщо рахунку немає. Для mint очікується:
+
+```json
+{"lamports": 1461600, "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "executable": false, "rentEpoch": 0, "space": 82,
+ "data": {"program": "spl-token", "space": 82,
+          "parsed": {"type": "mint", "info": {"decimals": 6, "supply": "1000000000000000", "isInitialized": true,
+                                               "mintAuthority": null, "freezeAuthority": null}}}}
+```
+
+`owner` ∈ {`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`, `TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`} і `data.parsed.type == "mint"` — критерій «токен існує». Інакше `token_not_found` з `detail=not_a_mint`; `None` → `detail=account_missing`.
+
+### `get_signatures_for_address(address, before, until, limit)` ↔ `getSignaturesForAddress`
+
+Повертає список **від найновішого до найстарішого**, довжиною ≤ `limit` (≤ 1000). Кожен елемент:
+
+```json
+{"signature": "5h…", "slot": 312000451, "err": null, "memo": null, "blockTime": 1759400000, "confirmationStatus": "finalized"}
+```
+
+Семантика курсорів (обов'язкова для обох реалізацій):
+
+- `before=S` — лише записи, що в історії адреси **строго раніші** за S (S має належати історії цієї адреси; ядро гарантує це: S — підпис ребра, яке посилається на адресу).
+- `until=S` — лише записи, **новіші** за S.
+- Порожній список означає кінець історії.
+
+`FixtureRpcSource` реалізує це поверх повного збереженого списку. Записи з `err != null` ядро пропускає.
+
+### `get_transactions(signatures)` ↔ `getTransaction(sig, {encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment})`
+
+Пакетний виклик: елемент i відповідає `signatures[i]`; `None` — транзакцію не знайдено (обрізана історія). Форма елемента:
+
+```json
+{"slot": 312000451, "blockTime": 1759400000, "version": 0,
+ "transaction": {"signatures": ["5h…"],
+   "message": {"recentBlockhash": "…",
+     "accountKeys": [{"pubkey": "…", "signer": true, "writable": true, "source": "transaction"}],
+     "instructions": [
+       {"program": "system", "programId": "11111111111111111111111111111111",
+        "parsed": {"type": "transfer", "info": {"source": "…", "destination": "…", "lamports": 1500000000}}},
+       {"programId": "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", "accounts": ["…"], "data": "…"}
+     ]}},
+ "meta": {"err": null, "fee": 5000,
+   "preBalances": [0, 0], "postBalances": [0, 0],
+   "preTokenBalances":  [{"accountIndex": 3, "mint": "…", "owner": "…", "programId": "Tokenkeg…",
+                          "uiTokenAmount": {"amount": "0", "decimals": 6, "uiAmount": null, "uiAmountString": "0"}}],
+   "postTokenBalances": [],
+   "innerInstructions": [{"index": 1, "instructions": [
+       {"program": "spl-token", "programId": "Tokenkeg…",
+        "parsed": {"type": "transferChecked", "info": {"source": "…", "destination": "…", "authority": "…", "mint": "…",
+                   "tokenAmount": {"amount": "250000", "decimals": 6, "uiAmount": 0.25, "uiAmountString": "0.25"}}}}]}],
+   "logMessages": [], "loadedAddresses": {"readonly": [], "writable": []}}}
+```
+
+Інструкції, які адаптер не може розібрати в `parsed`, лишаються сирими (`programId`, `accounts`, `data`); ядро їх ігнорує як перекази, але враховує `programId` у `programs[]` покупця.
+
+### `get_token_accounts_by_owner(owner)` ↔ `getTokenAccountsByOwner(owner, {programId: Token}, {encoding: "jsonParsed"})`
+
+Повертає `result.value` — список `{"pubkey": "…", "account": {"data": {"parsed": {"info": {"mint": "…", "owner": "…", "tokenAmount": {…}}}}}}`. Ядро використовує лише `pubkey` і `info.mint`. Викликається для spl-token і spl-token-2022 (адаптер об'єднує два запити в один результат).
+
+## Помилки
+
+Адаптер піднімає **тільки** ці винятки (`rpc/protocol.py`); усе інше з транспорту — дефект адаптера:
+
+| Виняток | Коли | Мапиться у `MissingReason` |
+|---|---|---|
+| `RpcRateLimited(retry_after: float \| None)` | HTTP 429 або JSON-RPC помилка з кодом ліміту | `rate_limited` |
+| `RpcTimeout` | таймаут запиту або `deadline` вичерпано до відправки | `timeout` (адаптер) / `budget_exhausted` (ядро, якщо винен дедлайн) |
+| `RpcUnavailable(detail)` | HTTP 5xx, мережевий збій, JSON-RPC `error`, невалідний JSON | `unavailable` |
+
+Повторні спроби (`rpc.max_retries`, `rpc.retry_backoff_seconds`) — відповідальність адаптера, у межах `deadline`. Ядро отримує або результат, або один із трьох винятків.
+
+## `Deadline`
+
+`budget.py::Deadline(clock: Clock, seconds: float)` — `remaining() -> float`, `expired() -> bool`, `request_timeout(cap: float) -> float` (мінімум із залишку й `rpc.request_timeout_seconds`). Адаптер перед кожним запитом: `if deadline.expired(): raise RpcTimeout("budget")`.
+
+## Вимоги до реалізацій
+
+**`FixtureRpcSource(scenario_dir, *, failures=None, clock=None)`**
+- Читає `rpc.json` сценарію: `{"getAccountInfo": {addr: value|null}, "getSignaturesForAddress": {addr: [SignatureInfo…]}, "getTransaction": {sig: RawTransaction|null}, "getTokenAccountsByOwner": {owner: [TokenAccountInfo…]}}`.
+- Веде журнал `calls: list[(method, params)]` — тести доводять «0 звернень» (FR-001-12) і «лише недоотримане» (FR-001-13) саме за ним.
+- `failures` — політика: `FailAfter(n_calls, exc)`, `FailFor(address|signature, exc, times)`; `clock` — `FakeClock`, який просувається на `advance_per_call` на кожному виклику.
+- Адреса, відсутня в `rpc.json`, → порожня історія (не помилка): це покриває edge case «гаманець без вхідних переказів».
+
+**`HttpRpcSource(url, config.rpc, transport=None)`**
+- JSON-RPC 2.0 через `httpx.Client`; `transport` підмінний (`httpx.MockTransport` у тестах).
+- `get_transactions` — один JSON-RPC batch на ≤ `rpc.page_size` підписів або пул на `rpc.max_concurrency` потоків; порядок результату відповідає порядку аргументів.
+- Ключ API — лише зі змінної середовища (`UNMASK_RPC_URL` із вбудованим ключем); у YAML і в git не потрапляє.

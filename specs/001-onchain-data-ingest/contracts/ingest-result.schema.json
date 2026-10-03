@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unmask.local/schemas/001/ingest-result.json",
+  "title": "unmask ingest outcome (feature 001)",
+  "description": "Serialized IngestOutcome: either a collection result with explicit completeness, or an explicit rejection. Amounts are integers in base units; addresses are base58 strings.",
+  "oneOf": [
+    { "$ref": "#/$defs/result" },
+    { "$ref": "#/$defs/rejection" }
+  ],
+  "$defs": {
+    "address": { "type": "string", "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$" },
+    "signature": { "type": "string", "pattern": "^[1-9A-HJ-NP-Za-km-z]{64,88}$" },
+    "asset": { "type": "string", "pattern": "^(sol|spl:[1-9A-HJ-NP-Za-km-z]{32,44})$" },
+    "nonNegInt": { "type": "integer", "minimum": 0 },
+    "posInt": { "type": "integer", "minimum": 1 },
+
+    "rejection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "mint", "detail"],
+      "properties": {
+        "kind": { "enum": ["invalid_address", "token_not_found"] },
+        "mint": { "type": "string" },
+        "detail": { "type": "string" }
+      }
+    },
+
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metadata", "completeness", "buyers", "transfers", "unexpanded"],
+      "properties": {
+        "metadata": { "$ref": "#/$defs/metadata" },
+        "completeness": { "$ref": "#/$defs/completeness" },
+        "buyers": { "type": "array", "items": { "$ref": "#/$defs/buyer" } },
+        "transfers": { "type": "array", "items": { "$ref": "#/$defs/transfer" } },
+        "unexpanded": { "type": "array", "items": { "$ref": "#/$defs/unexpanded" } }
+      }
+    },
+
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mint", "analyzed_at", "wallets_analyzed", "config_version",
+        "first_buyers_n", "funding_depth", "counterparty_threshold", "max_signatures_per_wallet",
+        "collect_spl_inbound", "time_budget_seconds", "elapsed_seconds",
+        "rpc_calls", "transactions_scanned", "source", "resumed", "served_from_cache"
+      ],
+      "properties": {
+        "mint": { "$ref": "#/$defs/address" },
+        "analyzed_at": { "$ref": "#/$defs/nonNegInt" },
+        "wallets_analyzed": { "$ref": "#/$defs/nonNegInt" },
+        "config_version": { "$ref": "#/$defs/posInt" },
+        "first_buyers_n": { "type": "integer", "minimum": 1, "maximum": 500 },
+        "funding_depth": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "counterparty_threshold": { "$ref": "#/$defs/posInt" },
+        "max_signatures_per_wallet": { "$ref": "#/$defs/posInt" },
+        "collect_spl_inbound": { "type": "boolean" },
+        "time_budget_seconds": { "type": "number", "exclusiveMinimum": 0 },
+        "elapsed_seconds": { "type": "number", "minimum": 0 },
+        "rpc_calls": { "$ref": "#/$defs/nonNegInt" },
+        "transactions_scanned": { "$ref": "#/$defs/nonNegInt" },
+        "source": { "type": "string", "pattern": "^(fixture:[A-Za-z0-9_-]+|http)$" },
+        "resumed": { "type": "boolean" },
+        "served_from_cache": { "type": "boolean" }
+      }
+    },
+
+    "completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "missing", "buyers"],
+      "properties": {
+        "status": { "enum": ["complete", "incomplete"] },
+        "missing": { "type": "array", "items": { "$ref": "#/$defs/missing" } },
+        "buyers": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["complete", "reason", "detail"],
+          "properties": {
+            "complete": { "type": "boolean" },
+            "reason": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/missingReason" } ] },
+            "detail": { "type": "string" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "description": "status=complete requires empty missing[] and buyers.complete=true (FR-001-10)",
+          "if": { "properties": { "status": { "const": "complete" } } },
+          "then": {
+            "properties": {
+              "missing": { "maxItems": 0 },
+              "buyers": { "properties": { "complete": { "const": true } } }
+            }
+          }
+        },
+        {
+          "description": "non-empty missing[] or buyers.complete=false forces status=incomplete",
+          "if": {
+            "anyOf": [
+              { "properties": { "missing": { "minItems": 1 } } },
+              { "properties": { "buyers": { "properties": { "complete": { "const": false } } } } }
+            ]
+          },
+          "then": { "properties": { "status": { "const": "incomplete" } } }
+        }
+      ]
+    },
+
+    "missingReason": { "enum": ["rate_limited", "timeout", "unavailable", "corrupt_data", "budget_exhausted"] },
+
+    "missing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wallet", "depth", "reason", "detail"],
+      "properties": {
+        "wallet": { "$ref": "#/$defs/address" },
+        "depth": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "reason": { "$ref": "#/$defs/missingReason" },
+        "detail": { "type": "string" }
+      }
+    },
+
+    "buyer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "wallet", "rank", "first_buy_signature", "first_buy_slot", "first_buy_time",
+        "received_amount", "spent", "programs", "address_type"
+      ],
+      "properties": {
+        "wallet": { "$ref": "#/$defs/address" },
+        "rank": { "$ref": "#/$defs/posInt" },
+        "first_buy_signature": { "$ref": "#/$defs/signature" },
+        "first_buy_slot": { "$ref": "#/$defs/nonNegInt" },
+        "first_buy_time": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/nonNegInt" } ] },
+        "received_amount": { "$ref": "#/$defs/posInt" },
+        "spent": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["asset", "amount"],
+            "properties": {
+              "asset": { "$ref": "#/$defs/asset" },
+              "amount": { "$ref": "#/$defs/posInt" }
+            }
+          }
+        },
+        "programs": { "type": "array", "items": { "$ref": "#/$defs/address" } },
+        "address_type": { "enum": ["wallet", "off_curve"] }
+      }
+    },
+
+    "transfer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "signature", "slot", "block_time", "instruction_path",
+        "sender", "receiver", "asset", "amount", "decimals", "depth"
+      ],
+      "properties": {
+        "signature": { "$ref": "#/$defs/signature" },
+        "slot": { "$ref": "#/$defs/nonNegInt" },
+        "block_time": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/nonNegInt" } ] },
+        "instruction_path": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" },
+        "sender": { "$ref": "#/$defs/address" },
+        "receiver": { "$ref": "#/$defs/address" },
+        "asset": { "$ref": "#/$defs/asset" },
+        "amount": { "$ref": "#/$defs/posInt" },
+        "decimals": { "oneOf": [ { "type": "null" }, { "type": "integer", "minimum": 0, "maximum": 18 } ] },
+        "depth": { "type": "integer", "minimum": 1, "maximum": 3 }
+      }
+    },
+
+    "unexpanded": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wallet", "depth", "reason", "counterparties_seen", "signatures_seen", "signatures_truncated"],
+      "properties": {
+        "wallet": { "$ref": "#/$defs/address" },
+        "depth": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "reason": { "enum": ["high_degree", "signature_cap"] },
+        "counterparties_seen": { "$ref": "#/$defs/nonNegInt" },
+        "signatures_seen": { "$ref": "#/$defs/nonNegInt" },
+        "signatures_truncated": { "type": "boolean" }
+      }
+    }
+  }
+}
