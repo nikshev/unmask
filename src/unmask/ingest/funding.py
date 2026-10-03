@@ -1,4 +1,4 @@
-# impl: FR-001-03, FR-001-04, FR-001-05, FR-001-07, FR-001-08, FR-001-16
+# impl: FR-001-03, FR-001-04, FR-001-05, FR-001-07, FR-001-08, FR-001-09, FR-001-10, FR-001-16
 """BFS джерел фінансування по рівнях (research R-1, R-8, R-9).
 
 Що робить: `expand_level(source, state, depth, config, deadline)` збирає вхідні перекази
@@ -40,6 +40,8 @@
 виклик спробує її знову (пошкоджена транзакція в `tx_cache` не кладеться), а при успіху її записи в
 `missing` видаляються. Розгорнуті вершини повторно не запитуються: виклик із тим самим станом
 ідемпотентний.
+Будь-який інший `RpcError` (базовий чи невідомий підклас — дефект адаптера) теж стає `unavailable` і з
+`collect` не виходить; `detail` збою джерела — метод, адреса/підпис і `<КласВинятку>: <текст>` (T-016).
 
 Межі розгортання (research R-3, FR-001-08, T-013):
 - `max_signatures_per_wallet` — спільний ліміт для гаманця й усіх його токен-рахунків: підписи (без
@@ -86,20 +88,27 @@ from unmask.ingest.collector import CollectionState
 from unmask.ingest.config import IngestConfig
 from unmask.ingest.model import Asset, MissingHistory, MissingReason, Transfer, UnexpandedNode, UnexpandedReason
 from unmask.ingest.parse import CorruptRecord, ParsedTransfer, ParsedTx, parse_transaction
-from unmask.ingest.rpc.protocol import Deadline, RpcRateLimited, RpcSource, RpcTimeout, RpcUnavailable
+from unmask.ingest.rpc.protocol import Deadline, RpcError, RpcRateLimited, RpcSource, RpcTimeout, RpcUnavailable
 
 _RPC_REASONS: tuple[tuple[type[Exception], MissingReason], ...] = (
     (RpcRateLimited, MissingReason.RATE_LIMITED),
     (RpcTimeout, MissingReason.TIMEOUT),
     (RpcUnavailable, MissingReason.UNAVAILABLE),
 )
-_RPC_ERRORS = tuple(exc for exc, _ in _RPC_REASONS)
+# Ловиться вся ієрархія `RpcError`: базовий чи невідомий підклас (поза контрактом — дефект адаптера)
+# із збору не виходить і стає `unavailable` — «не вдалось дізнатись», клас винятку видно в detail (T-016).
+_RPC_ERRORS = (RpcError,)
 
 Problem = tuple[MissingReason, str]
 
 
 def _rpc_reason(exc: Exception) -> MissingReason:
-    return next(reason for cls, reason in _RPC_REASONS if isinstance(exc, cls))
+    return next((reason for cls, reason in _RPC_REASONS if isinstance(exc, cls)), MissingReason.UNAVAILABLE)
+
+
+def _rpc_detail(what: str, exc: Exception) -> str:
+    """detail збою джерела: що запитували (метод, адреса/підпис) і клас винятку з його текстом."""
+    return f"{what}: {type(exc).__name__}: {exc}"
 
 
 @dataclass(frozen=True)
@@ -226,7 +235,7 @@ def _node_signatures(source: RpcSource, state: CollectionState, wallet: str, cut
             if _enough(wallet_valid, page[-1]["slot"], cap):
                 break
     except _RPC_ERRORS as exc:
-        problems.append((_rpc_reason(exc), f"getSignaturesForAddress {wallet} before={before}: {exc}"))
+        problems.append((_rpc_reason(exc), _rpc_detail(f"getSignaturesForAddress {wallet} before={before}", exc)))
 
     if config.collect_spl_inbound:
         try:
@@ -236,7 +245,7 @@ def _node_signatures(source: RpcSource, state: CollectionState, wallet: str, cut
             with deadline_timeouts(deadline, what):
                 accounts = source.get_token_accounts_by_owner(wallet, deadline=deadline)
         except _RPC_ERRORS as exc:
-            problems.append((_rpc_reason(exc), f"getTokenAccountsByOwner {wallet}: {exc}"))
+            problems.append((_rpc_reason(exc), _rpc_detail(what, exc)))
             accounts = []
         for pubkey in sorted({acc["pubkey"] for acc in accounts}):
             entries: list[tuple[str, int]] = []
@@ -252,7 +261,8 @@ def _node_signatures(source: RpcSource, state: CollectionState, wallet: str, cut
                     if _enough(_token_account_entries(entries, cutoff), page[-1]["slot"], cap):
                         break
             except _RPC_ERRORS as exc:
-                problems.append((_rpc_reason(exc), f"getSignaturesForAddress {pubkey} (token account of {wallet}): {exc}"))
+                problems.append((_rpc_reason(exc), _rpc_detail(
+                    f"getSignaturesForAddress {pubkey} (token account of {wallet})", exc)))
             for sig, slot in _token_account_entries(entries, cutoff):
                 found.setdefault(sig, slot)
 
@@ -271,7 +281,7 @@ def _fetch_batch(source: RpcSource, state: CollectionState, batch: list[str], de
         with deadline_timeouts(deadline, what):
             raws = source.get_transactions(batch, deadline=deadline)
     except _RPC_ERRORS as exc:
-        problems.append((_rpc_reason(exc), f"getTransaction from {batch[0]}: {exc}"))
+        problems.append((_rpc_reason(exc), _rpc_detail(what, exc)))
         return None
     return dict(zip(batch, raws))
 

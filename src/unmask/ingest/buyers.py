@@ -1,4 +1,4 @@
-# impl: FR-001-01, FR-001-02, FR-001-16
+# impl: FR-001-01, FR-001-02, FR-001-09, FR-001-10, FR-001-16
 """Перші N покупців токена з курсором (research R-6, R-7).
 
 Що робить: `enumerate_buyers(source, mint, state, config, deadline) -> BuyersCompleteness`
@@ -27,6 +27,9 @@
   знову); з `CorruptRecord.partial` (нерозпізнаний переказ при цілих балансах) купівлі все одно
   беруться — дані не губляться, але неповнота позначена.
 Перша з таких причин (у порядку обробки) потрапляє в `reason`, усі підписи — у `detail`.
+Будь-який `RpcError` поза трьома класами контракту (базовий чи невідомий підклас — дефект адаптера)
+теж не виходить зі збору й стає `unavailable` (T-016). `detail` збою джерела — метод, адреса mint чи
+перший підпис пакета, курсор і `<КласВинятку>: <текст>` (`_rpc_detail`).
 
 Лічильники в `state`: `rpc_calls` — кожне звернення до джерела (й невдале), накопичується;
 `transactions_scanned` — скільки транзакцій mint пропущено через правило купівлі в ОСТАННЬОМУ виклику
@@ -63,7 +66,7 @@ from unmask.ingest.config import IngestConfig
 from unmask.ingest.model import Buyer, BuyersCompleteness, MissingReason
 from unmask.ingest.parse import CorruptRecord, ParsedTx, parse_transaction
 from unmask.ingest.purchases import Purchase, detect_purchases
-from unmask.ingest.rpc.protocol import Deadline, RpcRateLimited, RpcSource, RpcTimeout, RpcUnavailable
+from unmask.ingest.rpc.protocol import Deadline, RpcError, RpcRateLimited, RpcSource, RpcTimeout, RpcUnavailable
 
 
 _RPC_REASONS: tuple[tuple[type[Exception], MissingReason], ...] = (
@@ -71,11 +74,18 @@ _RPC_REASONS: tuple[tuple[type[Exception], MissingReason], ...] = (
     (RpcTimeout, MissingReason.TIMEOUT),
     (RpcUnavailable, MissingReason.UNAVAILABLE),
 )
-_RPC_ERRORS = tuple(exc for exc, _ in _RPC_REASONS)
+# Ловиться вся ієрархія `RpcError`: базовий чи невідомий підклас (поза контрактом — дефект адаптера)
+# із збору не виходить і стає `unavailable` — «не вдалось дізнатись», клас винятку видно в detail (T-016).
+_RPC_ERRORS = (RpcError,)
 
 
 def _rpc_reason(exc: Exception) -> MissingReason:
-    return next(reason for cls, reason in _RPC_REASONS if isinstance(exc, cls))
+    return next((reason for cls, reason in _RPC_REASONS if isinstance(exc, cls)), MissingReason.UNAVAILABLE)
+
+
+def _rpc_detail(what: str, exc: Exception) -> str:
+    """detail збою джерела: що запитували (метод, адреса/підпис) і клас винятку з його текстом."""
+    return f"{what}: {type(exc).__name__}: {exc}"
 
 
 def _purchase_key(p: Purchase) -> tuple[int, str, str]:
@@ -99,7 +109,7 @@ def _page_history(source: RpcSource, mint: str, state: CollectionState, page_siz
                   deadline: Deadline) -> None:
     """Перегорнути історію mint від курсора до кінця. Винятки джерела й `BudgetExhausted` — викликачу."""
     while not state.mint_history_exhausted:
-        what = f"getSignaturesForAddress before={state.signature_cursor}"
+        what = f"getSignaturesForAddress {mint} before={state.signature_cursor}"
         ensure_time(deadline, what)  # перед кожною сторінкою
         state.rpc_calls += 1
         with deadline_timeouts(deadline, what):
@@ -166,7 +176,7 @@ def enumerate_buyers(source: RpcSource, mint: str, state: CollectionState, confi
         state.buyers = ()
         return BuyersCompleteness(
             complete=False, reason=_rpc_reason(exc),
-            detail=f"getSignaturesForAddress before={state.signature_cursor}: {exc}",
+            detail=_rpc_detail(f"getSignaturesForAddress {mint} before={state.signature_cursor}", exc),
         )
 
     # Від найстаріших; порядок — лише з даних (slot, signature), дублікати відкинуто, err пропущено.
@@ -200,7 +210,7 @@ def enumerate_buyers(source: RpcSource, mint: str, state: CollectionState, confi
                     budget_cut = True
                     break
                 except _RPC_ERRORS as exc:
-                    problems.append((_rpc_reason(exc), f"getTransaction from {to_fetch[0]}: {exc}"))
+                    problems.append((_rpc_reason(exc), _rpc_detail(what, exc)))
                     break
                 fetched.update(zip(to_fetch, raws))
             problem = _scan(state, mint, sig, fetched.pop(sig))
