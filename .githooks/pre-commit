@@ -1,0 +1,11 @@
+#!/bin/sh
+# Принцип I конституції: розірваний ланцюг трасування не потрапляє в історію.
+# Обійти можна лише свідомо: git commit --no-verify
+if ! python3 scripts/trace.py; then
+    echo ""
+    echo "pre-commit: коміт відхилено — матриця трасування розірвана."
+    echo "Полагодь ланцюг або, якщо це свідоме рішення, --no-verify."
+    exit 1
+fi
+git add docs/traceability.md 2>/dev/null || true
+exit 0

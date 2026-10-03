@@ -1,0 +1,9 @@
+# Vault показує зміст проекту, а не нутрощі інструментів.
+.specify/          # шаблони і скрипти spec-kit
+.claude/skills/    # вендорені скіли (агенти й команди — індексуються)
+.agents/skills/    # вендорені Codex-скіли spec-kit
+vault/
+graphify-out/
+target/
+.venv/
+node_modules/

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md", "CLAUDE.md"],
+  "plugin": ["@razroo/opencode-model-fallback"],
+  "fallback_models": [
+    "opencode/mimo-v2.6-flash-free",
+    "openrouter/nvidia/nemotron-3.5-lightning:free",
+    "opencode/nemotron-3.5-lightning-free",
+    "inclusionai/ling-3.0-flash-fin:free",
+    "opencode/ling-3.0-flash-fin-free",
+    "opencode/nemotron-3-ultra-free",
+    "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+    "opencode/muse-spark-1.3-contributor-free",
+    "opencode/muse-spark-1.2-contributor-free",
+    "openrouter/qwen/qwen3.8-27b:free",
+    "opencode/big-pickle"
+  ],
+  "provider": {
+    "openrouter": {
+      "options": {
+        "timeout": 900000,
+        "headerTimeout": 900000,
+        "chunkTimeout": 900000
+      }
+    }
+  }
+}

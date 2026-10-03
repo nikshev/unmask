@@ -1,0 +1,18 @@
+# Артефакти, відтворювані з коду — не в git
+/graphify-out/
+/vault/
+
+# Секрети
+.env
+*.key
+
+# Тулчейни
+/target/
+__pycache__/
+*.py[cod]
+.venv/
+.ipynb_checkpoints/
+node_modules/
+
+# OS
+.DS_Store
