@@ -1,0 +1,20 @@
+[project]
+name = "unmask"
+version = "0.1.0"
+description = "Insider cluster detection for Solana token launches"
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml",
+    "solders",
+    "httpx",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "jsonschema",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
