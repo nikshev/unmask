@@ -18,6 +18,25 @@
 Система JSON-RPC розбирає System-інструкції успішної транзакції завжди (інакше
 транзакція впала б), тож сира форма System-інструкції в успішній транзакції не
 трапляється й окремо не декодується.
+
+Розпізнається (SPL, T-008): spl-token і spl-token-2022 `transfer` / `transferChecked`
+(верхній рівень і inner) → `asset="spl:<mint>"`. `sender`/`receiver` — **власники**
+токен-рахунків джерела й призначення: позиція рахунку в `accountKeys` (у v0 jsonParsed
+там уже є адреси lookup-таблиць, `meta.loadedAddresses` вдруге не додається) →
+`pre/postTokenBalances[accountIndex].owner`. Рахунок, створений у транзакції, є лише в
+post, закритий — лише в pre; тому шукаються обидва, і вони мусять узгоджуватись.
+`mint` і `decimals` (`uiTokenAmount.decimals`) — з токен-балансів (legacy `transfer` поля
+`mint` не має); якщо інструкція їх теж називає, вони мусять збігтися. Сума — з
+`tokenAmount.amount` / `amount`: рядок лише з ASCII-цифр або точне `int`; інше — гучна
+помилка. WSOL лишається `spl:So111…112`, у SOL не перетворюється.
+
+Невстановлюваний власник не пропускається мовчки і не підміняється адресою
+токен-рахунку: такий переказ потрапляє в `ParsedTx.unresolved` з причиною
+(`UNRESOLVED_REASONS`), а сусідні перекази лишаються. Непорожній `unresolved` означає,
+що `transfers` неповні; T-009 перетворює це на `CorruptRecord`.
+
+Свідомо не розпізнаються: `transferCheckedWithFee` (розширення token-2022), `mintTo`,
+`burn`, `closeAccount` та інші — це не `transfer`/`transferChecked` за data-model.
 """
 
 from __future__ import annotations
@@ -29,6 +48,22 @@ from typing import Any, Iterator, Mapping
 from unmask.ingest.model import Asset, Transfer
 
 SYSTEM_PROGRAM = "11111111111111111111111111111111"
+TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+TOKEN_PROGRAMS = frozenset({TOKEN_PROGRAM, TOKEN_2022_PROGRAM})
+
+_SPL_TRANSFER_TYPES = frozenset({"transfer", "transferChecked"})
+_DIGITS_RE = re.compile(r"^[0-9]+$")
+
+# Причини, з яких SPL-переказ не можна приписати власникам (`UnresolvedTransfer.reason`).
+UNRESOLVED_REASONS = frozenset({
+    "account_not_in_keys",  # токен-рахунку немає в accountKeys
+    "no_token_balance",     # рахунок є, але не згаданий ні в pre-, ні в postTokenBalances
+    "owner_missing",        # запис балансу без поля owner
+    "owner_conflict",       # pre і post називають різних власників
+    "mint_mismatch",        # mint джерела/призначення/інструкції не збігаються
+    "decimals_mismatch",    # decimals джерела/призначення/інструкції не збігаються
+})
 
 _PATH_RE = re.compile(r"^[0-9]+(\.[0-9]+)?$")
 
@@ -83,6 +118,44 @@ class ParsedTransfer:
         return Transfer(**values, depth=depth)
 
 
+def _token_amount(name: str, value: Any) -> int:
+    """Сума SPL у базових одиницях: рядок ASCII-цифр (jsonParsed) або точне невідʼємне `int`."""
+    if isinstance(value, str):
+        if not _DIGITS_RE.match(value):
+            raise ValueError(f"{name}: {value!r} is not a non-negative integer string")
+        return int(value)
+    _exact_int(name, value)
+    if value < 0:
+        raise ValueError(f"{name}: {value} < 0")
+    return value
+
+
+@dataclass(frozen=True)
+class TokenBalance:
+    """Рядок `pre/postTokenBalances`: стан токен-рахунку `account_keys[account_index]`."""
+
+    account_index: int
+    mint: str
+    owner: str | None
+    amount: int
+    decimals: int
+
+
+@dataclass(frozen=True)
+class UnresolvedTransfer:
+    """SPL-переказ, який не вдалося приписати власникам. Не пропуск — явний факт для T-009."""
+
+    signature: str
+    instruction_path: str
+    program_id: str
+    account: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        if self.reason not in UNRESOLVED_REASONS:
+            raise ValueError(f"unresolved_transfer.reason: unknown {self.reason!r}")
+
+
 @dataclass(frozen=True)
 class ParsedTx:
     signature: str
@@ -96,6 +169,19 @@ class ParsedTx:
     account_keys: tuple[str, ...]
     pre_balances: tuple[int, ...]
     post_balances: tuple[int, ...]
+    unresolved: tuple[UnresolvedTransfer, ...] = ()
+    pre_token_balances: tuple[TokenBalance, ...] = ()
+    post_token_balances: tuple[TokenBalance, ...] = ()
+
+    def token_delta(self, owner: str, mint: str) -> int:
+        """Δ балансу `mint` для власника `owner` у базових одиницях (сума по його токен-рахунках, R-2).
+
+        Рахунок, якого немає в pre (створений) чи post (закритий), там рахується як 0.
+        """
+        def total(balances: tuple[TokenBalance, ...]) -> int:
+            return sum(b.amount for b in balances if b.owner == owner and b.mint == mint)
+
+        return total(self.post_token_balances) - total(self.pre_token_balances)
 
     @property
     def created_accounts_lamports(self) -> int:
@@ -139,6 +225,83 @@ def _system_transfer(ix: Mapping[str, Any]) -> tuple[str, str, int] | None:
     return info[roles[0]], info[roles[1]], _exact_int("lamports", info["lamports"])
 
 
+def _token_balances(name: str, entries: Any) -> tuple[TokenBalance, ...]:
+    return tuple(
+        TokenBalance(
+            account_index=_exact_int(f"{name}.accountIndex", e["accountIndex"]),
+            mint=e["mint"],
+            owner=e.get("owner") or None,
+            amount=_token_amount(f"{name}.uiTokenAmount.amount", e["uiTokenAmount"]["amount"]),
+            decimals=_exact_int(f"{name}.uiTokenAmount.decimals", e["uiTokenAmount"]["decimals"]),
+        )
+        for e in entries or ()
+    )
+
+
+class _Unresolved(Exception):
+    def __init__(self, account: str, reason: str) -> None:
+        self.account, self.reason = account, reason
+
+
+class _TokenAccounts:
+    """Власник/mint/decimals токен-рахунку за адресою через accountKeys і pre/post токен-баланси."""
+
+    def __init__(self, account_keys: tuple[str, ...], balances: tuple[TokenBalance, ...]) -> None:
+        self._index: dict[str, int] = {}
+        for i, key in enumerate(account_keys):
+            self._index.setdefault(key, i)
+        self._balances = balances
+
+    def resolve(self, account: str) -> tuple[str, str, int]:
+        index = self._index.get(account)
+        if index is None:
+            raise _Unresolved(account, "account_not_in_keys")
+        entries = [b for b in self._balances if b.account_index == index]
+        if not entries:
+            raise _Unresolved(account, "no_token_balance")
+        owners = {b.owner for b in entries}
+        if None in owners:
+            raise _Unresolved(account, "owner_missing")
+        if len(owners) > 1:
+            raise _Unresolved(account, "owner_conflict")
+        if len({b.mint for b in entries}) > 1:
+            raise _Unresolved(account, "mint_mismatch")
+        if len({b.decimals for b in entries}) > 1:
+            raise _Unresolved(account, "decimals_mismatch")
+        return entries[0].owner, entries[0].mint, entries[0].decimals  # type: ignore[return-value]
+
+
+def _spl_transfer(ix: Mapping[str, Any]) -> tuple[str, str, int, Mapping[str, Any]] | None:
+    """(source, destination, amount, info) токен-переказу або None, якщо це не він."""
+    if ix.get("programId") not in TOKEN_PROGRAMS:
+        return None
+    parsed = ix.get("parsed")
+    if not isinstance(parsed, Mapping) or parsed.get("type") not in _SPL_TRANSFER_TYPES:
+        return None
+    info = parsed["info"]
+    if parsed["type"] == "transferChecked":
+        amount = _token_amount("tokenAmount.amount", info["tokenAmount"]["amount"])
+    else:
+        amount = _token_amount("amount", info["amount"])
+    return info["source"], info["destination"], amount, info
+
+
+def _resolve_spl(accounts: _TokenAccounts, source: str, destination: str,
+                 info: Mapping[str, Any]) -> tuple[str, str, Asset, int]:
+    sender, mint, decimals = accounts.resolve(source)
+    receiver, dest_mint, dest_decimals = accounts.resolve(destination)
+    if dest_mint != mint:
+        raise _Unresolved(destination, "mint_mismatch")
+    if info.get("mint", mint) != mint:
+        raise _Unresolved(source, "mint_mismatch")
+    if dest_decimals != decimals:
+        raise _Unresolved(destination, "decimals_mismatch")
+    token_amount = info.get("tokenAmount")
+    if isinstance(token_amount, Mapping) and token_amount.get("decimals", decimals) != decimals:
+        raise _Unresolved(source, "decimals_mismatch")
+    return sender, receiver, Asset.spl(mint), decimals
+
+
 def parse_transaction(raw: Mapping[str, Any]) -> ParsedTx:
     meta = raw["meta"]
     message = raw["transaction"]["message"]
@@ -147,21 +310,42 @@ def parse_transaction(raw: Mapping[str, Any]) -> ParsedTx:
     block_time = raw.get("blockTime")
     failed = meta.get("err") is not None
 
+    account_keys = tuple(_pubkey(k) for k in message["accountKeys"])
+    pre_tokens = _token_balances("preTokenBalances", meta.get("preTokenBalances"))
+    post_tokens = _token_balances("postTokenBalances", meta.get("postTokenBalances"))
+    accounts = _TokenAccounts(account_keys, pre_tokens + post_tokens)
+
     transfers: list[ParsedTransfer] = []
+    unresolved: list[UnresolvedTransfer] = []
     if not failed:
         for path, ix in _instructions(message, meta):
-            found = _system_transfer(ix)
-            if found is None:
+            common = dict(signature=signature, slot=slot, block_time=block_time, instruction_path=path)
+            sol = _system_transfer(ix)
+            if sol is not None:
+                sender, receiver, lamports = sol
+                if lamports:
+                    transfers.append(ParsedTransfer(
+                        **common, sender=sender, receiver=receiver, asset=Asset.SOL, amount=lamports, decimals=None,
+                    ))
                 continue
-            sender, receiver, lamports = found
-            if lamports == 0:
+            spl = _spl_transfer(ix)
+            if spl is None:
+                continue
+            source, destination, amount, info = spl
+            if amount == 0:
+                continue
+            try:
+                sender, receiver, asset, decimals = _resolve_spl(accounts, source, destination, info)
+            except _Unresolved as e:
+                unresolved.append(UnresolvedTransfer(
+                    signature=signature, instruction_path=path, program_id=ix["programId"],
+                    account=e.account, reason=e.reason,
+                ))
                 continue
             transfers.append(ParsedTransfer(
-                signature=signature, slot=slot, block_time=block_time, instruction_path=path,
-                sender=sender, receiver=receiver, asset=Asset.SOL, amount=lamports, decimals=None,
+                **common, sender=sender, receiver=receiver, asset=asset, amount=amount, decimals=decimals,
             ))
 
-    account_keys = tuple(_pubkey(k) for k in message["accountKeys"])
     return ParsedTx(
         signature=signature,
         slot=slot,
@@ -174,4 +358,7 @@ def parse_transaction(raw: Mapping[str, Any]) -> ParsedTx:
         account_keys=account_keys,
         pre_balances=tuple(_exact_int("preBalances", b) for b in meta["preBalances"]),
         post_balances=tuple(_exact_int("postBalances", b) for b in meta["postBalances"]),
+        unresolved=tuple(unresolved),
+        pre_token_balances=pre_tokens,
+        post_token_balances=post_tokens,
     )
