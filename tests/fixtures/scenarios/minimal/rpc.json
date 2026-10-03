@@ -1,0 +1,69 @@
+{
+  "getAccountInfo": {
+    "MINT1": {
+      "lamports": 1461600,
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "executable": false,
+      "rentEpoch": 0,
+      "space": 82,
+      "data": {
+        "program": "spl-token",
+        "space": 82,
+        "parsed": {
+          "type": "mint",
+          "info": {"decimals": 6, "supply": "1000000", "isInitialized": true, "mintAuthority": null, "freezeAuthority": null}
+        }
+      }
+    },
+    "NOACCOUNT": null
+  },
+  "getSignaturesForAddress": {
+    "WALLET1": [
+      {"signature": "sig5", "slot": 105, "err": null, "memo": null, "blockTime": 1759400050, "confirmationStatus": "finalized"},
+      {"signature": "sig4", "slot": 104, "err": null, "memo": null, "blockTime": 1759400040, "confirmationStatus": "finalized"},
+      {"signature": "sig3", "slot": 103, "err": null, "memo": null, "blockTime": 1759400030, "confirmationStatus": "finalized"},
+      {"signature": "sig2", "slot": 102, "err": {"InstructionError": [0, "Custom"]}, "memo": null, "blockTime": 1759400020, "confirmationStatus": "finalized"},
+      {"signature": "sig1", "slot": 101, "err": null, "memo": null, "blockTime": 1759400010, "confirmationStatus": "finalized"}
+    ]
+  },
+  "getTransaction": {
+    "sig1": {
+      "slot": 101,
+      "blockTime": 1759400010,
+      "version": 0,
+      "transaction": {
+        "signatures": ["sig1"],
+        "message": {
+          "recentBlockhash": "hash1",
+          "accountKeys": [
+            {"pubkey": "SENDER1", "signer": true, "writable": true, "source": "transaction"},
+            {"pubkey": "WALLET1", "signer": false, "writable": true, "source": "transaction"}
+          ],
+          "instructions": [
+            {"program": "system", "programId": "11111111111111111111111111111111",
+             "parsed": {"type": "transfer", "info": {"source": "SENDER1", "destination": "WALLET1", "lamports": 1500000000}}}
+          ]
+        }
+      },
+      "meta": {
+        "err": null,
+        "fee": 5000,
+        "preBalances": [2000000000, 0],
+        "postBalances": [499995000, 1500000000],
+        "preTokenBalances": [],
+        "postTokenBalances": [],
+        "innerInstructions": [],
+        "logMessages": [],
+        "loadedAddresses": {"readonly": [], "writable": []}
+      }
+    },
+    "sig2": null
+  },
+  "getTokenAccountsByOwner": {
+    "WALLET1": [
+      {"pubkey": "TOKACC1",
+       "account": {"data": {"parsed": {"info": {"mint": "MINT1", "owner": "WALLET1",
+                                                "tokenAmount": {"amount": "250000", "decimals": 6, "uiAmount": 0.25, "uiAmountString": "0.25"}}}}}}
+    ]
+  }
+}
