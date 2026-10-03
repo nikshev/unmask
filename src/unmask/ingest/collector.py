@@ -30,8 +30,9 @@ len(buyers)`; `source = source.name`; `analyzed_at = clock.wall()` на поча
 звернень до джерела **за цей виклик** (приріст `state.rpc_calls`, data-model «за цей прогін»);
 `transactions_scanned` — скільки транзакцій mint пропущено через правило купівлі в останньому
 проході `enumerate_buyers` (і запитаних, і взятих із кешу), тож детермінований: після будь-якого
-повтору дорівнює свіжому прогону. `resumed` і
-`served_from_cache` тут завжди `false` — їх виставляють `resume` (T-017) і сервіс (T-018).
+повтору дорівнює свіжому прогону. `collect` ставить
+`resumed=false` і `served_from_cache=false`; `resumed=true` ставить `resume` (лише коли стан справді
+продовжено), `served_from_cache` — сервіс (T-018).
 
 Повторний виклик на тому самому `state` (зокрема після збою чи обірваного перелічення) дає той самий
 результат, що й свіжий прогін, за всіма полями, крім volatile-полів metadata (`rpc_calls` — реальна
@@ -41,8 +42,12 @@ len(buyers)`; `source = source.name`; `analyzed_at = clock.wall()` на поча
 каскад, що й вершини глибших рівнів (T-013), а записи `missing` вершини перебудовуються з її
 останнього розгортання (причини лише актуальні; перекази попередніх спроб лишаються доказами).
 Розгорнуті вершини й закешовані транзакції повторно не запитуються, транзакції mint за слотом N-го
-покупця на повторі не дозапитуються (ліниві пакети в `buyers.py`): на повному стані — нуль звернень. Що лишається T-017: партиційний
-кеш стану, політика відкидання стану іншої версії конфігу (тут — гучна відмова) і `resumed=true`.
+покупця на повторі не дозапитуються (ліниві пакети в `buyers.py`): на повному стані — нуль звернень.
+
+`resume(state, source, config, clock)` (T-017) — вхід для продовження партиційного стану з
+`cache.ResultCache`: той самий `collect`, плюс `resumed=true`. Стан іншої версії конфігу (принцип III)
+відкидає саме `resume` (скидає на місці й збирає заново, `resumed=false`); прямий `collect` із таким
+станом — гучний `ValueError` (дефект викликача, стани різних версій не змішуються).
 
 Бюджет часу (FR-001-16, T-015): `budget.Deadline(clock, config.time_budget_seconds)` створюється на
 початку `collect` (відлік — від початку цього виклику; час до нього в бюджет не входить) і передається в
@@ -66,7 +71,7 @@ resume (вище): вершини з `missing` і недоперелічені �
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, replace
 from typing import TYPE_CHECKING, Any
 
 from unmask.ingest.budget import Deadline
@@ -161,3 +166,23 @@ def collect(state: CollectionState, source: RpcSource, config: IngestConfig, clo
         transfers=tuple(sorted(state.transfers.values(), key=transfer_sort_key)),
         unexpanded=tuple(sorted(state.unexpanded, key=lambda u: (u.depth, u.wallet))),
     )
+
+
+def resume(state: CollectionState, source: RpcSource, config: IngestConfig, clock: Clock) -> IngestResult:
+    """Продовжити збір із партиційного стану (FR-001-13); `metadata.resumed=true`.
+
+    Добирає лише недоотримане — це робить сам `collect` на частковому стані (див. модуль): курсор
+    перегортання, гаманці з `missing`, нерозгорнуті рівні; `expanded` не запитуються.
+
+    Стан іншої `config_version` (принцип III) відкидається ТУТ: його скидають на місці до порожнього
+    стану поточної версії (той самий об'єкт — викликач кладе його в `partial`, якщо результат знову
+    неповний) і збір іде заново, як свіжий; тоді `resumed=false`, бо продовжувати не було з чого.
+    Прямий `collect` зі станом іншої версії лишається гучною відмовою (`ValueError`) — дефект викликача.
+    """
+    if state.config_version != config.version:
+        fresh = CollectionState(mint=state.mint, config_version=config.version)
+        for f in fields(CollectionState):
+            setattr(state, f.name, getattr(fresh, f.name))
+        return collect(state, source, config, clock)
+    result = collect(state, source, config, clock)
+    return replace(result, metadata=replace(result.metadata, resumed=True))
