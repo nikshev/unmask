@@ -1,0 +1,352 @@
+{
+  "scenario": "basic",
+  "description": "Синтетичний токен: 5 покупців, глибина фінансування 1-3, пастки відсікання (R-1), цикл, самопереказ, SPL на існуючий токен-рахунок, PDA-покупець, невдала транзакція.",
+  "mint": "FeC5ErmXHtwwsjQWYXasUPNRyWFQuY7XBHMR2yspcLPs",
+  "wallets": {
+    "DEX": "AJifsNjGyUQJeLCN6ppg1HThWjH1Lqag34zHDMF6C2iP",
+    "ROUTER": "FdZFJ3hSSzkY22KG3WaVb8zSTnTKWonoRdvmoei3WYus",
+    "M": "FeC5ErmXHtwwsjQWYXasUPNRyWFQuY7XBHMR2yspcLPs",
+    "CREATOR": "8c5zskiLNNwZ6m757CCGCCEX7sczcEJYi58rgdbx4av1",
+    "P5": "8stDXajKo2VMRTGWtbkWvdUHNA5uy6A668M2o1hDZwgz",
+    "SOL_VAULT": "2rp35qHrThmBfr5JPKBegZfYRSHat9WJqHtCfr3BSFpN",
+    "USDC": "71WL3BJVuaMGiEqoskjwY5W3NM5DXo8YBvjb7GysMPgK",
+    "A": "BG2CcmGWP9wJoXEmRqqud4ZjB4C8ppDfrCm1VzRmgYAc",
+    "B": "8WK4XexU2EH65Tpb3a3xvmvuPmNiYRsh6vGSNwd7ytqY",
+    "C": "DwrpsQRTn5PczMvrN4dN4hgvCKFbKafjqH2au8VTJmrK",
+    "D": "7mYdFSYRwhWoZhGetuJ6TUDDp8NWteV31JwDtxDCGFmD",
+    "E": "AjEdPqzov4xPXJhXbGHZos8cVsEuv3bxBU658c4aYxSu",
+    "F": "BRRh8msu86ax1G4Wfsjc7kHGwhjuVAqXShWSHGAX96k5",
+    "G": "7M9YrDUEKoHwzBoX5Pjsb8MKCqvSJANcfJNVpPMrC2qo",
+    "K": "3KUxWjKw8SJnA8SrFZ6euh9tv5b1ZEBddtW2zGVtaGYz",
+    "X": "EtND5kYJG5eqfMMXbZj7zvxyguA1c7TVTQErZcRfLNED",
+    "Z": "APKbo7jWjahuPAFr7eeXCrGpsrwQDUpTesJ8Ju6c1AfP",
+    "S": "4qpBXVCJqHc5S6yhtVVbGHrcG29M7AuxXiCTcaF8QzNs",
+    "U": "2GXviUMfXUwqVcYfiVXnq9tj7LurBwyt5yA8JeNZzqhP",
+    "P1": "8Ce2Y4ofSNGjXLL9afvwn5p2HXTu7yM1zW9ZLeRjnU6r",
+    "P2": "5jEmd1XJ8MsTqbdjYjkfGguo7Gs1Paq8yZZn4f3LQftT",
+    "P3": "HzwnbdJkjXLNs4wZCUUKrZXSdx3JKdr35mWCRLbfpMKz",
+    "P4": "5ydWCR12TmZkj92Lswi4jbkupb1xKXZLd6MHrvvnEoJq"
+  },
+  "config": {
+    "first_buyers_n": 5,
+    "funding_depth": 3,
+    "counterparty_threshold": 200,
+    "max_signatures_per_wallet": 300,
+    "collect_spl_inbound": true
+  },
+  "rules": {
+    "funding_depth": "для funding_depth=d беруться перекази з depth <= d; еталон складено для d=3",
+    "first_buyers_n": "для N<5 беруться перші N з buyers (порядок (slot, signature, wallet)); перекази відповідних покупців — за depth/шляхом від них",
+    "collect_spl_inbound": "при false усі перекази з asset 'spl:*' відсутні",
+    "same_slot_tie": "P2 і P3 купують в одному слоті: порядок за підписом (research R-6), тому P3 (rank 2) стоїть перед P2 (rank 3)",
+    "cutoff_is_strict": "межа — транзакція (перша купівля або ребро): береться лише те, що в історії строго раніше; доставка mint у самій купівельній транзакції не входить"
+  },
+  "completeness": {
+    "status": "complete",
+    "missing": [],
+    "buyers_complete": true
+  },
+  "buyers": [
+    {
+      "wallet": "8Ce2Y4ofSNGjXLL9afvwn5p2HXTu7yM1zW9ZLeRjnU6r",
+      "rank": 1,
+      "first_buy_signature": "5fEbVTvxkGmu92KwPLYihyQypiKGSbnpnqm5m1hUSQuZWsrYPNdmdwytshQwYR8i2dZanqqmJpbY4U5T9mS9o71D",
+      "first_buy_slot": 200,
+      "first_buy_time": 1759400200,
+      "received_amount": 4000000000,
+      "spent": [
+        {
+          "asset": "sol",
+          "amount": 600000000
+        }
+      ],
+      "programs": [
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "11111111111111111111111111111111",
+        "AJifsNjGyUQJeLCN6ppg1HThWjH1Lqag34zHDMF6C2iP"
+      ],
+      "address_type": "wallet"
+    },
+    {
+      "wallet": "HzwnbdJkjXLNs4wZCUUKrZXSdx3JKdr35mWCRLbfpMKz",
+      "rank": 2,
+      "first_buy_signature": "3dML2ZJVapVpB7X66sqUavnC6RZvZR3WfqFuAwD5jr81cvhrVDffyAMtEK7wQYqzGLv95nAta4BmXJUuLPezQK2j",
+      "first_buy_slot": 210,
+      "first_buy_time": 1759400210,
+      "received_amount": 1500000000,
+      "spent": [
+        {
+          "asset": "sol",
+          "amount": 300000000
+        }
+      ],
+      "programs": [
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "11111111111111111111111111111111",
+        "AJifsNjGyUQJeLCN6ppg1HThWjH1Lqag34zHDMF6C2iP"
+      ],
+      "address_type": "wallet"
+    },
+    {
+      "wallet": "5jEmd1XJ8MsTqbdjYjkfGguo7Gs1Paq8yZZn4f3LQftT",
+      "rank": 3,
+      "first_buy_signature": "vryd3oZkhzXFNpYoz5SsLi6LbkE8jG5me1wUSKmVYDopGV3ex6z5g4xGmgbYxfyeh7qSi3PZXzYbv3JuvxodMBi",
+      "first_buy_slot": 210,
+      "first_buy_time": 1759400210,
+      "received_amount": 2500000000,
+      "spent": [
+        {
+          "asset": "sol",
+          "amount": 400000000
+        }
+      ],
+      "programs": [
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "11111111111111111111111111111111",
+        "AJifsNjGyUQJeLCN6ppg1HThWjH1Lqag34zHDMF6C2iP"
+      ],
+      "address_type": "wallet"
+    },
+    {
+      "wallet": "5ydWCR12TmZkj92Lswi4jbkupb1xKXZLd6MHrvvnEoJq",
+      "rank": 4,
+      "first_buy_signature": "535pGtz3yZbSk8uf96u4oLwyAvXohPuaQ53j5rf7oC3S5QLXbufGXKmSdr9UpwEojkG8mZXthA2zS9AYcAszKDzQ",
+      "first_buy_slot": 220,
+      "first_buy_time": 1759400220,
+      "received_amount": 1000000000,
+      "spent": [
+        {
+          "asset": "sol",
+          "amount": 200000000
+        }
+      ],
+      "programs": [
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "11111111111111111111111111111111",
+        "AJifsNjGyUQJeLCN6ppg1HThWjH1Lqag34zHDMF6C2iP"
+      ],
+      "address_type": "wallet"
+    },
+    {
+      "wallet": "8stDXajKo2VMRTGWtbkWvdUHNA5uy6A668M2o1hDZwgz",
+      "rank": 5,
+      "first_buy_signature": "2j2yBnsSi3GEgw2kZVDsjzxQtueSRYu6421piYat5yb6B8uf9oSGMpzYygzXmXMuGjAPHootFQJE2LuWEiZgdH7w",
+      "first_buy_slot": 230,
+      "first_buy_time": 1759400230,
+      "received_amount": 20000000000,
+      "spent": [
+        {
+          "asset": "sol",
+          "amount": 2500000000
+        }
+      ],
+      "programs": [
+        "AJifsNjGyUQJeLCN6ppg1HThWjH1Lqag34zHDMF6C2iP"
+      ],
+      "address_type": "off_curve"
+    }
+  ],
+  "transfers": [
+    {
+      "signature": "4Au5MBM8hicf1LYx9YbSUHZ6tA98hcBdtfj8tdvVKcfhdR6zqGaCkuBMD2yrZ5zutNPk2dxB7qN6pzDwSL6AbJ6n",
+      "slot": 100,
+      "block_time": 1759400100,
+      "instruction_path": "0",
+      "sender": "DwrpsQRTn5PczMvrN4dN4hgvCKFbKafjqH2au8VTJmrK",
+      "receiver": "8WK4XexU2EH65Tpb3a3xvmvuPmNiYRsh6vGSNwd7ytqY",
+      "asset": "sol",
+      "amount": 5000000000,
+      "decimals": null,
+      "depth": 3
+    },
+    {
+      "signature": "nrCxgMKNzMNdLsBvnPADy1u1HqeVGqgtGezFYVrQYP9gFBiMGKueF2stTkXCMyMYay29Awn1etehQLfkvEWemM2",
+      "slot": 104,
+      "block_time": 1759400104,
+      "instruction_path": "0",
+      "sender": "BG2CcmGWP9wJoXEmRqqud4ZjB4C8ppDfrCm1VzRmgYAc",
+      "receiver": "7mYdFSYRwhWoZhGetuJ6TUDDp8NWteV31JwDtxDCGFmD",
+      "asset": "sol",
+      "amount": 1000000000,
+      "decimals": null,
+      "depth": 3
+    },
+    {
+      "signature": "2YTSM285e529LNBXkZhueMLGVevpv2zK1FcH2Yav51e16nixnwgRi8PsCmxuWxqUSnvTLEMWSpy3Lj97MrRUMypH",
+      "slot": 108,
+      "block_time": 1759400108,
+      "instruction_path": "0",
+      "sender": "7mYdFSYRwhWoZhGetuJ6TUDDp8NWteV31JwDtxDCGFmD",
+      "receiver": "BG2CcmGWP9wJoXEmRqqud4ZjB4C8ppDfrCm1VzRmgYAc",
+      "asset": "sol",
+      "amount": 1500000000,
+      "decimals": null,
+      "depth": 2
+    },
+    {
+      "signature": "3sWVjSh4at5KCFYT2buuVCGxCvXvt3WoXXk5qSzV8qyYRZu13SQdJumwT1gKZ6W5d7EcGkvrX7ZWQ8557x3jA7Xh",
+      "slot": 110,
+      "block_time": 1759400110,
+      "instruction_path": "0",
+      "sender": "8WK4XexU2EH65Tpb3a3xvmvuPmNiYRsh6vGSNwd7ytqY",
+      "receiver": "BG2CcmGWP9wJoXEmRqqud4ZjB4C8ppDfrCm1VzRmgYAc",
+      "asset": "sol",
+      "amount": 4000000000,
+      "decimals": null,
+      "depth": 2
+    },
+    {
+      "signature": "47HaJrgcKAvwQe8pSgYJvG23bDWfy6xipH8yGYX8QtHKTdg9tXtkomw5kmLkD5bHNjxX67mxDMZRNYhf91UDou25",
+      "slot": 120,
+      "block_time": 1759400120,
+      "instruction_path": "0.0",
+      "sender": "BG2CcmGWP9wJoXEmRqqud4ZjB4C8ppDfrCm1VzRmgYAc",
+      "receiver": "8Ce2Y4ofSNGjXLL9afvwn5p2HXTu7yM1zW9ZLeRjnU6r",
+      "asset": "sol",
+      "amount": 3000000000,
+      "decimals": null,
+      "depth": 1
+    },
+    {
+      "signature": "2avhivTtpL5ZUDJFgDu1o9dhcahn43zmYneNMUsBo8YiKNjbv7fkNLbHmBP9pvKmypf1roZmjQhR28RwsSbJktF9",
+      "slot": 122,
+      "block_time": 1759400122,
+      "instruction_path": "0",
+      "sender": "7M9YrDUEKoHwzBoX5Pjsb8MKCqvSJANcfJNVpPMrC2qo",
+      "receiver": "BG2CcmGWP9wJoXEmRqqud4ZjB4C8ppDfrCm1VzRmgYAc",
+      "asset": "sol",
+      "amount": 1000000000,
+      "decimals": null,
+      "depth": 2
+    },
+    {
+      "signature": "RafQBMEz5i5W5BDU2iBZ39PcaZtocQD4KNCDfStDbrHvT954QMHEfx83vj84tNEewm7tWnc3UMJmsQ9y7qxepHy",
+      "slot": 125,
+      "block_time": 1759400125,
+      "instruction_path": "0",
+      "sender": "BG2CcmGWP9wJoXEmRqqud4ZjB4C8ppDfrCm1VzRmgYAc",
+      "receiver": "5jEmd1XJ8MsTqbdjYjkfGguo7Gs1Paq8yZZn4f3LQftT",
+      "asset": "sol",
+      "amount": 1000000000,
+      "decimals": null,
+      "depth": 1
+    },
+    {
+      "signature": "RafQBMEz5i5W5BDU2iBZ39PcaZtocQD4KNCDfStDbrHvT954QMHEfx83vj84tNEewm7tWnc3UMJmsQ9y7qxepHy",
+      "slot": 125,
+      "block_time": 1759400125,
+      "instruction_path": "1",
+      "sender": "BG2CcmGWP9wJoXEmRqqud4ZjB4C8ppDfrCm1VzRmgYAc",
+      "receiver": "5jEmd1XJ8MsTqbdjYjkfGguo7Gs1Paq8yZZn4f3LQftT",
+      "asset": "sol",
+      "amount": 1000000000,
+      "decimals": null,
+      "depth": 1
+    },
+    {
+      "signature": "wWN58uBjAhiaBLVXW4LNjhXvbcJ3CXg2X3hayDAcnBebNTTAcSTRH5zzHBzuY6FntHSRxsuE7ZNsfNGLgc5Z2SD",
+      "slot": 126,
+      "block_time": 1759400126,
+      "instruction_path": "0",
+      "sender": "4qpBXVCJqHc5S6yhtVVbGHrcG29M7AuxXiCTcaF8QzNs",
+      "receiver": "5jEmd1XJ8MsTqbdjYjkfGguo7Gs1Paq8yZZn4f3LQftT",
+      "asset": "spl:71WL3BJVuaMGiEqoskjwY5W3NM5DXo8YBvjb7GysMPgK",
+      "amount": 25000000,
+      "decimals": 6,
+      "depth": 1
+    },
+    {
+      "signature": "5UkNdVVFxpBZBdmfoSgDhjYmja2YA6qbDihQtJAESP5QLc8GC1MYRgKxnJAKmTFCdAm2MhhbaQZ5pH6KVuVi7UhX",
+      "slot": 127,
+      "block_time": 1759400127,
+      "instruction_path": "1",
+      "sender": "4qpBXVCJqHc5S6yhtVVbGHrcG29M7AuxXiCTcaF8QzNs",
+      "receiver": "5jEmd1XJ8MsTqbdjYjkfGguo7Gs1Paq8yZZn4f3LQftT",
+      "asset": "spl:71WL3BJVuaMGiEqoskjwY5W3NM5DXo8YBvjb7GysMPgK",
+      "amount": 5000000,
+      "decimals": 6,
+      "depth": 1
+    }
+  ],
+  "unexpanded": [],
+  "excluded": [
+    {
+      "signature": "5N5yn9HJdKYJULS3RZ61LQxgqr6zx78VGqstcoh8HSEWaRBcGG6sgTVjxK5m3Ly71cNnemGGR4taFTAfbKnCgty2",
+      "slot": 90,
+      "reason": "beyond_funding_depth",
+      "note": "K фінансує C, C — третій стрибок: переказ у C мав би глибину 4"
+    },
+    {
+      "signature": "5XWYqwATTrXg34KvgxRygB7UY16pXH5e8fkm2YmJyMUkpxtooJX51cUhmmTGohJSfFfcCmKi8duNbFTZRSQG7qds",
+      "slot": 115,
+      "reason": "causal_cutoff",
+      "note": "E->B після B->A (слот 110): не міг фінансувати ребро B->A, хоч і раніше за купівлю"
+    },
+    {
+      "signature": "3cxg6rgV9H3Wm1wv6jUouLMpo6tkQFK4FvUyZeUSRGbaryP1z3Q8cG3iL1E8YRaNiAeVmFNxY6xeQs2cBV2m5MY3",
+      "slot": 128,
+      "reason": "causal_cutoff",
+      "note": "F->A після останнього ребра A (A->P2, слот 125): раніше за купівлю, але пізніше за ребро"
+    },
+    {
+      "signature": "4PDeYe9R8HR3qwC353ZNqXD3Uir9USorr4FTCBAr37p2aL48KimBTZNc2BP9XiCnUVAtibW7Jap9Kh9JPKxVBY9k",
+      "slot": 130,
+      "reason": "failed_transaction",
+      "note": "транзакція з err (недостатньо коштів): переказу не було"
+    },
+    {
+      "signature": "64Z8bupj6L755tTD8wmatQU2A4yaGMmCSJWBh77gHerXJp9mDkkyRnzjLFht1CTgPm92Ezp8i7zrqKtCSCeEdVWs",
+      "slot": 150,
+      "reason": "self_transfer",
+      "note": "відправник дорівнює отримувачу"
+    },
+    {
+      "signature": "4PEu5ngNVNTcQUUbyFxLTdVZkVejuUoYPL67A3n4bss2x4z7s8jEWto3oSB1h3yRf3da47zZypsupQ3tA6m1z56G",
+      "slot": 205,
+      "reason": "after_first_buy",
+      "note": "після першої купівлі P1 (слот 200)"
+    },
+    {
+      "signature": "5fEbVTvxkGmu92KwPLYihyQypiKGSbnpnqm5m1hUSQuZWsrYPNdmdwytshQwYR8i2dZanqqmJpbY4U5T9mS9o71D",
+      "slot": 200,
+      "reason": "in_first_buy_transaction",
+      "note": "доставка токена в транзакції першої купівлі P1 — це сама купівля, а не фінансування; межа строга (research R-1: строго раніше)"
+    },
+    {
+      "signature": "vryd3oZkhzXFNpYoz5SsLi6LbkE8jG5me1wUSKmVYDopGV3ex6z5g4xGmgbYxfyeh7qSi3PZXzYbv3JuvxodMBi",
+      "slot": 210,
+      "reason": "in_first_buy_transaction",
+      "note": "доставка токена в транзакції першої купівлі P2 — це сама купівля, а не фінансування; межа строга (research R-1: строго раніше)"
+    },
+    {
+      "signature": "3dML2ZJVapVpB7X66sqUavnC6RZvZR3WfqFuAwD5jr81cvhrVDffyAMtEK7wQYqzGLv95nAta4BmXJUuLPezQK2j",
+      "slot": 210,
+      "reason": "in_first_buy_transaction",
+      "note": "доставка токена в транзакції першої купівлі P3 — це сама купівля, а не фінансування; межа строга (research R-1: строго раніше)"
+    },
+    {
+      "signature": "535pGtz3yZbSk8uf96u4oLwyAvXohPuaQ53j5rf7oC3S5QLXbufGXKmSdr9UpwEojkG8mZXthA2zS9AYcAszKDzQ",
+      "slot": 220,
+      "reason": "in_first_buy_transaction",
+      "note": "доставка токена в транзакції першої купівлі P4 — це сама купівля, а не фінансування; межа строга (research R-1: строго раніше)"
+    },
+    {
+      "signature": "2j2yBnsSi3GEgw2kZVDsjzxQtueSRYu6421piYat5yb6B8uf9oSGMpzYygzXmXMuGjAPHootFQJE2LuWEiZgdH7w",
+      "slot": 230,
+      "reason": "in_first_buy_transaction",
+      "note": "доставка токена в транзакції першої купівлі P5 — це сама купівля, а не фінансування; межа строга (research R-1: строго раніше)"
+    }
+  ],
+  "transfer_notes": {
+    "4Au5MBM8hicf1LYx9YbSUHZ6tA98hcBdtfj8tdvVKcfhdR6zqGaCkuBMD2yrZ5zutNPk2dxB7qN6pzDwSL6AbJ6n#0": "C->B depth 3 (plain)",
+    "nrCxgMKNzMNdLsBvnPADy1u1HqeVGqgtGezFYVrQYP9gFBiMGKueF2stTkXCMyMYay29Awn1etehQLfkvEWemM2#0": "A->D depth 3 (plain)",
+    "2YTSM285e529LNBXkZhueMLGVevpv2zK1FcH2Yav51e16nixnwgRi8PsCmxuWxqUSnvTLEMWSpy3Lj97MrRUMypH#0": "D->A depth 2 (plain)",
+    "3sWVjSh4at5KCFYT2buuVCGxCvXvt3WoXXk5qSzV8qyYRZu13SQdJumwT1gKZ6W5d7EcGkvrX7ZWQ8557x3jA7Xh#0": "B->A depth 2 (plain)",
+    "47HaJrgcKAvwQe8pSgYJvG23bDWfy6xipH8yGYX8QtHKTdg9tXtkomw5kmLkD5bHNjxX67mxDMZRNYhf91UDou25#0.0": "A->P1 depth 1 (cpi)",
+    "2avhivTtpL5ZUDJFgDu1o9dhcahn43zmYneNMUsBo8YiKNjbv7fkNLbHmBP9pvKmypf1roZmjQhR28RwsSbJktF9#0": "G->A depth 2 (plain)",
+    "RafQBMEz5i5W5BDU2iBZ39PcaZtocQD4KNCDfStDbrHvT954QMHEfx83vj84tNEewm7tWnc3UMJmsQ9y7qxepHy#0": "A->P2 depth 1 (double)",
+    "RafQBMEz5i5W5BDU2iBZ39PcaZtocQD4KNCDfStDbrHvT954QMHEfx83vj84tNEewm7tWnc3UMJmsQ9y7qxepHy#1": "A->P2 depth 1 (double)",
+    "wWN58uBjAhiaBLVXW4LNjhXvbcJ3CXg2X3hayDAcnBebNTTAcSTRH5zzHBzuY6FntHSRxsuE7ZNsfNGLgc5Z2SD#0": "S->P2 SPL depth 1",
+    "5UkNdVVFxpBZBdmfoSgDhjYmja2YA6qbDihQtJAESP5QLc8GC1MYRgKxnJAKmTFCdAm2MhhbaQZ5pH6KVuVi7UhX#1": "S->P2 SPL depth 1"
+  }
+}

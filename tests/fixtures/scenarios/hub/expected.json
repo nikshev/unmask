@@ -1,0 +1,971 @@
+{
+  "scenario": "hub",
+  "description": "Хаб H: 1200 підписів і 6 унікальних відправників; фінансує покупця Q1. Три випадки конфігурації: поріг зв'язності, ліміт підписів, контроль без обмежень.",
+  "mint": "8Ww3GT5QLESZw1LCoR7diu8VaUmijgcXQFR699wvhKDW",
+  "wallets": {
+    "DEX": "4FwysxPNbgLfLuKJiFXUkZaC9CPwsmBbWh66eq1agRuh",
+    "M": "8Ww3GT5QLESZw1LCoR7diu8VaUmijgcXQFR699wvhKDW",
+    "CREATOR": "7MqCCza8NnFj3hMJxPrYUQxVgoeYAwaiX8cWMQGqY9Mg",
+    "POOL": "2y41zit5kMmToKTz5fgTmykw6nnTcwPZ23fwynBKtfPF",
+    "SOL_VAULT": "HSgTUwfnB7EEjUZNd8bfDQWiPKKpuXtT3ozKpVMFwCBq",
+    "H": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+    "S1": "2R4x2bGhzSRuGX8C6ZBgmQXzYZmY69SEnQRQTgwEaALy",
+    "S2": "HXawWpKXLWEDNz7e5Ubtk2GLtmJ1BeTtLep2PWfx4vLi",
+    "S3": "28W3AehX9heVVQ2JhT2746BJ6AwvowjBJEygmEfU7R5A",
+    "S4": "6JV8p8GA4kwrfHoqUdFvUxqyfb5BwrT9qFnPoi4WP11t",
+    "S5": "5FJJqdpF2mMJttYYGkNFYfkVE3WVfSuSbkrX5eKpumSt",
+    "S6": "JDSNp6VR8aEYBe1EGadwyvPMxyHpKmzbXqp8TaXPSSHG",
+    "T1": "B7wMQJX3AKQPPD1cjZ4BHVsgWLix4chBZFFDLpNHQrU9",
+    "U1": "DGFBPpgjAtRFwaKSkT8twYn1US1XsAz8B6ZKFuhBoKU5",
+    "W": "6he4vzTHsQvFY9EkMcFk6DqocAEg7RscPXjt4GCtoZpM",
+    "Q1": "3PnGwNYgnPaQoFPtJERjQAToPwjcz7QcGWX275c4b6nX",
+    "Q2": "4SrBGyc2k8WRWahe1QveVFVjbCxYoN1yaCNLSoydcDez",
+    "R1": "9vxJM2cpLjCNtQ73Vu3HJbuVP7amRN3JXZxjJyy2jryL",
+    "R2": "BrkirAgrSffFjt9H3oYNAZLpQ9FbgX14fEcHU2FaurzS",
+    "R3": "7smtYDWQEmdZ75jNNtuKJ3iFEp28KyH8Rfwkatvv3WB",
+    "R4": "H6mSS2z4QR6MLGTkto7NGRYPHtWFpevLokk2X2TcuSYq",
+    "R5": "9JVivEE7vPTRGHPu75S83CxaC36LXUFPEz54Nz575hpU",
+    "R6": "5bKFvRNiNoatADxp5FCYfgjf6iuzYenA4neUBhptuGHh",
+    "R7": "5i8QvaXYoSsAfdAGu2pRtiMfAJe33Fx1zfCwLCqMAY3N",
+    "ROUTER": "93AhRbYVhVtWet6uFGfFabbvZxh1yKHvtnbdPKb2iFbP"
+  },
+  "assumptions": [
+    "Поріг перевищено, коли унікальних відправників стало БІЛЬШЕ порога; переказ відправника, що перевищив поріг, не збирається, counterparties_seen = поріг + 1 (data-model: 'понад поріг не збираються').",
+    "signatures_seen при high_degree залежить від розміру сторінки/пакета і в еталоні не фіксується (not_asserted).",
+    "Ліміт підписів: переглядаються рівно max_signatures_per_wallet найновіших записів до межі H."
+  ],
+  "buyers": [
+    {
+      "wallet": "3PnGwNYgnPaQoFPtJERjQAToPwjcz7QcGWX275c4b6nX",
+      "rank": 1,
+      "first_buy_signature": "628efQtbLw8Lf3sJXaa518aK8ma7b1FmF8CmbpZsf58n1B3Y312mYqh6BD4dwTgU1vVQB63dtnvjSSHDnN2GzMh7",
+      "first_buy_slot": 3100,
+      "first_buy_time": 1759403100,
+      "received_amount": 4000000000,
+      "spent": [
+        {
+          "asset": "sol",
+          "amount": 6000000000
+        }
+      ],
+      "programs": [
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "11111111111111111111111111111111",
+        "4FwysxPNbgLfLuKJiFXUkZaC9CPwsmBbWh66eq1agRuh"
+      ],
+      "address_type": "wallet"
+    },
+    {
+      "wallet": "4SrBGyc2k8WRWahe1QveVFVjbCxYoN1yaCNLSoydcDez",
+      "rank": 2,
+      "first_buy_signature": "2KQaRM33nvofHFaf4XJHogUpXiKZ4Rvo7v1fV6GjWxzf4vKZGWq4BJfMrPqq8nGTYD7t8atzmysa6WwdtfAD7TBc",
+      "first_buy_slot": 3110,
+      "first_buy_time": 1759403110,
+      "received_amount": 2000000000,
+      "spent": [
+        {
+          "asset": "sol",
+          "amount": 1000000000
+        }
+      ],
+      "programs": [
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "11111111111111111111111111111111",
+        "4FwysxPNbgLfLuKJiFXUkZaC9CPwsmBbWh66eq1agRuh"
+      ],
+      "address_type": "wallet"
+    }
+  ],
+  "cases": [
+    {
+      "name": "hub_high_degree",
+      "config": {
+        "first_buyers_n": 2,
+        "funding_depth": 3,
+        "collect_spl_inbound": true,
+        "counterparty_threshold": 5,
+        "max_signatures_per_wallet": 2000
+      },
+      "completeness": {
+        "status": "complete",
+        "missing": [],
+        "buyers_complete": true
+      },
+      "unexpanded": [
+        {
+          "wallet": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "depth": 1,
+          "reason": "high_degree",
+          "counterparties_seen": 6,
+          "signatures_truncated": false,
+          "not_asserted": [
+            "signatures_seen"
+          ]
+        }
+      ],
+      "transfers": [
+        {
+          "signature": "4sD2z81ASEuHxSAhhWJJj9MTngJ7imn6uEPeTim1naUYwZtaDvZZmvBfKHk69hBWvho9UhBNGYd2Hy7w6raZmDka",
+          "slot": 648,
+          "block_time": 1759400648,
+          "instruction_path": "0",
+          "sender": "5FJJqdpF2mMJttYYGkNFYfkVE3WVfSuSbkrX5eKpumSt",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "3tEfiF8YZkd34Dsf5ihzwqvDBFC5sr5DBfnHGhb63gjqcRxUjnvgZmJZbXKMeWKowQCxbC8opU4Pc3t9ZFeJJ39H",
+          "slot": 770,
+          "block_time": 1759400770,
+          "instruction_path": "0",
+          "sender": "6JV8p8GA4kwrfHoqUdFvUxqyfb5BwrT9qFnPoi4WP11t",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "2SAKyLwJJ1eYrAxE1eHMVBCkMUGSaYTc5TWDQEpb3Uf9xYpjB799Ng8i27L6LkjgjVndjFBHVDeYKpmyySMgLovW",
+          "slot": 892,
+          "block_time": 1759400892,
+          "instruction_path": "0",
+          "sender": "28W3AehX9heVVQ2JhT2746BJ6AwvowjBJEygmEfU7R5A",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "2EYcQ19q3mJzV9eH8bS3wViuAaE6LXRghyak1RJ1bb3FULpV9ZGP3xNGyBsgii3wxPUT9TDraD7Ur5oUJL3nYxGN",
+          "slot": 1014,
+          "block_time": 1759401014,
+          "instruction_path": "0",
+          "sender": "HXawWpKXLWEDNz7e5Ubtk2GLtmJ1BeTtLep2PWfx4vLi",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "2keMKDreLWNdejRTjWj9bCRC77iLrKrm6pxcUKiyPKFtevz5xLnAGyRmSwbvZcfBZkGo5qXruUxRx6yWcH6SPc7C",
+          "slot": 1136,
+          "block_time": 1759401136,
+          "instruction_path": "0",
+          "sender": "2R4x2bGhzSRuGX8C6ZBgmQXzYZmY69SEnQRQTgwEaALy",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "dHfTKrXrh6NTotq21hUypDUHEYTnNUtDi7q7P725xm3ZBPkxTPaNGV6awDo1GnnkYHvcqpZCVUyKtBCYVfes7My",
+          "slot": 1258,
+          "block_time": 1759401258,
+          "instruction_path": "0",
+          "sender": "5FJJqdpF2mMJttYYGkNFYfkVE3WVfSuSbkrX5eKpumSt",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "4sbKyZLUsJhuXyGg7qSuq4xodjw3YLost9wjfPWQBfgZ2kB4fATvsGnwNpPqKL2KxGFJCe7CHYU393Q4AJh2tMbU",
+          "slot": 1380,
+          "block_time": 1759401380,
+          "instruction_path": "0",
+          "sender": "6JV8p8GA4kwrfHoqUdFvUxqyfb5BwrT9qFnPoi4WP11t",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "3dMYUUaGSx6KarRGMVwMUkBfjncvP396i5pdXFMRUQ7WfLmqb2oxLG9UUhDR96AduNSB363kxBzK9VR3EiFVHyZp",
+          "slot": 1502,
+          "block_time": 1759401502,
+          "instruction_path": "0",
+          "sender": "28W3AehX9heVVQ2JhT2746BJ6AwvowjBJEygmEfU7R5A",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "4wxLUjXNntnBwiVpVFJSYQx6WauyHfhpbUqjTuPpuxNvjjMpruMBaHdnCTTAykVUDk31foj22GD2Rf918vhBXRTG",
+          "slot": 1624,
+          "block_time": 1759401624,
+          "instruction_path": "0",
+          "sender": "HXawWpKXLWEDNz7e5Ubtk2GLtmJ1BeTtLep2PWfx4vLi",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "65yNdSAq2Vy6N2yHht2YLVFKDnRg1sCjDVaYXafug39Uiw7AasNwctazSTjmHYeF8cPazvghSywHc611wapUJTNw",
+          "slot": 1746,
+          "block_time": 1759401746,
+          "instruction_path": "0",
+          "sender": "2R4x2bGhzSRuGX8C6ZBgmQXzYZmY69SEnQRQTgwEaALy",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "4YySAXkavLr2e4XWoPxg9UjxvKLUqdxUdGXGukM2MCXWyH354i9rGNmC3e8tYk5nXWHZiQWdXsADHwWnsJ4xfLDc",
+          "slot": 1868,
+          "block_time": 1759401868,
+          "instruction_path": "0",
+          "sender": "5FJJqdpF2mMJttYYGkNFYfkVE3WVfSuSbkrX5eKpumSt",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "4rfKhuw1nCJzxTthJjnXWi3giLMJxuvK8RfHzSJLABkZiQ8Vhm2cuCq8Rt1iwukq6S6cwn1DHAdNGYpi2ZAwnAvx",
+          "slot": 1990,
+          "block_time": 1759401990,
+          "instruction_path": "0",
+          "sender": "6JV8p8GA4kwrfHoqUdFvUxqyfb5BwrT9qFnPoi4WP11t",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "Uthos7CADiDfYLyBR4ichTLavcnEQrc4Di9yZ2TeCQSPrdPfSaZhDSxr3ygwUSCuMfwPnsZRmoaJPH8zbQSKCwW",
+          "slot": 2112,
+          "block_time": 1759402112,
+          "instruction_path": "0",
+          "sender": "28W3AehX9heVVQ2JhT2746BJ6AwvowjBJEygmEfU7R5A",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "2RVqP1oBRpaaz5wWNfWDvVWLH6TsJt7d1FMZDrXVpCAqCwmUhD5exMjH5dENUPfJi9H3eyLwik2PobVvcABqjKFK",
+          "slot": 2234,
+          "block_time": 1759402234,
+          "instruction_path": "0",
+          "sender": "HXawWpKXLWEDNz7e5Ubtk2GLtmJ1BeTtLep2PWfx4vLi",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "3vLfmTqbHbEUwChfN5LGSByidgTZ3Tp3MyMqjkoGFEPyaTtkYnCpDi8u7UFAS7YkwD33mp7Pe5ZpheUMwoFcyxad",
+          "slot": 2356,
+          "block_time": 1759402356,
+          "instruction_path": "0",
+          "sender": "2R4x2bGhzSRuGX8C6ZBgmQXzYZmY69SEnQRQTgwEaALy",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "5sUMHkX7vc68baKiari9YSTRkGA4Z6kmXy77cHyjHmVsG1Rtr943xoJGYxg3ba65NzDfP8TWYfEvZawBzL1jZbLj",
+          "slot": 2478,
+          "block_time": 1759402478,
+          "instruction_path": "0",
+          "sender": "5FJJqdpF2mMJttYYGkNFYfkVE3WVfSuSbkrX5eKpumSt",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "3uAgxX4RMhSjurgzsGcS1JmXpyiWgkiN97atzWEfMzKgkeMTBbKpcF3SNpPFcWMfZn8AGWFxRJ5sHHNpUmLFGNrx",
+          "slot": 2600,
+          "block_time": 1759402600,
+          "instruction_path": "0",
+          "sender": "6JV8p8GA4kwrfHoqUdFvUxqyfb5BwrT9qFnPoi4WP11t",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "4nQysbUhvq2nyk1zL7H2FFRX4kHbv1J1JHgNmnX69MNeW7kq8zw1QgeTKrS1AHo5my3wH4D855NAbHw3PvjiJj49",
+          "slot": 2722,
+          "block_time": 1759402722,
+          "instruction_path": "0",
+          "sender": "28W3AehX9heVVQ2JhT2746BJ6AwvowjBJEygmEfU7R5A",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "5Y6V8iD1N2z16jCQGRL1DvTnVnjNne6DJpvotRhNeoa6968K1QwXap8TZ4TfzBU23Z5pVmNDZmvFiFyLvdrbrhRC",
+          "slot": 2844,
+          "block_time": 1759402844,
+          "instruction_path": "0",
+          "sender": "HXawWpKXLWEDNz7e5Ubtk2GLtmJ1BeTtLep2PWfx4vLi",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "4NttTRRYJUjxror833dzASXBPHFHc4Af4FJ463786b2so4p18bAVkDFRFSCGmtyGdhGBk7FFHQ7bTXbKKcRpVpLH",
+          "slot": 2966,
+          "block_time": 1759402966,
+          "instruction_path": "0",
+          "sender": "2R4x2bGhzSRuGX8C6ZBgmQXzYZmY69SEnQRQTgwEaALy",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "2ju5MZcdVLzZYBu77FZVfqCtviV67hRAKQjH6Z4VZKrKiW59RpiXiXCVYTfXroJLgK7xjbs8hU5H53zw5TyDz8vu",
+          "slot": 3001,
+          "block_time": 1759403001,
+          "instruction_path": "0",
+          "sender": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "receiver": "3PnGwNYgnPaQoFPtJERjQAToPwjcz7QcGWX275c4b6nX",
+          "asset": "sol",
+          "amount": 10000000000,
+          "decimals": null,
+          "depth": 1
+        },
+        {
+          "signature": "5BH3bBocXRm3mAMqocDqqCnrstQAtZrH1RuFTspgHfv9cYHLJuZTM91NWaSm8QSxbLjy2NLiP4UFRTXqZ3ErPARY",
+          "slot": 3050,
+          "block_time": 1759403050,
+          "instruction_path": "0",
+          "sender": "6he4vzTHsQvFY9EkMcFk6DqocAEg7RscPXjt4GCtoZpM",
+          "receiver": "4SrBGyc2k8WRWahe1QveVFVjbCxYoN1yaCNLSoydcDez",
+          "asset": "sol",
+          "amount": 2000000000,
+          "decimals": null,
+          "depth": 1
+        }
+      ],
+      "excluded": [
+        {
+          "signature": "2AKA75t3xH76dcrtgSgjjUkC2xwtk5VqVZHcpjQ1ct1Umncfv6YTMNbrf6osSmuB4zHcogHfgH9eL5bavDAsK43T",
+          "slot": 3011,
+          "reason": "causal_cutoff",
+          "note": "S1->H після ребра H->Q1 (слот 3001)"
+        },
+        {
+          "signature": "4oFGUXJaesMirpEBjmWxFbtfHsnET6NFbriHWkaypoJMM3EjwiwZcoeNEwL7k9ywRr9BHb5Sf8wtmT9EnQAAbF1Y",
+          "slot": 3021,
+          "reason": "causal_cutoff",
+          "note": "S1->H після ребра H->Q1 (слот 3001)"
+        },
+        {
+          "signature": "4shJDL3USZ95bZPqZigFc5ba6aVJpGPp5tkVeTLKdgnZVaPzJogzv5F2kJoq64usmns8ugv2vCaqUjptfNGG6Yna",
+          "slot": 608,
+          "reason": "over_counterparty_threshold",
+          "note": "шостий унікальний відправник / за межею вікна підписів"
+        },
+        {
+          "signature": "5smjwfK7Sfpzij14S7gy6irkcJ3oSR5XFfCV3Ytvniien8h1ivLipBWUkYTY2Nz84k5hm6N3tC169w2ykWXX6tjm",
+          "slot": 301,
+          "reason": "sender_not_expanded_high_degree",
+          "note": "S1 — відправник хаба; через хаб з високою зв'язністю не розгортається"
+        },
+        {
+          "signature": "5ESiPGWpLBkKFJn7zniEKZanoqzRgWHgdMpFrfk3sodo9DfrvCiDmcrv2k5LKY1SVHMNCcfzUKDfhq8BFR41g5q1",
+          "slot": 2981,
+          "reason": "sender_not_expanded_high_degree",
+          "note": "те саме: S1 не розгортається"
+        }
+      ]
+    },
+    {
+      "name": "hub_signature_cap",
+      "config": {
+        "first_buyers_n": 2,
+        "funding_depth": 3,
+        "collect_spl_inbound": true,
+        "counterparty_threshold": 10,
+        "max_signatures_per_wallet": 300
+      },
+      "completeness": {
+        "status": "complete",
+        "missing": [],
+        "buyers_complete": true
+      },
+      "unexpanded": [
+        {
+          "wallet": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "depth": 1,
+          "reason": "signature_cap",
+          "counterparties_seen": 5,
+          "signatures_seen": 300,
+          "signatures_truncated": true
+        }
+      ],
+      "transfers": [
+        {
+          "signature": "5smjwfK7Sfpzij14S7gy6irkcJ3oSR5XFfCV3Ytvniien8h1ivLipBWUkYTY2Nz84k5hm6N3tC169w2ykWXX6tjm",
+          "slot": 301,
+          "block_time": 1759400301,
+          "instruction_path": "0",
+          "sender": "B7wMQJX3AKQPPD1cjZ4BHVsgWLix4chBZFFDLpNHQrU9",
+          "receiver": "2R4x2bGhzSRuGX8C6ZBgmQXzYZmY69SEnQRQTgwEaALy",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 3
+        },
+        {
+          "signature": "5sUMHkX7vc68baKiari9YSTRkGA4Z6kmXy77cHyjHmVsG1Rtr943xoJGYxg3ba65NzDfP8TWYfEvZawBzL1jZbLj",
+          "slot": 2478,
+          "block_time": 1759402478,
+          "instruction_path": "0",
+          "sender": "5FJJqdpF2mMJttYYGkNFYfkVE3WVfSuSbkrX5eKpumSt",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "3uAgxX4RMhSjurgzsGcS1JmXpyiWgkiN97atzWEfMzKgkeMTBbKpcF3SNpPFcWMfZn8AGWFxRJ5sHHNpUmLFGNrx",
+          "slot": 2600,
+          "block_time": 1759402600,
+          "instruction_path": "0",
+          "sender": "6JV8p8GA4kwrfHoqUdFvUxqyfb5BwrT9qFnPoi4WP11t",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "4nQysbUhvq2nyk1zL7H2FFRX4kHbv1J1JHgNmnX69MNeW7kq8zw1QgeTKrS1AHo5my3wH4D855NAbHw3PvjiJj49",
+          "slot": 2722,
+          "block_time": 1759402722,
+          "instruction_path": "0",
+          "sender": "28W3AehX9heVVQ2JhT2746BJ6AwvowjBJEygmEfU7R5A",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "5Y6V8iD1N2z16jCQGRL1DvTnVnjNne6DJpvotRhNeoa6968K1QwXap8TZ4TfzBU23Z5pVmNDZmvFiFyLvdrbrhRC",
+          "slot": 2844,
+          "block_time": 1759402844,
+          "instruction_path": "0",
+          "sender": "HXawWpKXLWEDNz7e5Ubtk2GLtmJ1BeTtLep2PWfx4vLi",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "4NttTRRYJUjxror833dzASXBPHFHc4Af4FJ463786b2so4p18bAVkDFRFSCGmtyGdhGBk7FFHQ7bTXbKKcRpVpLH",
+          "slot": 2966,
+          "block_time": 1759402966,
+          "instruction_path": "0",
+          "sender": "2R4x2bGhzSRuGX8C6ZBgmQXzYZmY69SEnQRQTgwEaALy",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "2ju5MZcdVLzZYBu77FZVfqCtviV67hRAKQjH6Z4VZKrKiW59RpiXiXCVYTfXroJLgK7xjbs8hU5H53zw5TyDz8vu",
+          "slot": 3001,
+          "block_time": 1759403001,
+          "instruction_path": "0",
+          "sender": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "receiver": "3PnGwNYgnPaQoFPtJERjQAToPwjcz7QcGWX275c4b6nX",
+          "asset": "sol",
+          "amount": 10000000000,
+          "decimals": null,
+          "depth": 1
+        },
+        {
+          "signature": "5BH3bBocXRm3mAMqocDqqCnrstQAtZrH1RuFTspgHfv9cYHLJuZTM91NWaSm8QSxbLjy2NLiP4UFRTXqZ3ErPARY",
+          "slot": 3050,
+          "block_time": 1759403050,
+          "instruction_path": "0",
+          "sender": "6he4vzTHsQvFY9EkMcFk6DqocAEg7RscPXjt4GCtoZpM",
+          "receiver": "4SrBGyc2k8WRWahe1QveVFVjbCxYoN1yaCNLSoydcDez",
+          "asset": "sol",
+          "amount": 2000000000,
+          "decimals": null,
+          "depth": 1
+        }
+      ],
+      "excluded": [
+        {
+          "signature": "2AKA75t3xH76dcrtgSgjjUkC2xwtk5VqVZHcpjQ1ct1Umncfv6YTMNbrf6osSmuB4zHcogHfgH9eL5bavDAsK43T",
+          "slot": 3011,
+          "reason": "causal_cutoff",
+          "note": "S1->H після ребра H->Q1 (слот 3001)"
+        },
+        {
+          "signature": "4oFGUXJaesMirpEBjmWxFbtfHsnET6NFbriHWkaypoJMM3EjwiwZcoeNEwL7k9ywRr9BHb5Sf8wtmT9EnQAAbF1Y",
+          "slot": 3021,
+          "reason": "causal_cutoff",
+          "note": "S1->H після ребра H->Q1 (слот 3001)"
+        },
+        {
+          "signature": "3vLfmTqbHbEUwChfN5LGSByidgTZ3Tp3MyMqjkoGFEPyaTtkYnCpDi8u7UFAS7YkwD33mp7Pe5ZpheUMwoFcyxad",
+          "slot": 2356,
+          "reason": "beyond_signature_cap",
+          "note": "позиція 322 глибша за вікно 300"
+        },
+        {
+          "signature": "2RVqP1oBRpaaz5wWNfWDvVWLH6TsJt7d1FMZDrXVpCAqCwmUhD5exMjH5dENUPfJi9H3eyLwik2PobVvcABqjKFK",
+          "slot": 2234,
+          "reason": "beyond_signature_cap",
+          "note": "позиція 383 глибша за вікно 300"
+        },
+        {
+          "signature": "Uthos7CADiDfYLyBR4ichTLavcnEQrc4Di9yZ2TeCQSPrdPfSaZhDSxr3ygwUSCuMfwPnsZRmoaJPH8zbQSKCwW",
+          "slot": 2112,
+          "reason": "beyond_signature_cap",
+          "note": "позиція 444 глибша за вікно 300"
+        },
+        {
+          "signature": "4rfKhuw1nCJzxTthJjnXWi3giLMJxuvK8RfHzSJLABkZiQ8Vhm2cuCq8Rt1iwukq6S6cwn1DHAdNGYpi2ZAwnAvx",
+          "slot": 1990,
+          "reason": "beyond_signature_cap",
+          "note": "позиція 505 глибша за вікно 300"
+        },
+        {
+          "signature": "4YySAXkavLr2e4XWoPxg9UjxvKLUqdxUdGXGukM2MCXWyH354i9rGNmC3e8tYk5nXWHZiQWdXsADHwWnsJ4xfLDc",
+          "slot": 1868,
+          "reason": "beyond_signature_cap",
+          "note": "позиція 566 глибша за вікно 300"
+        },
+        {
+          "signature": "65yNdSAq2Vy6N2yHht2YLVFKDnRg1sCjDVaYXafug39Uiw7AasNwctazSTjmHYeF8cPazvghSywHc611wapUJTNw",
+          "slot": 1746,
+          "reason": "beyond_signature_cap",
+          "note": "позиція 627 глибша за вікно 300"
+        },
+        {
+          "signature": "4wxLUjXNntnBwiVpVFJSYQx6WauyHfhpbUqjTuPpuxNvjjMpruMBaHdnCTTAykVUDk31foj22GD2Rf918vhBXRTG",
+          "slot": 1624,
+          "reason": "beyond_signature_cap",
+          "note": "позиція 688 глибша за вікно 300"
+        },
+        {
+          "signature": "3dMYUUaGSx6KarRGMVwMUkBfjncvP396i5pdXFMRUQ7WfLmqb2oxLG9UUhDR96AduNSB363kxBzK9VR3EiFVHyZp",
+          "slot": 1502,
+          "reason": "beyond_signature_cap",
+          "note": "позиція 749 глибша за вікно 300"
+        },
+        {
+          "signature": "4sbKyZLUsJhuXyGg7qSuq4xodjw3YLost9wjfPWQBfgZ2kB4fATvsGnwNpPqKL2KxGFJCe7CHYU393Q4AJh2tMbU",
+          "slot": 1380,
+          "reason": "beyond_signature_cap",
+          "note": "позиція 810 глибша за вікно 300"
+        },
+        {
+          "signature": "dHfTKrXrh6NTotq21hUypDUHEYTnNUtDi7q7P725xm3ZBPkxTPaNGV6awDo1GnnkYHvcqpZCVUyKtBCYVfes7My",
+          "slot": 1258,
+          "reason": "beyond_signature_cap",
+          "note": "позиція 871 глибша за вікно 300"
+        },
+        {
+          "signature": "2keMKDreLWNdejRTjWj9bCRC77iLrKrm6pxcUKiyPKFtevz5xLnAGyRmSwbvZcfBZkGo5qXruUxRx6yWcH6SPc7C",
+          "slot": 1136,
+          "reason": "beyond_signature_cap",
+          "note": "позиція 932 глибша за вікно 300"
+        },
+        {
+          "signature": "2EYcQ19q3mJzV9eH8bS3wViuAaE6LXRghyak1RJ1bb3FULpV9ZGP3xNGyBsgii3wxPUT9TDraD7Ur5oUJL3nYxGN",
+          "slot": 1014,
+          "reason": "beyond_signature_cap",
+          "note": "позиція 993 глибша за вікно 300"
+        },
+        {
+          "signature": "2SAKyLwJJ1eYrAxE1eHMVBCkMUGSaYTc5TWDQEpb3Uf9xYpjB799Ng8i27L6LkjgjVndjFBHVDeYKpmyySMgLovW",
+          "slot": 892,
+          "reason": "beyond_signature_cap",
+          "note": "позиція 1054 глибша за вікно 300"
+        },
+        {
+          "signature": "3tEfiF8YZkd34Dsf5ihzwqvDBFC5sr5DBfnHGhb63gjqcRxUjnvgZmJZbXKMeWKowQCxbC8opU4Pc3t9ZFeJJ39H",
+          "slot": 770,
+          "reason": "beyond_signature_cap",
+          "note": "позиція 1115 глибша за вікно 300"
+        },
+        {
+          "signature": "4sD2z81ASEuHxSAhhWJJj9MTngJ7imn6uEPeTim1naUYwZtaDvZZmvBfKHk69hBWvho9UhBNGYd2Hy7w6raZmDka",
+          "slot": 648,
+          "reason": "beyond_signature_cap",
+          "note": "позиція 1176 глибша за вікно 300"
+        },
+        {
+          "signature": "4shJDL3USZ95bZPqZigFc5ba6aVJpGPp5tkVeTLKdgnZVaPzJogzv5F2kJoq64usmns8ugv2vCaqUjptfNGG6Yna",
+          "slot": 608,
+          "reason": "beyond_signature_cap",
+          "note": "шостий унікальний відправник / за межею вікна підписів"
+        },
+        {
+          "signature": "5ESiPGWpLBkKFJn7zniEKZanoqzRgWHgdMpFrfk3sodo9DfrvCiDmcrv2k5LKY1SVHMNCcfzUKDfhq8BFR41g5q1",
+          "slot": 2981,
+          "reason": "causal_cutoff",
+          "note": "U1->S1 після останнього ребра S1 у зібраних переказах хаба"
+        }
+      ]
+    },
+    {
+      "name": "hub_control",
+      "config": {
+        "first_buyers_n": 2,
+        "funding_depth": 3,
+        "collect_spl_inbound": true,
+        "counterparty_threshold": 10,
+        "max_signatures_per_wallet": 2000
+      },
+      "completeness": {
+        "status": "complete",
+        "missing": [],
+        "buyers_complete": true
+      },
+      "unexpanded": [],
+      "transfers": [
+        {
+          "signature": "5smjwfK7Sfpzij14S7gy6irkcJ3oSR5XFfCV3Ytvniien8h1ivLipBWUkYTY2Nz84k5hm6N3tC169w2ykWXX6tjm",
+          "slot": 301,
+          "block_time": 1759400301,
+          "instruction_path": "0",
+          "sender": "B7wMQJX3AKQPPD1cjZ4BHVsgWLix4chBZFFDLpNHQrU9",
+          "receiver": "2R4x2bGhzSRuGX8C6ZBgmQXzYZmY69SEnQRQTgwEaALy",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 3
+        },
+        {
+          "signature": "4shJDL3USZ95bZPqZigFc5ba6aVJpGPp5tkVeTLKdgnZVaPzJogzv5F2kJoq64usmns8ugv2vCaqUjptfNGG6Yna",
+          "slot": 608,
+          "block_time": 1759400608,
+          "instruction_path": "0",
+          "sender": "JDSNp6VR8aEYBe1EGadwyvPMxyHpKmzbXqp8TaXPSSHG",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "4sD2z81ASEuHxSAhhWJJj9MTngJ7imn6uEPeTim1naUYwZtaDvZZmvBfKHk69hBWvho9UhBNGYd2Hy7w6raZmDka",
+          "slot": 648,
+          "block_time": 1759400648,
+          "instruction_path": "0",
+          "sender": "5FJJqdpF2mMJttYYGkNFYfkVE3WVfSuSbkrX5eKpumSt",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "3tEfiF8YZkd34Dsf5ihzwqvDBFC5sr5DBfnHGhb63gjqcRxUjnvgZmJZbXKMeWKowQCxbC8opU4Pc3t9ZFeJJ39H",
+          "slot": 770,
+          "block_time": 1759400770,
+          "instruction_path": "0",
+          "sender": "6JV8p8GA4kwrfHoqUdFvUxqyfb5BwrT9qFnPoi4WP11t",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "2SAKyLwJJ1eYrAxE1eHMVBCkMUGSaYTc5TWDQEpb3Uf9xYpjB799Ng8i27L6LkjgjVndjFBHVDeYKpmyySMgLovW",
+          "slot": 892,
+          "block_time": 1759400892,
+          "instruction_path": "0",
+          "sender": "28W3AehX9heVVQ2JhT2746BJ6AwvowjBJEygmEfU7R5A",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "2EYcQ19q3mJzV9eH8bS3wViuAaE6LXRghyak1RJ1bb3FULpV9ZGP3xNGyBsgii3wxPUT9TDraD7Ur5oUJL3nYxGN",
+          "slot": 1014,
+          "block_time": 1759401014,
+          "instruction_path": "0",
+          "sender": "HXawWpKXLWEDNz7e5Ubtk2GLtmJ1BeTtLep2PWfx4vLi",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "2keMKDreLWNdejRTjWj9bCRC77iLrKrm6pxcUKiyPKFtevz5xLnAGyRmSwbvZcfBZkGo5qXruUxRx6yWcH6SPc7C",
+          "slot": 1136,
+          "block_time": 1759401136,
+          "instruction_path": "0",
+          "sender": "2R4x2bGhzSRuGX8C6ZBgmQXzYZmY69SEnQRQTgwEaALy",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "dHfTKrXrh6NTotq21hUypDUHEYTnNUtDi7q7P725xm3ZBPkxTPaNGV6awDo1GnnkYHvcqpZCVUyKtBCYVfes7My",
+          "slot": 1258,
+          "block_time": 1759401258,
+          "instruction_path": "0",
+          "sender": "5FJJqdpF2mMJttYYGkNFYfkVE3WVfSuSbkrX5eKpumSt",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "4sbKyZLUsJhuXyGg7qSuq4xodjw3YLost9wjfPWQBfgZ2kB4fATvsGnwNpPqKL2KxGFJCe7CHYU393Q4AJh2tMbU",
+          "slot": 1380,
+          "block_time": 1759401380,
+          "instruction_path": "0",
+          "sender": "6JV8p8GA4kwrfHoqUdFvUxqyfb5BwrT9qFnPoi4WP11t",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "3dMYUUaGSx6KarRGMVwMUkBfjncvP396i5pdXFMRUQ7WfLmqb2oxLG9UUhDR96AduNSB363kxBzK9VR3EiFVHyZp",
+          "slot": 1502,
+          "block_time": 1759401502,
+          "instruction_path": "0",
+          "sender": "28W3AehX9heVVQ2JhT2746BJ6AwvowjBJEygmEfU7R5A",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "4wxLUjXNntnBwiVpVFJSYQx6WauyHfhpbUqjTuPpuxNvjjMpruMBaHdnCTTAykVUDk31foj22GD2Rf918vhBXRTG",
+          "slot": 1624,
+          "block_time": 1759401624,
+          "instruction_path": "0",
+          "sender": "HXawWpKXLWEDNz7e5Ubtk2GLtmJ1BeTtLep2PWfx4vLi",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "65yNdSAq2Vy6N2yHht2YLVFKDnRg1sCjDVaYXafug39Uiw7AasNwctazSTjmHYeF8cPazvghSywHc611wapUJTNw",
+          "slot": 1746,
+          "block_time": 1759401746,
+          "instruction_path": "0",
+          "sender": "2R4x2bGhzSRuGX8C6ZBgmQXzYZmY69SEnQRQTgwEaALy",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "4YySAXkavLr2e4XWoPxg9UjxvKLUqdxUdGXGukM2MCXWyH354i9rGNmC3e8tYk5nXWHZiQWdXsADHwWnsJ4xfLDc",
+          "slot": 1868,
+          "block_time": 1759401868,
+          "instruction_path": "0",
+          "sender": "5FJJqdpF2mMJttYYGkNFYfkVE3WVfSuSbkrX5eKpumSt",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "4rfKhuw1nCJzxTthJjnXWi3giLMJxuvK8RfHzSJLABkZiQ8Vhm2cuCq8Rt1iwukq6S6cwn1DHAdNGYpi2ZAwnAvx",
+          "slot": 1990,
+          "block_time": 1759401990,
+          "instruction_path": "0",
+          "sender": "6JV8p8GA4kwrfHoqUdFvUxqyfb5BwrT9qFnPoi4WP11t",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "Uthos7CADiDfYLyBR4ichTLavcnEQrc4Di9yZ2TeCQSPrdPfSaZhDSxr3ygwUSCuMfwPnsZRmoaJPH8zbQSKCwW",
+          "slot": 2112,
+          "block_time": 1759402112,
+          "instruction_path": "0",
+          "sender": "28W3AehX9heVVQ2JhT2746BJ6AwvowjBJEygmEfU7R5A",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "2RVqP1oBRpaaz5wWNfWDvVWLH6TsJt7d1FMZDrXVpCAqCwmUhD5exMjH5dENUPfJi9H3eyLwik2PobVvcABqjKFK",
+          "slot": 2234,
+          "block_time": 1759402234,
+          "instruction_path": "0",
+          "sender": "HXawWpKXLWEDNz7e5Ubtk2GLtmJ1BeTtLep2PWfx4vLi",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "3vLfmTqbHbEUwChfN5LGSByidgTZ3Tp3MyMqjkoGFEPyaTtkYnCpDi8u7UFAS7YkwD33mp7Pe5ZpheUMwoFcyxad",
+          "slot": 2356,
+          "block_time": 1759402356,
+          "instruction_path": "0",
+          "sender": "2R4x2bGhzSRuGX8C6ZBgmQXzYZmY69SEnQRQTgwEaALy",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "5sUMHkX7vc68baKiari9YSTRkGA4Z6kmXy77cHyjHmVsG1Rtr943xoJGYxg3ba65NzDfP8TWYfEvZawBzL1jZbLj",
+          "slot": 2478,
+          "block_time": 1759402478,
+          "instruction_path": "0",
+          "sender": "5FJJqdpF2mMJttYYGkNFYfkVE3WVfSuSbkrX5eKpumSt",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "3uAgxX4RMhSjurgzsGcS1JmXpyiWgkiN97atzWEfMzKgkeMTBbKpcF3SNpPFcWMfZn8AGWFxRJ5sHHNpUmLFGNrx",
+          "slot": 2600,
+          "block_time": 1759402600,
+          "instruction_path": "0",
+          "sender": "6JV8p8GA4kwrfHoqUdFvUxqyfb5BwrT9qFnPoi4WP11t",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "4nQysbUhvq2nyk1zL7H2FFRX4kHbv1J1JHgNmnX69MNeW7kq8zw1QgeTKrS1AHo5my3wH4D855NAbHw3PvjiJj49",
+          "slot": 2722,
+          "block_time": 1759402722,
+          "instruction_path": "0",
+          "sender": "28W3AehX9heVVQ2JhT2746BJ6AwvowjBJEygmEfU7R5A",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "5Y6V8iD1N2z16jCQGRL1DvTnVnjNne6DJpvotRhNeoa6968K1QwXap8TZ4TfzBU23Z5pVmNDZmvFiFyLvdrbrhRC",
+          "slot": 2844,
+          "block_time": 1759402844,
+          "instruction_path": "0",
+          "sender": "HXawWpKXLWEDNz7e5Ubtk2GLtmJ1BeTtLep2PWfx4vLi",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "4NttTRRYJUjxror833dzASXBPHFHc4Af4FJ463786b2so4p18bAVkDFRFSCGmtyGdhGBk7FFHQ7bTXbKKcRpVpLH",
+          "slot": 2966,
+          "block_time": 1759402966,
+          "instruction_path": "0",
+          "sender": "2R4x2bGhzSRuGX8C6ZBgmQXzYZmY69SEnQRQTgwEaALy",
+          "receiver": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "asset": "sol",
+          "amount": 1000000000,
+          "decimals": null,
+          "depth": 2
+        },
+        {
+          "signature": "2ju5MZcdVLzZYBu77FZVfqCtviV67hRAKQjH6Z4VZKrKiW59RpiXiXCVYTfXroJLgK7xjbs8hU5H53zw5TyDz8vu",
+          "slot": 3001,
+          "block_time": 1759403001,
+          "instruction_path": "0",
+          "sender": "isGBMcYe1XgEhhhYMoG6i4TYBt1j9zQs6zefPmf4uzD",
+          "receiver": "3PnGwNYgnPaQoFPtJERjQAToPwjcz7QcGWX275c4b6nX",
+          "asset": "sol",
+          "amount": 10000000000,
+          "decimals": null,
+          "depth": 1
+        },
+        {
+          "signature": "5BH3bBocXRm3mAMqocDqqCnrstQAtZrH1RuFTspgHfv9cYHLJuZTM91NWaSm8QSxbLjy2NLiP4UFRTXqZ3ErPARY",
+          "slot": 3050,
+          "block_time": 1759403050,
+          "instruction_path": "0",
+          "sender": "6he4vzTHsQvFY9EkMcFk6DqocAEg7RscPXjt4GCtoZpM",
+          "receiver": "4SrBGyc2k8WRWahe1QveVFVjbCxYoN1yaCNLSoydcDez",
+          "asset": "sol",
+          "amount": 2000000000,
+          "decimals": null,
+          "depth": 1
+        }
+      ],
+      "excluded": [
+        {
+          "signature": "2AKA75t3xH76dcrtgSgjjUkC2xwtk5VqVZHcpjQ1ct1Umncfv6YTMNbrf6osSmuB4zHcogHfgH9eL5bavDAsK43T",
+          "slot": 3011,
+          "reason": "causal_cutoff",
+          "note": "S1->H після ребра H->Q1 (слот 3001)"
+        },
+        {
+          "signature": "4oFGUXJaesMirpEBjmWxFbtfHsnET6NFbriHWkaypoJMM3EjwiwZcoeNEwL7k9ywRr9BHb5Sf8wtmT9EnQAAbF1Y",
+          "slot": 3021,
+          "reason": "causal_cutoff",
+          "note": "S1->H після ребра H->Q1 (слот 3001)"
+        },
+        {
+          "signature": "5ESiPGWpLBkKFJn7zniEKZanoqzRgWHgdMpFrfk3sodo9DfrvCiDmcrv2k5LKY1SVHMNCcfzUKDfhq8BFR41g5q1",
+          "slot": 2981,
+          "reason": "causal_cutoff",
+          "note": "U1->S1 після останнього ребра S1 у зібраних переказах хаба"
+        }
+      ]
+    }
+  ]
+}

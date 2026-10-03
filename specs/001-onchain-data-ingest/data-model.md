@@ -70,7 +70,7 @@
 | `decimals` | int \| None | для `spl:*` з `uiTokenAmount.decimals`; для `sol` — `None` (9 мається на увазі) |
 | `depth` | int | 1 — безпосередньо в покупця, …, ≤ `funding_depth`; мінімальна з усіх шляхів |
 
-Ключ унікальності — `(signature, instruction_path)`. Правила включення: `sender != receiver`; транзакція без `meta.err`; слот ≤ слоту межі вершини-отримувача (research R-1). Порядок у результаті — `(slot, signature, instruction_path)`.
+Ключ унікальності — `(signature, instruction_path)`. Правила включення: `sender != receiver`; транзакція без `meta.err`; транзакція **строго раніше** за транзакцію-межу вершини-отримувача (research R-1; сама транзакція-межа, зокрема доставка токена в купівельній транзакції, не включається). Порядок у результаті — `(slot, signature, instruction_path)`.
 
 Джерела розпізнавання (`parse.py`): System `transfer`, `transferWithSeed`, `createAccount`, `createAccountWithSeed` (lamports) → `sol`; spl-token / spl-token-2022 `transfer`, `transferChecked` → `spl:<mint>`, власники через `pre/postTokenBalances[accountIndex].owner`. Верхній рівень і `meta.innerInstructions`.
 

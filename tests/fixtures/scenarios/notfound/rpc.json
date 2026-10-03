@@ -1,0 +1,57 @@
+{
+  "_meta": {
+    "scenario": "notfound",
+    "description": "Токена немає: рахунок відсутній; адреса — звичайний гаманець System Program; адреса — токен-рахунок (належить Token, але не mint).",
+    "synthetic": true,
+    "cast": {
+      "MISSING_MINT": "77bMC1DPZQ9y2PXHRZuH9HX43sG65jss52KtG8NzbwuG",
+      "SYSTEM_OWNED": "Hx21aLUf24XXpjhReFrPBLpfRYgMXRzziB8k3vGeQhHM",
+      "TOKEN_ACCOUNT_OWNER": "HRqz1cSSZib6jF82GyESNuerhztSqki2Pdn6fycjH39P",
+      "SOME_MINT": "4iAz8Vrry1m7nt92LEff2HUANRCcyTbgj87rT1bcBtc7",
+      "TOKEN_ACCOUNT": "2HZDw8UUSZFncKB2PcA53QN7o9ccmdF1jCaX5G285Ktx"
+    }
+  },
+  "getAccountInfo": {
+    "77bMC1DPZQ9y2PXHRZuH9HX43sG65jss52KtG8NzbwuG": null,
+    "Hx21aLUf24XXpjhReFrPBLpfRYgMXRzziB8k3vGeQhHM": {
+      "lamports": 2500000000,
+      "owner": "11111111111111111111111111111111",
+      "executable": false,
+      "rentEpoch": 0,
+      "space": 0,
+      "data": [
+        "",
+        "base64"
+      ]
+    },
+    "2HZDw8UUSZFncKB2PcA53QN7o9ccmdF1jCaX5G285Ktx": {
+      "lamports": 2039280,
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "executable": false,
+      "rentEpoch": 0,
+      "space": 165,
+      "data": {
+        "program": "spl-token",
+        "space": 165,
+        "parsed": {
+          "info": {
+            "isNative": false,
+            "mint": "4iAz8Vrry1m7nt92LEff2HUANRCcyTbgj87rT1bcBtc7",
+            "owner": "HRqz1cSSZib6jF82GyESNuerhztSqki2Pdn6fycjH39P",
+            "state": "initialized",
+            "tokenAmount": {
+              "amount": "1000000",
+              "decimals": 6,
+              "uiAmount": 1.0,
+              "uiAmountString": "1"
+            }
+          },
+          "type": "account"
+        }
+      }
+    }
+  },
+  "getSignaturesForAddress": {},
+  "getTransaction": {},
+  "getTokenAccountsByOwner": {}
+}
