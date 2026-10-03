@@ -3,7 +3,8 @@
 
 Що робить: `expand_level(source, state, depth, config, deadline)` збирає вхідні перекази
 глибини `depth` (1 — безпосередньо в покупця), розгортаючи вершини рівня `depth-1`
-з `state.frontier_by_depth[depth-1]` (рівень 0 — покупці, засівається з `state.buyers`).
+з `state.frontier_by_depth[depth-1]` (рівень 0 — покупці; перевиводиться з поточних `state.buyers` на кожному `expand_level(1)` через
+`_reconcile_buyers` — новий/змінений/зниклий покупець інвалідується, як і вершини глибших рівнів).
 Колектор (T-014) викликає його для `depth = 1 … funding_depth` по черзі.
 
 Для кожної ще не розгорнутої вершини W з межею `cutoff` (підпис транзакції):
@@ -32,7 +33,8 @@
 Неповнота не мовчки (принцип V, FR-001-09): відмова джерела (`RpcRateLimited`/`RpcTimeout`/
 `RpcUnavailable`) на будь-якому кроці, `None` замість транзакції (`unavailable`) чи `CorruptRecord`
 (`corrupt_data`) дають `MissingHistory(wallet=W, depth=рівень W, reason, detail)` у `state.missing`
-(один запис на `(wallet, reason)`, деталі доповнюються). Решта вершин рівня розгортається далі; усі
+(один запис на `(wallet, reason)`; при кожному розгортанні вершини її записи перебудовуються з
+результату цього проходу — причини лише актуальні, тоді як перекази попередніх спроб лишаються доказами). Решта вершин рівня розгортається далі; усі
 перекази, зібрані для W до збою, зберігаються (відправники W до повного розгортання не реєструються — нижче); з `CorruptRecord.partial` перекази
 беруться (як у `buyers.py`). Вершина з проблемою **не** потрапляє в `state.expanded` — повторний
 виклик спробує її знову (пошкоджена транзакція в `tx_cache` не кладеться), а при успіху її записи в
@@ -321,6 +323,7 @@ def _forget_missing(state: CollectionState, wallet: str) -> bool:
 
 
 def _record_missing(state: CollectionState, wallet: str, level: int, problems: list[Problem]) -> None:
+    """Записати проблеми ОДНОГО проходу вершини (викликач спершу прибирає її старі записи)."""
     for reason, detail in problems:
         key = (wallet, reason)
         known = state.missing.get(key)
@@ -338,14 +341,14 @@ def expand_level(source: RpcSource, state: CollectionState, depth: int, config: 
     if isinstance(depth, bool) or not isinstance(depth, int) or not 1 <= depth <= config.funding_depth:
         raise ValueError(f"depth: {depth!r} must be an int in 1..funding_depth={config.funding_depth}")
     frontier = state.frontier_by_depth
-    if depth == 1 and 0 not in frontier:
-        frontier[0] = {b.wallet: b.first_buy_signature for b in state.buyers}
+    into = _StateIndex(state)
+    if depth == 1:
+        _reconcile_buyers(state, into)
     if depth - 1 not in frontier:
         raise ValueError(f"depth {depth}: level {depth - 1} has not been expanded yet")
 
     level = depth - 1
     slots = _slot_index(state)
-    into = _StateIndex(state)
 
     try:
         for wallet in sorted(frontier[level]):
@@ -368,11 +371,12 @@ def expand_level(source: RpcSource, state: CollectionState, depth: int, config: 
                 slots.setdefault(transfer.signature, transfer.slot)
 
             into.set_unexpanded(wallet, scan.unexpanded(level))
+            # причини вершини — лише з цього проходу: старі прибираються (докази-перекази лишаються)
+            _forget_missing(state, wallet)
             if scan.problems:
                 _record_missing(state, wallet, level, scan.problems)
             else:
                 state.expanded.add(wallet)
-                _forget_missing(state, wallet)
     finally:
         into.flush()  # state.unexpanded узгоджено навіть при винятку; _derive_level читає хабів звідти
     if depth + 1 <= config.funding_depth:
@@ -452,6 +456,25 @@ def _derive_level(state: CollectionState, level: int) -> dict[str, str]:
             if edge > edges.get(t.sender, (-1, "")):
                 edges[t.sender] = edge
     return {sender: edge[1] for sender, edge in edges.items()}
+
+
+def _reconcile_buyers(state: CollectionState, into: _StateIndex) -> None:
+    """Перевивести рівень 0 з ПОТОЧНИХ `state.buyers` (на кожному `expand_level(1)`).
+
+    Той самий принцип, що й `_reconcile_level` для глибших рівнів: покупець, що з'явився, зник або
+    змінив першу купівлю (межу), інвалідується (`_invalidate`). Новий розгорнеться на цьому ж виклику;
+    зниклий лишається без своїх переказів/`expanded`/`unexpanded`/`missing`, а його піддерево, що
+    більше ніким не досяжне, прибирає каскад `_reconcile_level` наступних рівнів. Без цього рівень 0,
+    зафіксований після перелічення, що збоїло чи обірвалось, лишався б порожнім чи застарілим — і
+    повторний збір повернув би `complete` без переказів нових покупців.
+    """
+    frontier = state.frontier_by_depth
+    old = frontier.get(0, {})
+    new = {b.wallet: b.first_buy_signature for b in state.buyers}
+    for wallet in old.keys() | new.keys():
+        if old.get(wallet) != new.get(wallet):
+            _invalidate(state, wallet, into)
+    frontier[0] = new
 
 
 def _reconcile_level(state: CollectionState, level: int, into: _StateIndex) -> None:

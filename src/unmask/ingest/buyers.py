@@ -28,9 +28,19 @@
   беруться — дані не губляться, але неповнота позначена.
 Перша з таких причин (у порядку обробки) потрапляє в `reason`, усі підписи — у `detail`.
 
-Лічильники в `state`: `rpc_calls` — кожне звернення до джерела (й невдале);
-`transactions_scanned` — кожна нова транзакція mint, пропущена через правило купівлі.
-Транзакції з `state.tx_cache` повторно не запитуються й не рахуються (повтор/resume).
+Лічильники в `state`: `rpc_calls` — кожне звернення до джерела (й невдале), накопичується;
+`transactions_scanned` — скільки транзакцій mint пропущено через правило купівлі в ОСТАННЬОМУ виклику
+(скидається на початку; рахується кожна розібрана правилом транзакція — і запитана, і взята з
+`state.tx_cache`), тож детермінований: після будь-якого повтору дорівнює свіжому прогону.
+Транзакції з `state.tx_cache` повторно не запитуються. `purchases_by_wallet` на кожному виклику
+перевиводиться з нуля (кеш відтворюється, решта дозапитується), тож повтор після збою дає ту саму
+вибірку, що й свіжий прогін (T-014).
+
+Запити транзакцій ліниві: пакет (до `rpc.page_size` ще не закешованих підписів від поточного, а після
+досягнення N — лише зі слота N-го покупця) запитується, лише коли розбір дійшов до незакешованого
+підпису. У свіжому прогоні пакети ті самі, що й «вікно `page_size` від поточного»; на повторі,
+коли N досягається на закешованих транзакціях, транзакції за межею слота (отримані, але не розібрані
+першим проходом) не запитуються — повторний виклик на повному стані не звертається до джерела.
 
 `deadline` лише передається в кожен виклик джерела; перевірки `expired()` і мапування в
 `budget_exhausted` додає T-015 (`budget.Deadline`).
@@ -125,6 +135,18 @@ def _scan(state: CollectionState, mint: str, sig: str, raw: object) -> tuple[Mis
     return None
 
 
+def _next_batch(eligible: list[tuple[int, str]], start: int, state: CollectionState, page_size: int,
+                cut_slot: int | None) -> list[str]:
+    """До `page_size` ще не закешованих підписів від позиції `start` (після N — лише слот `cut_slot`)."""
+    batch: list[str] = []
+    for slot, sig in eligible[start:]:
+        if len(batch) == page_size or (cut_slot is not None and slot > cut_slot):
+            break
+        if sig not in state.tx_cache:
+            batch.append(sig)
+    return batch
+
+
 def enumerate_buyers(source: RpcSource, mint: str, state: CollectionState, config: IngestConfig,
                      deadline: DeadlineLike) -> BuyersCompleteness:
     """Заповнити `state.buyers` першими N покупцями `mint`; повернути повноту перелічення."""
@@ -133,6 +155,7 @@ def enumerate_buyers(source: RpcSource, mint: str, state: CollectionState, confi
         raise ValueError(f"first_buyers_n: {n!r} must be an int >= 1")
     page_size = config.rpc.page_size
 
+    state.transactions_scanned = 0  # лічильник останнього проходу (детермінований)
     try:
         _page_history(source, mint, state, page_size, deadline)
     except _RPC_ERRORS as exc:
@@ -145,36 +168,34 @@ def enumerate_buyers(source: RpcSource, mint: str, state: CollectionState, confi
     # Від найстаріших; порядок — лише з даних (slot, signature), дублікати відкинуто, err пропущено.
     eligible = sorted({(slot, sig) for sig, slot, _bt, err in state.mint_signatures if err is None})
 
+    # Купівлі перевиводяться щоразу від найстаріших: закешовані транзакції лише відтворюються, тож
+    # повторний виклик не запитує їх знову. Купівлі минулого проходу не переносяться: інакше вони
+    # передчасно «заповнюють» N, і раніший покупець, недоступний минулого разу, у вибірку не потрапить.
+    state.purchases_by_wallet = {}
     problems: list[tuple[MissingReason, str]] = []  # у порядку обробки
     cut_slot: int | None = None  # слот, у якому знайдено N-го покупця
-    i = 0
-    while i < len(eligible) and (cut_slot is None or eligible[i][0] <= cut_slot):
-        batch = eligible[i:i + page_size]
-        if cut_slot is not None:
-            batch = [item for item in batch if item[0] == cut_slot]
-        to_fetch = [sig for _slot, sig in batch if sig not in state.tx_cache]
-        fetched: dict[str, object] = {}
-        if to_fetch:
-            state.rpc_calls += 1
-            try:
-                raws = source.get_transactions(to_fetch, deadline=deadline)
-            except _RPC_ERRORS as exc:
-                problems.append((_rpc_reason(exc), f"getTransaction from {to_fetch[0]}: {exc}"))
-                break
-            fetched = dict(zip(to_fetch, raws))
-
-        for slot, sig in batch:
-            if cut_slot is not None and slot > cut_slot:
-                break  # пакет зайшов за межу слота: решту не розбираємо (і не кешуємо)
-            i += 1
-            if sig in state.tx_cache:
-                _record_first(state, state.tx_cache[sig], mint)
-            else:
-                problem = _scan(state, mint, sig, fetched.get(sig))
-                if problem is not None:
-                    problems.append(problem)
-            if cut_slot is None and len(state.purchases_by_wallet) >= n:
-                cut_slot = slot  # N-й покупець знайдено: добиваємо цей слот до кінця
+    fetched: dict[str, object] = {}
+    for i, (slot, sig) in enumerate(eligible):
+        if cut_slot is not None and slot > cut_slot:
+            break  # слот N-го покупця добито; далі не розбираємо (і не запитуємо)
+        if sig in state.tx_cache:
+            state.transactions_scanned += 1
+            _record_first(state, state.tx_cache[sig], mint)
+        else:
+            if sig not in fetched:
+                to_fetch = _next_batch(eligible, i, state, page_size, cut_slot)
+                state.rpc_calls += 1
+                try:
+                    raws = source.get_transactions(to_fetch, deadline=deadline)
+                except _RPC_ERRORS as exc:
+                    problems.append((_rpc_reason(exc), f"getTransaction from {to_fetch[0]}: {exc}"))
+                    break
+                fetched.update(zip(to_fetch, raws))
+            problem = _scan(state, mint, sig, fetched.pop(sig))
+            if problem is not None:
+                problems.append(problem)
+        if cut_slot is None and len(state.purchases_by_wallet) >= n:
+            cut_slot = slot  # N-й покупець знайдено: добиваємо цей слот до кінця
 
     state.buyers = tuple(select_first_n(state.purchases_by_wallet.values(), n))
 

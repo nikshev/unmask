@@ -480,6 +480,14 @@ def test_reconcile_level_is_linear_in_transfers_for_300_buyers_x_50_senders():
                 sender=f"s{i:03d}_{j:02d}", receiver=buyer, asset=Asset("sol"), amount=1, decimals=None, depth=1,
             )
     total = len(transfers)
+    # рівень 0 виводиться з state.buyers на кожному expand_level(1) (T-014) — покупці мусять бути в стані
+    from unmask.ingest.model import AddressType, Buyer, Spend
+
+    state.buyers = tuple(
+        Buyer(wallet=w, rank=r, first_buy_signature=sig, first_buy_slot=10_000, first_buy_time=None,
+              received_amount=1, spent=(Spend(Asset("sol"), 1),), programs=(), address_type=AddressType.WALLET)
+        for r, (w, sig) in enumerate(frontier0.items(), start=1)
+    )
     state.frontier_by_depth = {0: frontier0}
     state.expanded = set(frontier0)
     state.transfers = _CountingTransfers(transfers, budget=10 * total)
