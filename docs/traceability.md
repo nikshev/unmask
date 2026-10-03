@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **16** · задач: **21** (виконано 14) · вимог у роботі: **9** · порушень: **0**
+Вимог: **16** · задач: **21** (виконано 15) · вимог у роботі: **8** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -23,7 +23,7 @@
 | `FR-001-13` | Неповний результат MUST NOT потрапляти в кеш як остаточний; повторний запит MUST домагатися лише відсутніх дан | `T-014`, `T-017`, `T-018` | `src/unmask/ingest/collector.py` | — |
 | `FR-001-14` | Результат MUST містити метадані: адресу токена, час аналізу, кількість покупців у вибірці, використані значенн | `T-002`, `T-003`, `T-014`, `T-020` | `src/unmask/ingest/collector.py`, `src/unmask/ingest/model.py`, `src/unmask/ingest/config.py` | `tests/test_config.py`, `tests/test_collector.py` |
 | `FR-001-15` | Доступ до зовнішнього джерела даних MUST бути прихований за інтерфейсом, що дозволяє підставити записані фікст | `T-001`, `T-004`, `T-005`, `T-021` | `src/unmask/ingest/rpc/fixture.py`, `src/unmask/ingest/rpc/protocol.py` | `tests/test_fixture_builder.py`, `tests/test_rpc_fixture.py`, `tests/test_no_network.py` |
-| `FR-001-16` | Збір MUST вкладатися в налаштований бюджет часу (за замовчуванням 40 с із 60 с на весь холодний запит); при ви | `T-002`, `T-004`, `T-014`, `T-015` | `src/unmask/ingest/budget.py`, `src/unmask/ingest/config.py` | `tests/test_config.py` |
+| `FR-001-16` | Збір MUST вкладатися в налаштований бюджет часу (за замовчуванням 40 с із 60 с на весь холодний запит); при ви | `T-002`, `T-004`, `T-014`, `T-015` | `src/unmask/ingest/collector.py`, `src/unmask/ingest/funding.py`, `src/unmask/ingest/buyers.py`, `src/unmask/ingest/budget.py`, `src/unmask/ingest/config.py` | `tests/test_config.py`, `tests/test_budget.py` |
 
 ## Критичні задачі
 
@@ -36,7 +36,7 @@
 - `T-012` (001-onchain-data-ingest) — виконано
 - `T-013` (001-onchain-data-ingest) — виконано
 - `T-014` (001-onchain-data-ingest) — виконано
-- `T-015` (001-onchain-data-ingest) — у роботі
+- `T-015` (001-onchain-data-ingest) — виконано
 - `T-016` (001-onchain-data-ingest) — у роботі
 - `T-017` (001-onchain-data-ingest) — у роботі
 - `T-018` (001-onchain-data-ingest) — у роботі

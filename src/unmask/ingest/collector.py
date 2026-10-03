@@ -1,4 +1,4 @@
-# impl: FR-001-01, FR-001-02, FR-001-09, FR-001-10, FR-001-13, FR-001-14
+# impl: FR-001-01, FR-001-02, FR-001-09, FR-001-10, FR-001-13, FR-001-14, FR-001-16
 """Стан збору та оркестрація (data-model.md, «Стан збору і кеш»; contracts/ingest-service.md, крок 5).
 
 Що робить:
@@ -37,21 +37,32 @@ len(buyers)`; `source = source.name`; `analyzed_at = clock.wall()` на поча
 покупця на повторі не дозапитуються (ліниві пакети в `buyers.py`): на повному стані — нуль звернень. Що лишається T-017: партиційний
 кеш стану, політика відкидання стану іншої версії конфігу (тут — гучна відмова) і `resumed=true`.
 
-Бюджет часу: ТОЧКА ПІДСТАНОВКИ T-015 — `_deadline_for(clock, config)`. Зараз повертає
-`_NeverExpires` (структурний `DeadlineLike`, ніколи не спливає), який передається в
-`enumerate_buyers` і кожен `expand_level`, а звідти — у кожен виклик джерела. T-015 замінить його на
-`budget.Deadline(clock, config.time_budget_seconds)` і додасть перевірки `expired()` між кроками.
+Бюджет часу (FR-001-16, T-015): `budget.Deadline(clock, config.time_budget_seconds)` створюється на
+початку `collect` (відлік — від початку цього виклику; час до нього в бюджет не входить) і передається в
+`enumerate_buyers` і кожен `expand_level`, а звідти — у кожен виклик джерела. Перевірка `expired()`
+стоїть перед КОЖНИМ зверненням до джерела (`budget.ensure_time`: сторінка історії, пакет транзакцій,
+токен-рахунки), тож після спливу звернень немає, а `RpcTimeout`, спричинений дедлайном, стає
+`budget_exhausted` (`budget.deadline_timeouts`). На вичерпанні: незавершене перелічення →
+`buyers.complete=false, reason=budget_exhausted`; вершина, яку обірвано чи не почато, →
+`MissingHistory(reason=budget_exhausted)` з її рівнем; зібране зберігається.
+
+Між рівнями колектор свідомо НЕ обриває цикл після спливу: `expand_level` наступних рівнів не робить
+жодного звернення (кожне зупиняє `ensure_time`), але виконує узгодження рівнів (`_reconcile_*`) і
+записує кожну вже відому нерозгорнуту вершину в `missing` з `budget_exhausted` — без цього вершини
+наступних рівнів мовчки зникли б із результату (принцип V). Вершини, яких ще не знайдено (відправники
+обірваних вершин), покриває запис `missing` їхнього батька. Повтор на частковому стані — звичайний
+resume (вище): вершини з `missing` і недоперелічені покупці добираються, результат == свіжому прогону.
 
 Залежить від: `buyers`, `funding` (імпортуються в тілі `collect`: вони самі імпортують
-`CollectionState` звідси), `budget.Clock`, `config`, `model`, `rpc.protocol`.
+`CollectionState` звідси), `budget` (`Clock`, `Deadline`), `config`, `model`, `rpc.protocol`.
 """
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from unmask.ingest.budget import Deadline
 from unmask.ingest.model import (
     Buyer,
     Completeness,
@@ -97,21 +108,6 @@ class CollectionState:
     transactions_scanned: int = 0
 
 
-class _NeverExpires:
-    """Заглушка дедлайну до T-015: структурно `DeadlineLike`, ніколи не спливає."""
-
-    def expired(self) -> bool:
-        return False
-
-    def remaining(self) -> float:
-        return math.inf
-
-
-def _deadline_for(clock: Clock, config: IngestConfig) -> _NeverExpires:
-    """ТОЧКА ПІДСТАНОВКИ T-015: тут стане `budget.Deadline(clock, config.time_budget_seconds)`."""
-    return _NeverExpires()
-
-
 def collect(state: CollectionState, source: RpcSource, config: IngestConfig, clock: Clock) -> IngestResult:
     """Зібрати покупців і їхнє фінансування в `state`; повернути результат із виведеною повнотою."""
     from unmask.ingest.buyers import enumerate_buyers  # цикл імпорту: buyers/funding імпортують
@@ -125,10 +121,11 @@ def collect(state: CollectionState, source: RpcSource, config: IngestConfig, clo
     started = clock.monotonic()
     analyzed_at = clock.wall()
     calls_before = state.rpc_calls
-    deadline = _deadline_for(clock, config)
+    deadline = Deadline(clock, config.time_budget_seconds)  # відлік бюджету — від початку collect
 
     buyers_completeness = enumerate_buyers(source, state.mint, state, config, deadline)
     for depth in range(1, config.funding_depth + 1):
+        # після спливу рівень не звертається до джерела, але чесно позначає свої вершини (див. модуль)
         expand_level(source, state, depth, config, deadline)
 
     buyers = tuple(sorted(state.buyers, key=buyer_sort_key))

@@ -8,10 +8,22 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Protocol, Sequence, TypeAlias, TypedDict
+from typing import Any, Mapping, Protocol, Sequence, TypedDict
 
-# T-015 замінить на `budget.Deadline`; до того фікстурне джерело його не перевіряє.
-Deadline: TypeAlias = Any
+
+class Deadline(Protocol):
+    """Бюджет часу, що передається в кожен виклик джерела (contracts/rpc-source.md «Deadline»).
+
+    Структурний тип: реалізація — `budget.Deadline(clock, seconds)`; протокол тут, щоб межа джерела
+    не імпортувала `budget` (той сам імпортує цей модуль). Адаптер перед кожним запитом:
+    `if deadline.expired(): raise RpcTimeout("budget")`, таймаут запиту — `deadline.request_timeout(cap)`.
+    """
+
+    def remaining(self) -> float: ...
+
+    def expired(self) -> bool: ...
+
+    def request_timeout(self, cap: float) -> float: ...
 
 
 class SignatureInfo(TypedDict):

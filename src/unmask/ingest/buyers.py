@@ -1,4 +1,4 @@
-# impl: FR-001-01, FR-001-02
+# impl: FR-001-01, FR-001-02, FR-001-16
 """Перші N покупців токена з курсором (research R-6, R-7).
 
 Що робить: `enumerate_buyers(source, mint, state, config, deadline) -> BuyersCompleteness`
@@ -42,30 +42,28 @@
 коли N досягається на закешованих транзакціях, транзакції за межею слота (отримані, але не розібрані
 першим проходом) не запитуються — повторний виклик на повному стані не звертається до джерела.
 
-`deadline` лише передається в кожен виклик джерела; перевірки `expired()` і мапування в
-`budget_exhausted` додає T-015 (`budget.Deadline`).
+Бюджет часу (FR-001-16): перед кожною сторінкою історії й кожним пакетом транзакцій —
+`budget.ensure_time(deadline)`; після спливу звернень немає. `RpcTimeout`, спричинений дедлайном,
+`budget.deadline_timeouts` перетворює на `BudgetExhausted` (звичайний лишається `timeout`). Вичерпання
+посеред перегортання — `complete=false, reason=budget_exhausted`, покупці не відбираються (курсор
+збережено); посеред пакетів — відбираються лише покупці з уже розібраних транзакцій, а `reason` —
+`budget_exhausted` навіть якщо раніше була інша проблема (перелічення незавершене — головний факт;
+попередні проблеми лишаються в `detail`). Повтор добирає з курсора й кешу, як після збою.
 
-Залежить від: `rpc.protocol` (джерело, винятки), `parse`, `purchases`, `model`, `collector.CollectionState`.
+Залежить від: `rpc.protocol` (джерело, винятки, `Deadline`), `budget`, `parse`, `purchases`, `model`, `collector.CollectionState`.
 """
 
 from __future__ import annotations
 
-from typing import Iterable, Protocol
+from typing import Iterable
 
+from unmask.ingest.budget import BudgetExhausted, deadline_timeouts, ensure_time
 from unmask.ingest.collector import CollectionState
 from unmask.ingest.config import IngestConfig
 from unmask.ingest.model import Buyer, BuyersCompleteness, MissingReason
 from unmask.ingest.parse import CorruptRecord, ParsedTx, parse_transaction
 from unmask.ingest.purchases import Purchase, detect_purchases
-from unmask.ingest.rpc.protocol import RpcRateLimited, RpcSource, RpcTimeout, RpcUnavailable
-
-
-class DeadlineLike(Protocol):
-    """Структурний тип дедлайну; реалізація — `budget.Deadline` (T-015)."""
-
-    def expired(self) -> bool: ...
-
-    def remaining(self) -> float: ...
+from unmask.ingest.rpc.protocol import Deadline, RpcRateLimited, RpcSource, RpcTimeout, RpcUnavailable
 
 
 _RPC_REASONS: tuple[tuple[type[Exception], MissingReason], ...] = (
@@ -98,13 +96,16 @@ def select_first_n(purchases: Iterable[Purchase], n: int) -> list[Buyer]:
 
 
 def _page_history(source: RpcSource, mint: str, state: CollectionState, page_size: int,
-                  deadline: DeadlineLike) -> None:
-    """Перегорнути історію mint від курсора до кінця. Винятки джерела летять викликачу."""
+                  deadline: Deadline) -> None:
+    """Перегорнути історію mint від курсора до кінця. Винятки джерела й `BudgetExhausted` — викликачу."""
     while not state.mint_history_exhausted:
+        what = f"getSignaturesForAddress before={state.signature_cursor}"
+        ensure_time(deadline, what)  # перед кожною сторінкою
         state.rpc_calls += 1
-        page = source.get_signatures_for_address(
-            mint, before=state.signature_cursor, until=None, limit=page_size, deadline=deadline,
-        )
+        with deadline_timeouts(deadline, what):
+            page = source.get_signatures_for_address(
+                mint, before=state.signature_cursor, until=None, limit=page_size, deadline=deadline,
+            )
         if not page:
             state.mint_history_exhausted = True
             break
@@ -148,7 +149,7 @@ def _next_batch(eligible: list[tuple[int, str]], start: int, state: CollectionSt
 
 
 def enumerate_buyers(source: RpcSource, mint: str, state: CollectionState, config: IngestConfig,
-                     deadline: DeadlineLike) -> BuyersCompleteness:
+                     deadline: Deadline) -> BuyersCompleteness:
     """Заповнити `state.buyers` першими N покупцями `mint`; повернути повноту перелічення."""
     n = config.first_buyers_n
     if isinstance(n, bool) or not isinstance(n, int) or n < 1:
@@ -158,6 +159,9 @@ def enumerate_buyers(source: RpcSource, mint: str, state: CollectionState, confi
     state.transactions_scanned = 0  # лічильник останнього проходу (детермінований)
     try:
         _page_history(source, mint, state, page_size, deadline)
+    except BudgetExhausted as exc:
+        state.buyers = ()  # найстаріших записів не бачили — перших N не вигадуємо
+        return BuyersCompleteness(complete=False, reason=MissingReason.BUDGET_EXHAUSTED, detail=exc.detail)
     except _RPC_ERRORS as exc:
         state.buyers = ()
         return BuyersCompleteness(
@@ -175,6 +179,7 @@ def enumerate_buyers(source: RpcSource, mint: str, state: CollectionState, confi
     problems: list[tuple[MissingReason, str]] = []  # у порядку обробки
     cut_slot: int | None = None  # слот, у якому знайдено N-го покупця
     fetched: dict[str, object] = {}
+    budget_cut = False  # перелічення обірвав бюджет
     for i, (slot, sig) in enumerate(eligible):
         if cut_slot is not None and slot > cut_slot:
             break  # слот N-го покупця добито; далі не розбираємо (і не запитуємо)
@@ -184,9 +189,16 @@ def enumerate_buyers(source: RpcSource, mint: str, state: CollectionState, confi
         else:
             if sig not in fetched:
                 to_fetch = _next_batch(eligible, i, state, page_size, cut_slot)
-                state.rpc_calls += 1
+                what = f"getTransaction from {to_fetch[0]}"
                 try:
-                    raws = source.get_transactions(to_fetch, deadline=deadline)
+                    ensure_time(deadline, what)  # перед кожним пакетом
+                    state.rpc_calls += 1
+                    with deadline_timeouts(deadline, what):
+                        raws = source.get_transactions(to_fetch, deadline=deadline)
+                except BudgetExhausted as exc:
+                    problems.append((MissingReason.BUDGET_EXHAUSTED, exc.detail))
+                    budget_cut = True
+                    break
                 except _RPC_ERRORS as exc:
                     problems.append((_rpc_reason(exc), f"getTransaction from {to_fetch[0]}: {exc}"))
                     break
@@ -202,6 +214,6 @@ def enumerate_buyers(source: RpcSource, mint: str, state: CollectionState, confi
     if not problems:
         return BuyersCompleteness(complete=True, reason=None, detail="")
     return BuyersCompleteness(
-        complete=False, reason=problems[0][0],
+        complete=False, reason=MissingReason.BUDGET_EXHAUSTED if budget_cut else problems[0][0],
         detail="; ".join(f"{reason.value}: {what}" for reason, what in problems),
     )

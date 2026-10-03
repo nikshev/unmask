@@ -1,4 +1,4 @@
-# impl: FR-001-03, FR-001-04, FR-001-05, FR-001-07, FR-001-08
+# impl: FR-001-03, FR-001-04, FR-001-05, FR-001-07, FR-001-08, FR-001-16
 """BFS джерел фінансування по рівнях (research R-1, R-8, R-9).
 
 Що робить: `expand_level(source, state, depth, config, deadline)` збирає вхідні перекази
@@ -66,22 +66,27 @@
   повторному розгортанні вершини з `missing` замінюється, порядок `(depth, wallet)`). На `missing` і
   `state.expanded` не впливає: позначена вершина без збоїв вважається розгорнутою.
 
-`deadline` лише передається в кожен виклик джерела (структурний тип, як у `buyers.py`); перевірки
-`expired()` і `budget_exhausted` — T-015.
+Бюджет часу (FR-001-16): перед кожною сторінкою історії (гаманця й токен-рахунку), запитом
+токен-рахунків і пакетом транзакцій — `budget.ensure_time(deadline)`; після спливу звернень немає;
+`RpcTimeout`, спричинений дедлайном, — теж `BudgetExhausted` (`budget.deadline_timeouts`). Вичерпання
+зупиняє вершину негайно (`_expand_node`): `MissingHistory(reason=budget_exhausted)` з рівнем вершини,
+зібрані до того перекази лишаються, вершина не в `expanded` і відправників не реєструє (як при збої).
+Решта вершин рівня й усі вже відомі вершини наступних рівнів (колектор викликає `expand_level` далі)
+отримують `budget_exhausted` без жодного звернення. Повтор розгортає їх як після збою.
 
-Залежить від: `rpc.protocol` (джерело, винятки), `parse`, `model`, `collector.CollectionState`.
+Залежить від: `rpc.protocol` (джерело, винятки, `Deadline`), `budget`, `parse`, `model`, `collector.CollectionState`.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from unmask.ingest.buyers import DeadlineLike
+from unmask.ingest.budget import BudgetExhausted, deadline_timeouts, ensure_time
 from unmask.ingest.collector import CollectionState
 from unmask.ingest.config import IngestConfig
 from unmask.ingest.model import Asset, MissingHistory, MissingReason, Transfer, UnexpandedNode, UnexpandedReason
 from unmask.ingest.parse import CorruptRecord, ParsedTransfer, ParsedTx, parse_transaction
-from unmask.ingest.rpc.protocol import RpcRateLimited, RpcSource, RpcTimeout, RpcUnavailable
+from unmask.ingest.rpc.protocol import Deadline, RpcRateLimited, RpcSource, RpcTimeout, RpcUnavailable
 
 _RPC_REASONS: tuple[tuple[type[Exception], MissingReason], ...] = (
     (RpcRateLimited, MissingReason.RATE_LIMITED),
@@ -153,13 +158,16 @@ def _slot_index(state: CollectionState) -> dict[str, int]:
 
 
 def _page(source: RpcSource, state: CollectionState, address: str, before: str | None,
-          page_size: int, deadline: DeadlineLike):
-    """Сторінки історії адреси від `before` до кінця (порожня сторінка). Винятки — викликачу."""
+          page_size: int, deadline: Deadline):
+    """Сторінки історії адреси від `before` до кінця (порожня сторінка). Винятки й `BudgetExhausted` — викликачу."""
     while True:
+        what = f"getSignaturesForAddress {address} before={before}"
+        ensure_time(deadline, what)  # перед кожною сторінкою
         state.rpc_calls += 1
-        page = source.get_signatures_for_address(
-            address, before=before, until=None, limit=page_size, deadline=deadline,
-        )
+        with deadline_timeouts(deadline, what):
+            page = source.get_signatures_for_address(
+                address, before=before, until=None, limit=page_size, deadline=deadline,
+            )
         if not page:
             return
         yield page
@@ -185,7 +193,7 @@ def _enough(valid: list[tuple[str, int]], last_slot: int, cap: int) -> bool:
 
 
 def _node_signatures(source: RpcSource, state: CollectionState, wallet: str, cutoff: Cutoff,
-                     config: IngestConfig, deadline: DeadlineLike,
+                     config: IngestConfig, deadline: Deadline,
                      problems: list[Problem]) -> tuple[list[str], bool]:
     """Вікно підписів (без err) строго раніше за межу: гаманець + токен-рахунки, від найновішого.
 
@@ -222,8 +230,11 @@ def _node_signatures(source: RpcSource, state: CollectionState, wallet: str, cut
 
     if config.collect_spl_inbound:
         try:
+            what = f"getTokenAccountsByOwner {wallet}"
+            ensure_time(deadline, what)
             state.rpc_calls += 1
-            accounts = source.get_token_accounts_by_owner(wallet, deadline=deadline)
+            with deadline_timeouts(deadline, what):
+                accounts = source.get_token_accounts_by_owner(wallet, deadline=deadline)
         except _RPC_ERRORS as exc:
             problems.append((_rpc_reason(exc), f"getTokenAccountsByOwner {wallet}: {exc}"))
             accounts = []
@@ -250,12 +261,15 @@ def _node_signatures(source: RpcSource, state: CollectionState, wallet: str, cut
     return newest_first[:cap], len(newest_first) > cap
 
 
-def _fetch_batch(source: RpcSource, state: CollectionState, batch: list[str], deadline: DeadlineLike,
+def _fetch_batch(source: RpcSource, state: CollectionState, batch: list[str], deadline: Deadline,
                  problems: list[Problem]) -> dict[str, object] | None:
-    """Один пакет `get_transactions`; на відмові — проблема і None."""
+    """Один пакет `get_transactions`; на відмові — проблема і None; `BudgetExhausted` — викликачу."""
+    what = f"getTransaction from {batch[0]}"
+    ensure_time(deadline, what)  # перед кожним пакетом
     state.rpc_calls += 1
     try:
-        raws = source.get_transactions(batch, deadline=deadline)
+        with deadline_timeouts(deadline, what):
+            raws = source.get_transactions(batch, deadline=deadline)
     except _RPC_ERRORS as exc:
         problems.append((_rpc_reason(exc), f"getTransaction from {batch[0]}: {exc}"))
         return None
@@ -263,8 +277,20 @@ def _fetch_batch(source: RpcSource, state: CollectionState, batch: list[str], de
 
 
 def _expand_node(source: RpcSource, state: CollectionState, wallet: str, depth: int, cutoff: Cutoff,
-                 config: IngestConfig, deadline: DeadlineLike) -> _NodeScan:
+                 config: IngestConfig, deadline: Deadline) -> _NodeScan:
+    """Розгорнути вершину. Вичерпаний бюджет зупиняє її негайно: `budget_exhausted` у проблемах вершини,
+    зібране до того лишається (як при збої джерела), далі звернень немає."""
     scan = _NodeScan(wallet=wallet, depth=depth, threshold=config.counterparty_threshold)
+    try:
+        _scan_node(source, state, scan, cutoff, config, deadline)
+    except BudgetExhausted as exc:
+        scan.problems.append((MissingReason.BUDGET_EXHAUSTED, exc.detail))
+    return scan
+
+
+def _scan_node(source: RpcSource, state: CollectionState, scan: _NodeScan, cutoff: Cutoff,
+               config: IngestConfig, deadline: Deadline) -> None:
+    wallet = scan.wallet
     newest_first, scan.signatures_truncated = _node_signatures(
         source, state, wallet, cutoff, config, deadline, scan.problems,
     )
@@ -313,8 +339,7 @@ def _expand_node(source: RpcSource, state: CollectionState, wallet: str, depth: 
             if not config.collect_spl_inbound and transfer.asset != Asset.SOL:
                 continue
             if not scan.accept(transfer):
-                return scan  # high_degree: перевищувач і все старіше не збирається
-    return scan
+                return  # high_degree: перевищувач і все старіше не збирається
 
 
 def _forget_missing(state: CollectionState, wallet: str) -> bool:
@@ -336,7 +361,7 @@ def _record_missing(state: CollectionState, wallet: str, level: int, problems: l
 
 
 def expand_level(source: RpcSource, state: CollectionState, depth: int, config: IngestConfig,
-                 deadline: DeadlineLike) -> None:
+                 deadline: Deadline) -> None:
     """Зібрати перекази глибини `depth`, розгорнувши вершини рівня `depth-1` (див. модуль)."""
     if isinstance(depth, bool) or not isinstance(depth, int) or not 1 <= depth <= config.funding_depth:
         raise ValueError(f"depth: {depth!r} must be an int in 1..funding_depth={config.funding_depth}")
