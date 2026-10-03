@@ -2,14 +2,14 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **16** · задач: **21** (виконано 10) · вимог у роботі: **16** · порушень: **0**
+Вимог: **16** · задач: **21** (виконано 11) · вимог у роботі: **14** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
 | Вимога | Опис | Задачі | Імплементація | Тести |
 |---|---|---|---|---|
-| `FR-001-01` | Система MUST вибирати перших N покупців токена за часом першої купівлі (за замовчуванням N із діапазону 200–50 | `T-002`, `T-010`, `T-011` | `src/unmask/ingest/purchases.py`, `src/unmask/ingest/config.py` | `tests/test_purchases.py`, `tests/test_config.py` |
-| `FR-001-02` | Система MUST впорядковувати покупців детерміновано: однаковий вхід дає однаковий порядок, зокрема при купівлях | `T-010`, `T-011` | `src/unmask/ingest/purchases.py` | `tests/test_purchases.py` |
+| `FR-001-01` | Система MUST вибирати перших N покупців токена за часом першої купівлі (за замовчуванням N із діапазону 200–50 | `T-002`, `T-010`, `T-011` | `src/unmask/ingest/collector.py`, `src/unmask/ingest/purchases.py`, `src/unmask/ingest/buyers.py`, `src/unmask/ingest/config.py` | `tests/test_buyers.py`, `tests/test_purchases.py`, `tests/test_config.py` |
+| `FR-001-02` | Система MUST впорядковувати покупців детерміновано: однаковий вхід дає однаковий порядок, зокрема при купівлях | `T-010`, `T-011` | `src/unmask/ingest/collector.py`, `src/unmask/ingest/purchases.py`, `src/unmask/ingest/buyers.py` | `tests/test_buyers.py`, `tests/test_purchases.py` |
 | `FR-001-03` | Для кожного покупця система MUST збирати вхідні перекази SOL, що відбулися до моменту його першої купівлі. | `T-007`, `T-012` | `src/unmask/ingest/parse.py` | `tests/test_parse_sol.py` |
 | `FR-001-04` | Для кожного покупця система MUST збирати вхідні перекази SPL-токенів, що відбулися до моменту його першої купі | `T-007`, `T-008`, `T-012` | `src/unmask/ingest/parse.py` | `tests/test_parse_spl.py` |
 | `FR-001-05` | Система MUST обходити джерела фінансування назад на задану глибину (за замовчуванням 2, допустимо до 3; значен | `T-002`, `T-012` | `src/unmask/ingest/config.py` | `tests/test_config.py` |
@@ -32,7 +32,7 @@
 - `T-008` (001-onchain-data-ingest) — виконано
 - `T-009` (001-onchain-data-ingest) — виконано
 - `T-010` (001-onchain-data-ingest) — виконано
-- `T-011` (001-onchain-data-ingest) — у роботі
+- `T-011` (001-onchain-data-ingest) — виконано
 - `T-012` (001-onchain-data-ingest) — у роботі
 - `T-013` (001-onchain-data-ingest) — у роботі
 - `T-014` (001-onchain-data-ingest) — у роботі
