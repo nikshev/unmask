@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **16** · задач: **21** (виконано 12) · вимог у роботі: **10** · порушень: **0**
+Вимог: **16** · задач: **21** (виконано 13) · вимог у роботі: **9** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -15,7 +15,7 @@
 | `FR-001-05` | Система MUST обходити джерела фінансування назад на задану глибину (за замовчуванням 2, допустимо до 3; значен | `T-002`, `T-012` | `src/unmask/ingest/funding.py`, `src/unmask/ingest/config.py` | `tests/test_funding.py`, `tests/test_config.py` |
 | `FR-001-06` | Кожен переказ у результаті MUST нести: відправника, отримувача, актив, суму, час, слот і підпис транзакції — п | `T-003`, `T-007`, `T-008`, `T-009`, `T-020` | `src/unmask/ingest/parse.py`, `src/unmask/ingest/model.py` | `tests/test_parse_spl.py`, `tests/test_parse_corrupt.py`, `tests/test_parse_sol.py`, `tests/test_model_completeness.py` |
 | `FR-001-07` | Система MUST не включати переказ, що відбувся пізніше за першу купівлю відповідного покупця, і MUST не дублюва | `T-012` | `src/unmask/ingest/funding.py` | `tests/test_funding.py` |
-| `FR-001-08` | Гаманець фінансувався з дуже «жвавої» адреси (біржа, роутер) із тисячами контрагентів: обхід через неї не розг | `T-002`, `T-012`, `T-013` | `src/unmask/ingest/funding.py`, `src/unmask/ingest/config.py` | `tests/test_config.py` |
+| `FR-001-08` | Гаманець фінансувався з дуже «жвавої» адреси (біржа, роутер) із тисячами контрагентів: обхід через неї не розг | `T-002`, `T-012`, `T-013` | `src/unmask/ingest/funding.py`, `src/unmask/ingest/config.py` | `tests/test_funding_limits.py`, `tests/test_config.py` |
 | `FR-001-09` | Результат MUST містити статус повноти («повний» або «неповний») і для кожного гаманця з недоотриманою історією | `T-003`, `T-007`, `T-009`, `T-014`, `T-016` | `src/unmask/ingest/parse.py`, `src/unmask/ingest/model.py` | `tests/test_parse_corrupt.py`, `tests/test_model_completeness.py` |
 | `FR-001-10` | Система MUST NOT видавати неповний результат як повний; відсутність даних MUST бути видимою у відповіді, а не  | `T-003`, `T-014`, `T-016` | `src/unmask/ingest/model.py` | `tests/test_model_completeness.py` |
 | `FR-001-11` | Коли токена не існує або адреса некоректна, система MUST повертати явну відповідь («токен не знайдено» або «не | `T-006`, `T-018`, `T-019` | `src/unmask/ingest/addresses.py` | `tests/test_addresses.py` |
@@ -34,7 +34,7 @@
 - `T-010` (001-onchain-data-ingest) — виконано
 - `T-011` (001-onchain-data-ingest) — виконано
 - `T-012` (001-onchain-data-ingest) — виконано
-- `T-013` (001-onchain-data-ingest) — у роботі
+- `T-013` (001-onchain-data-ingest) — виконано
 - `T-014` (001-onchain-data-ingest) — у роботі
 - `T-015` (001-onchain-data-ingest) — у роботі
 - `T-016` (001-onchain-data-ingest) — у роботі

@@ -25,21 +25,44 @@
    `(signature, instruction_path)` (R-9); при повторній зустрічі зберігається мінімальна глибина.
 6. Відправники стають вершинами рівня `depth` (`frontier_by_depth[depth]`, межа — найпізніше ребро)
    лише якщо `depth + 1 <= funding_depth` і вони ще не є вершиною меншого/цього рівня — так цикл
-   (A→D→A) завершується, а спільний фінансувальник розгортається один раз.
+   (A→D→A) завершується, а спільний фінансувальник розгортається один раз. Рівень `depth`
+   перевиводиться після розгортання рівня `depth-1` з переказів його повністю розгорнутих вершин
+   (`_reconcile_level`), тож resume дає той самий frontier, що й свіжий прогін.
 
 Неповнота не мовчки (принцип V, FR-001-09): відмова джерела (`RpcRateLimited`/`RpcTimeout`/
 `RpcUnavailable`) на будь-якому кроці, `None` замість транзакції (`unavailable`) чи `CorruptRecord`
 (`corrupt_data`) дають `MissingHistory(wallet=W, depth=рівень W, reason, detail)` у `state.missing`
-(один запис на `(wallet, reason)`, деталі доповнюються). Решта вершин рівня розгортається далі; усе,
-що зібрано для W до збою (зокрема відправники), зберігається; з `CorruptRecord.partial` перекази
+(один запис на `(wallet, reason)`, деталі доповнюються). Решта вершин рівня розгортається далі; усі
+перекази, зібрані для W до збою, зберігаються (відправники W до повного розгортання не реєструються — нижче); з `CorruptRecord.partial` перекази
 беруться (як у `buyers.py`). Вершина з проблемою **не** потрапляє в `state.expanded` — повторний
 виклик спробує її знову (пошкоджена транзакція в `tx_cache` не кладеться), а при успіху її записи в
 `missing` видаляються. Розгорнуті вершини повторно не запитуються: виклик із тим самим станом
 ідемпотентний.
 
-Точка розширення для T-013 (межі R-3): `_NodeScan` переглядає транзакції вершини від найновішої до
-межі, кожен прийнятий переказ іде через `_NodeScan.accept` — там лічитимуться унікальні відправники
-(`counterparty_threshold`), а `_node_signatures` — місце для `max_signatures_per_wallet`.
+Межі розгортання (research R-3, FR-001-08, T-013):
+- `max_signatures_per_wallet` — спільний ліміт для гаманця й усіх його токен-рахунків: підписи (без
+  err, строго раніше за межу; спільний підпис — один раз) зливаються від найновішого за `(slot, signature)`
+  і переглядаються лише перші `max_signatures_per_wallet`. Історія довша → `signatures_truncated`; кожне
+  джерело гортається лише до `max+1` придатних записів (досить, щоб знати про обрізання). Вершина
+  позначається `signature_cap`, знайдені відправники розгортаються нормально.
+- `counterparty_threshold` — унікальні відправники прийнятих переказів лічаться в `_NodeScan.accept`
+  інкрементально, від найновішої транзакції до межі. Порогу дорівнює — не перевищено; щойно відправник
+  став (поріг+1)-м унікальним, перегляд зупиняється: його переказ і все старіше не збирається, транзакції
+  далі не запитуються, `counterparties_seen = поріг + 1`. Зібране до цього зберігається, а відправники
+  вершини НЕ стають вершинами наступного рівня (`high_degree`, має пріоритет над `signature_cap`).
+- `signatures_seen` — скільки підписів вікна переглянуто від найновішого (при `high_degree` — включно з
+  підписом перевищувача); від розміру сторінки/пакета не залежить.
+- Вершина зі збоєм у цьому проході (будь-який запис у `missing`) переглянута частково: хаб вона чи ні,
+  невідомо, тому її відправники, як і при `high_degree`, НЕ реєструються (рішення власника процесу за
+  T-013; змінює контракт T-012). Зібрані до збою перекази лишаються доказами. На resume вершина
+  розгортається повністю й лише тоді реєструє відправників. Вершина наступного рівня, що з'явилась,
+  піднялась із глибшого рівня (коротший шлях), змінила межу чи зникла, інвалідується (перекази в неї,
+  `expanded`, `unexpanded`, `missing`) і розгортається заново з новою межею й мінімальною глибиною;
+  її відправники перевиводяться тим самим правилом (каскад). Успішна повторна спроба вершини з
+  `missing` замінює її перекази результатом повного перегляду.
+- `UnexpandedNode(depth = рівень вершини)` пишеться в `state.unexpanded` (один запис на гаманець; при
+  повторному розгортанні вершини з `missing` замінюється, порядок `(depth, wallet)`). На `missing` і
+  `state.expanded` не впливає: позначена вершина без збоїв вважається розгорнутою.
 
 `deadline` лише передається в кожен виклик джерела (структурний тип, як у `buyers.py`); перевірки
 `expired()` і `budget_exhausted` — T-015.
@@ -54,7 +77,7 @@ from dataclasses import dataclass, field
 from unmask.ingest.buyers import DeadlineLike
 from unmask.ingest.collector import CollectionState
 from unmask.ingest.config import IngestConfig
-from unmask.ingest.model import Asset, MissingHistory, MissingReason, Transfer
+from unmask.ingest.model import Asset, MissingHistory, MissingReason, Transfer, UnexpandedNode, UnexpandedReason
 from unmask.ingest.parse import CorruptRecord, ParsedTransfer, ParsedTx, parse_transaction
 from unmask.ingest.rpc.protocol import RpcRateLimited, RpcSource, RpcTimeout, RpcUnavailable
 
@@ -86,16 +109,38 @@ class _NodeScan:
 
     wallet: str
     depth: int  # глибина переказів у вершину = рівень вершини + 1
+    threshold: int  # counterparty_threshold
     transfers: list[Transfer] = field(default_factory=list)
     senders: dict[str, tuple[int, str]] = field(default_factory=dict)  # відправник -> найпізніше ребро
     problems: list[Problem] = field(default_factory=list)
+    high_degree: bool = False  # поріг перевищено: перегляд зупинено, відправники не розгортаються
+    signatures_seen: int = 0
+    signatures_truncated: bool = False
 
-    def accept(self, transfer: ParsedTransfer) -> None:
+    def accept(self, transfer: ParsedTransfer) -> bool:
+        """Прийняти переказ; False — новий відправник перевищив поріг (переказ не прийнято, стоп)."""
+        known = self.senders.get(transfer.sender)
+        if known is None and len(self.senders) >= self.threshold:
+            self.high_degree = True
+            return False
         self.transfers.append(transfer.at_depth(self.depth))
         edge = (transfer.slot, transfer.signature)
-        known = self.senders.get(transfer.sender)
         if known is None or edge > known:
             self.senders[transfer.sender] = edge
+        return True
+
+    def unexpanded(self, level: int) -> UnexpandedNode | None:
+        if self.high_degree:
+            reason = UnexpandedReason.HIGH_DEGREE
+        elif self.signatures_truncated:
+            reason = UnexpandedReason.SIGNATURE_CAP
+        else:
+            return None
+        return UnexpandedNode(
+            wallet=self.wallet, depth=level, reason=reason,
+            counterparties_seen=len(self.senders) + (1 if self.high_degree else 0),
+            signatures_seen=self.signatures_seen, signatures_truncated=self.signatures_truncated,
+        )
 
 
 def _slot_index(state: CollectionState) -> dict[str, int]:
@@ -132,19 +177,44 @@ def _token_account_entries(entries: list[tuple[str, int]], cutoff: Cutoff) -> li
     return [(sig, slot) for sig, slot in entries if slot < cutoff.slot]
 
 
+def _enough(valid: list[tuple[str, int]], last_slot: int, cap: int) -> bool:
+    """Чи досить гортати джерело: є `cap+1` придатних і група слота `cap+1`-го вже вся отримана."""
+    return len(valid) > cap and last_slot < valid[cap][1]
+
+
 def _node_signatures(source: RpcSource, state: CollectionState, wallet: str, cutoff: Cutoff,
-                     config: IngestConfig, deadline: DeadlineLike, problems: list[Problem]) -> dict[str, int]:
-    """Підписи (без err) строго раніше за межу: історія гаманця + історії токен-рахунків."""
+                     config: IngestConfig, deadline: DeadlineLike,
+                     problems: list[Problem]) -> tuple[list[str], bool]:
+    """Вікно підписів (без err) строго раніше за межу: гаманець + токен-рахунки, від найновішого.
+
+    Повертає (не більше `max_signatures_per_wallet` найновіших підписів, чи історія довша за ліміт) —
+    рівно те, що дав би оракул «перегорнути все → фільтр межі → злиття за (slot, signature) спадно → max».
+
+    Кожне джерело (гаманець, кожен токен-рахунок) гортається, доки в ньому є `max+1` придатних записів
+    І слот останнього отриманого запису строго менший за слот `max+1`-го придатного (`_enough`). Порядок
+    усередині слота в RPC — позиція в блоці, не підпис, тож група одного слота на межі добирається
+    повністю: у злитті будь-який запис джерела зі слотом, меншим за слот його `max+1`-го придатного,
+    поступається щонайменше `max+1` різним підписам того ж джерела, отже в найновіші `max` не потрапляє,
+    а всі записи зі слотом не меншим — уже отримані. Результат не залежить від `rpc.page_size`.
+    `_token_account_entries` перераховується на кожній сторінці — квадратично за кількістю записів,
+    новіших за межу (виміряно ≈0,5 с на 80 тис.), свідомо лишено.
+    """
     page_size = config.rpc.page_size
+    cap = config.max_signatures_per_wallet
     found: dict[str, int] = {}
 
     before = cutoff.signature
+    wallet_valid: list[tuple[str, int]] = []
     try:
         for page in _page(source, state, wallet, cutoff.signature, page_size, deadline):
             for entry in page:
-                if entry.get("err") is None:
+                if entry.get("err") is None and entry["signature"] != cutoff.signature:
+                    if entry["signature"] not in found:
+                        wallet_valid.append((entry["signature"], entry["slot"]))
                     found.setdefault(entry["signature"], entry["slot"])
             before = page[-1]["signature"]
+            if _enough(wallet_valid, page[-1]["slot"], cap):
+                break
     except _RPC_ERRORS as exc:
         problems.append((_rpc_reason(exc), f"getSignaturesForAddress {wallet} before={before}: {exc}"))
 
@@ -163,42 +233,59 @@ def _node_signatures(source: RpcSource, state: CollectionState, wallet: str, cut
                         (e["signature"], e["slot"]) for e in page
                         if e.get("err") is None
                     )
+                    # Історія — від найновішого за слотом. Понад `cap` придатних записів означає, що межу
+                    # вже пройдено: або її підпис знайдено, або є записи зі слотом, меншим за її слот
+                    # (а записи того ж слота, що й межа, правило R-8 без підпису межі відкидає).
+                    if _enough(_token_account_entries(entries, cutoff), page[-1]["slot"], cap):
+                        break
             except _RPC_ERRORS as exc:
                 problems.append((_rpc_reason(exc), f"getSignaturesForAddress {pubkey} (token account of {wallet}): {exc}"))
             for sig, slot in _token_account_entries(entries, cutoff):
                 found.setdefault(sig, slot)
 
     found.pop(cutoff.signature, None)  # межа строга на рівні транзакції
-    return found
+    newest_first = sorted(found, key=lambda s: (found[s], s), reverse=True)
+    return newest_first[:cap], len(newest_first) > cap
 
 
-def _fetch(source: RpcSource, state: CollectionState, signatures: list[str], page_size: int,
-           deadline: DeadlineLike, problems: list[Problem]) -> dict[str, object]:
-    """Завантажити транзакції, яких немає в `tx_cache`; на відмові — проблема, решта не запитується."""
-    fetched: dict[str, object] = {}
-    missing = [sig for sig in signatures if sig not in state.tx_cache]
-    for i in range(0, len(missing), page_size):
-        batch = missing[i:i + page_size]
-        state.rpc_calls += 1
-        try:
-            raws = source.get_transactions(batch, deadline=deadline)
-        except _RPC_ERRORS as exc:
-            problems.append((_rpc_reason(exc), f"getTransaction from {batch[0]}: {exc}"))
-            break
-        fetched.update(zip(batch, raws))
-    return fetched
+def _fetch_batch(source: RpcSource, state: CollectionState, batch: list[str], deadline: DeadlineLike,
+                 problems: list[Problem]) -> dict[str, object] | None:
+    """Один пакет `get_transactions`; на відмові — проблема і None."""
+    state.rpc_calls += 1
+    try:
+        raws = source.get_transactions(batch, deadline=deadline)
+    except _RPC_ERRORS as exc:
+        problems.append((_rpc_reason(exc), f"getTransaction from {batch[0]}: {exc}"))
+        return None
+    return dict(zip(batch, raws))
 
 
 def _expand_node(source: RpcSource, state: CollectionState, wallet: str, depth: int, cutoff: Cutoff,
                  config: IngestConfig, deadline: DeadlineLike) -> _NodeScan:
-    scan = _NodeScan(wallet=wallet, depth=depth)
-    signatures = _node_signatures(source, state, wallet, cutoff, config, deadline, scan.problems)
-    newest_first = sorted(signatures, key=lambda s: (signatures[s], s), reverse=True)
-    fetched = _fetch(source, state, newest_first, config.rpc.page_size, deadline, scan.problems)
+    scan = _NodeScan(wallet=wallet, depth=depth, threshold=config.counterparty_threshold)
+    newest_first, scan.signatures_truncated = _node_signatures(
+        source, state, wallet, cutoff, config, deadline, scan.problems,
+    )
+    # Транзакції, яких немає в кеші, запитуються пакетами `page_size` (у порядку від найновішого)
+    # ліниво — лише коли перегляд до них дійшов; після відмови пакети більше не запитуються.
+    page_size = config.rpc.page_size
+    to_fetch = [sig for sig in newest_first if sig not in state.tx_cache]
+    fetched: dict[str, object] = {}
+    next_batch = 0
+    fetch_failed = False
 
     for sig in newest_first:
+        scan.signatures_seen += 1
         parsed: ParsedTx | None = state.tx_cache.get(sig)
         if parsed is None:
+            if sig not in fetched and not fetch_failed and next_batch < len(to_fetch):
+                batch = to_fetch[next_batch:next_batch + page_size]
+                next_batch += page_size
+                got = _fetch_batch(source, state, batch, deadline, scan.problems)
+                if got is None:
+                    fetch_failed = True
+                else:
+                    fetched.update(got)
             if sig not in fetched:
                 continue  # пакет не отримано — проблему вже зафіксовано
             raw = fetched[sig]
@@ -223,8 +310,14 @@ def _expand_node(source: RpcSource, state: CollectionState, wallet: str, depth: 
                 continue
             if not config.collect_spl_inbound and transfer.asset != Asset.SOL:
                 continue
-            scan.accept(transfer)
+            if not scan.accept(transfer):
+                return scan  # high_degree: перевищувач і все старіше не збирається
     return scan
+
+
+def _forget_missing(state: CollectionState, wallet: str) -> bool:
+    """Прибрати записи `missing` гаманця за O(кількості причин); True — якщо такі були."""
+    return any([state.missing.pop((wallet, reason), None) is not None for reason in MissingReason])
 
 
 def _record_missing(state: CollectionState, wallet: str, level: int, problems: list[Problem]) -> None:
@@ -251,38 +344,134 @@ def expand_level(source: RpcSource, state: CollectionState, depth: int, config: 
         raise ValueError(f"depth {depth}: level {depth - 1} has not been expanded yet")
 
     level = depth - 1
-    register_next = depth + 1 <= config.funding_depth
-    shallower = set().union(*(nodes for d, nodes in frontier.items() if d <= level))
-    next_level = frontier.setdefault(depth, {}) if register_next else {}
     slots = _slot_index(state)
+    into = _StateIndex(state)
 
-    for wallet in sorted(frontier[level]):
-        if wallet in state.expanded:
-            continue
-        cutoff_sig = frontier[level][wallet]
-        if cutoff_sig not in slots:
-            raise ValueError(f"cutoff {cutoff_sig!r} of {wallet!r} is neither a first buy nor a collected edge")
-        scan = _expand_node(source, state, wallet, depth, Cutoff(cutoff_sig, slots[cutoff_sig]),
-                            config, deadline)
+    try:
+        for wallet in sorted(frontier[level]):
+            if wallet in state.expanded:
+                continue
+            cutoff_sig = frontier[level][wallet]
+            if cutoff_sig not in slots:
+                raise ValueError(f"cutoff {cutoff_sig!r} of {wallet!r} is neither a first buy nor a collected edge")
+            scan = _expand_node(source, state, wallet, depth, Cutoff(cutoff_sig, slots[cutoff_sig]),
+                                config, deadline)
 
-        for transfer in scan.transfers:
-            key = (transfer.signature, transfer.instruction_path)
-            known = state.transfers.get(key)
-            if known is None or transfer.depth < known.depth:
-                state.transfers[key] = transfer
-            slots.setdefault(transfer.signature, transfer.slot)
+            if not scan.problems and any((wallet, reason) in state.missing for reason in MissingReason):
+                # повторна спроба вдалася: перекази у вершину — рівно ті, що дає повний перегляд
+                into.drop(wallet)
+            for transfer in scan.transfers:
+                key = (transfer.signature, transfer.instruction_path)
+                known = state.transfers.get(key)
+                if known is None or transfer.depth < known.depth:
+                    into.put(key, transfer)
+                slots.setdefault(transfer.signature, transfer.slot)
 
-        if register_next:
-            for sender, edge in scan.senders.items():
-                if sender in shallower or sender in state.expanded:
-                    continue
-                current = next_level.get(sender)
-                if current is None or edge > (slots[current], current):
-                    next_level[sender] = edge[1]
+            into.set_unexpanded(wallet, scan.unexpanded(level))
+            if scan.problems:
+                _record_missing(state, wallet, level, scan.problems)
+            else:
+                state.expanded.add(wallet)
+                _forget_missing(state, wallet)
+    finally:
+        into.flush()  # state.unexpanded узгоджено навіть при винятку; _derive_level читає хабів звідти
+    if depth + 1 <= config.funding_depth:
+        _reconcile_level(state, depth, into)
+        into.flush()
 
-        if scan.problems:
-            _record_missing(state, wallet, level, scan.problems)
+
+class _StateIndex:
+    """Індекси стану за гаманцем — щоб забути чи замінити записи вершини за O(її записів).
+
+    `transfers`: ключі `state.transfers` за отримувачем (перекази з `receiver == W` дає лише перегляд
+    самої W); `unexpanded`: позиція запису гаманця. Живе лише в межах одного виклику `expand_level`:
+    будується одним проходом (O(переказів + unexpanded) на рівень) і оновлюється разом зі станом. У
+    `CollectionState` не зберігається, тож resume і збереження стану його не стосуються — він завжди
+    виводиться з `transfers` і `unexpanded`.
+    """
+
+    def __init__(self, state: CollectionState) -> None:
+        self._state = state
+        self._keys: dict[str, set[tuple[str, str]]] = {}
+        for key, t in state.transfers.items():
+            self._keys.setdefault(t.receiver, set()).add(key)
+        self._unexpanded: dict[str, UnexpandedNode] = {u.wallet: u for u in state.unexpanded}
+        self._unexpanded_dirty = False
+
+    def put(self, key: tuple[str, str], transfer: Transfer) -> None:
+        self._state.transfers[key] = transfer
+        self._keys.setdefault(transfer.receiver, set()).add(key)
+
+    def drop(self, wallet: str) -> None:
+        for key in self._keys.pop(wallet, ()):
+            del self._state.transfers[key]
+
+    def set_unexpanded(self, wallet: str, node: UnexpandedNode | None) -> None:
+        """Один запис на гаманець: повторне розгортання (resume) замінює, а не дублює."""
+        if node is None:
+            if self._unexpanded.pop(wallet, None) is None:
+                return
         else:
-            state.expanded.add(wallet)
-            for key in [k for k in state.missing if k[0] == wallet]:
-                del state.missing[key]
+            self._unexpanded[wallet] = node
+        self._unexpanded_dirty = True
+
+    def flush(self) -> None:
+        """Записати `state.unexpanded` (порядок `(depth, wallet)`) — раз на виклик, не на вершину."""
+        if self._unexpanded_dirty:
+            self._state.unexpanded = sorted(self._unexpanded.values(), key=lambda u: (u.depth, u.wallet))
+            self._unexpanded_dirty = False
+
+
+def _invalidate(state: CollectionState, wallet: str, index: _StateIndex) -> None:
+    """Забути розгортання вершини: її позиція чи межа змінилась (або вона більше не досяжна).
+
+    O(записів цієї вершини); вершина без стану (щойно знайдена у свіжому прогоні) — O(1).
+    """
+    index.drop(wallet)
+    index.set_unexpanded(wallet, None)
+    state.expanded.discard(wallet)
+    _forget_missing(state, wallet)
+
+
+def _derive_level(state: CollectionState, level: int) -> dict[str, str]:
+    """Вершини рівня `level` і їхні межі — лише з даних повністю розгорнутих вершин рівня `level-1`.
+
+    Батько реєструє відправників, лише якщо розгорнутий без збоїв і не `high_degree` (FR-001-08; вершина
+    зі збоєм переглянута частково — хаб вона чи ні, невідомо). Відправник, що вже є вершиною меншого
+    рівня, пропускається (цикли, спільні фінансувальники). Межа — найпізніше за `(slot, signature)`
+    ребро до вершини рівня `level-1`.
+    """
+    frontier = state.frontier_by_depth
+    hubs = {u.wallet for u in state.unexpanded if u.reason == UnexpandedReason.HIGH_DEGREE}
+    parents = {w for w in frontier[level - 1] if w in state.expanded and w not in hubs}
+    shallower = set().union(*(frontier[d] for d in range(level)))
+    edges: dict[str, tuple[int, str]] = {}
+    for t in state.transfers.values():
+        if t.receiver in parents and t.sender not in shallower:
+            edge = (t.slot, t.signature)
+            if edge > edges.get(t.sender, (-1, "")):
+                edges[t.sender] = edge
+    return {sender: edge[1] for sender, edge in edges.items()}
+
+
+def _reconcile_level(state: CollectionState, level: int, into: _StateIndex) -> None:
+    """Перевивести `frontier[level]` після розгортання рівня `level-1` (зокрема на resume).
+
+    У свіжому прогоні рівень ще порожній — це звичайна реєстрація відправників. На resume вершина могла
+    з'явитись (батько нарешті розгорнутий повністю), перейти з глибшого рівня на цей (коротший шлях),
+    змінити межу (пізніше ребро) або зникнути (батька більше немає). Кожна така вершина інвалідується:
+    її перекази, `expanded`, `unexpanded`, `missing` забуваються, і наступний рівень розгорне її заново —
+    з новою межею й мінімальною глибиною, а її відправники перевиводяться тим самим правилом (каскад).
+    Вершина, що піднялась на менший рівень, там уже інвалідована й розгорнута — тут лише прибирається.
+    """
+    frontier = state.frontier_by_depth
+    old = frontier.get(level, {})
+    new = _derive_level(state, level)
+    shallower = set().union(*(frontier[d] for d in range(level)))
+    for wallet, cutoff in old.items():
+        if new.get(wallet) != cutoff and wallet not in shallower:
+            _invalidate(state, wallet, into)
+    for wallet, cutoff in new.items():
+        if old.get(wallet) != cutoff:
+            _invalidate(state, wallet, into)
+    frontier[level] = new

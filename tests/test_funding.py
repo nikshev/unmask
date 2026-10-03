@@ -22,7 +22,7 @@ from unmask.ingest.buyers import enumerate_buyers
 from unmask.ingest.collector import CollectionState
 from unmask.ingest.config import load_config
 from unmask.ingest.funding import expand_level
-from unmask.ingest.model import MissingReason, Transfer, transfer_sort_key
+from unmask.ingest.model import MissingReason, Transfer, UnexpandedReason, transfer_sort_key
 from unmask.ingest.rpc.fixture import FailFor, FixtureRpcSource
 from unmask.ingest.rpc.protocol import RpcRateLimited, RpcUnavailable
 
@@ -371,8 +371,23 @@ def test_corrupt_record_recorded_as_corrupt_data_and_rest_kept(tmp_path):
     m = state.missing[(A, MissingReason.CORRUPT_DATA)]
     assert (m.wallet, m.depth) == (A, 1) and SIG_G_A in m.detail
     assert {(SIG_B_A, "0"), (SIG_D_A, "0")} <= _keys(state)
-    # решта рівня 3 розгорнута (B, D), лише G недосяжний
-    assert (SIG_C_B, "0") in state.transfers and (SIG_A_D, "0") in state.transfers
+    # T-013 (рішення власника процесу): вершина зі збоєм хоча б в одній транзакції переглянута частково —
+    # її відправники (B, D) не стають вершинами рівня 2 до повного розгортання; зібране лишається доказом
+    assert A not in state.expanded
+    assert not ({B, D, G} & set(state.frontier_by_depth[2]))
+    assert SIG_C_B not in _sigs(state) and SIG_A_D not in _sigs(state)
+    assert not [p for m, p in source.calls if m == "getSignaturesForAddress" and p["address"] in (B, D)]
+
+
+def test_resume_after_corrupt_record_registers_senders_and_matches_golden(tmp_path):
+    source = _variant(tmp_path, lambda d: d["getTransaction"][SIG_G_A].__setitem__("meta", None))
+    cfg = _cfg(3)
+    state = _bfs(source, cfg)
+    assert (A, MissingReason.CORRUPT_DATA) in state.missing
+    _bfs(FixtureRpcSource(BASIC), cfg, state)  # resume тим самим станом, джерело вже чисте
+    assert state.missing == {}
+    assert {A, B, D, G} <= state.expanded
+    assert _rows(state) == EXPECTED["transfers"]
 
 
 def test_partially_corrupt_transaction_keeps_resolved_transfers_and_marks_corrupt(tmp_path):
@@ -385,7 +400,26 @@ def test_partially_corrupt_transaction_keeps_resolved_transfers_and_marks_corrup
     assert (SIG_A_P2, "0") in state.transfers and (SIG_A_P2, "1") in state.transfers
     m = state.missing[(P2, MissingReason.CORRUPT_DATA)]
     assert m.depth == 0 and SIG_A_P2 in m.detail
-    assert state.frontier_by_depth[1][A] == SIG_A_P2  # межа з частково розібраного ребра
+    # T-013: частково розібраний P2 відправників не реєструє — A лишається вершиною лише через P1,
+    # з межею з ребра A->P1; ребро з частково розібраної транзакції межею не стає до resume
+    assert state.frontier_by_depth[1][A] == SIG_A_P1
+    assert P2 not in state.expanded
+
+
+def test_resume_reopens_expanded_sender_when_later_edge_arrives(tmp_path):
+    # перший прохід: A розгорнуто з межею A->P1 (120) — G->A (122) не видно; resume P2 з чистим джерелом
+    # дає пізніше ребро A->P2 (125): A розгортається знову з пізнішою межею, нічого не губиться
+    def mutate(data):
+        tx = data["getTransaction"][SIG_A_P2]
+        tx["transaction"]["message"]["instructions"].append({"programId": TOKEN, "accounts": [A, P2], "data": ""})
+
+    cfg = _cfg(2)
+    state = _bfs(_variant(tmp_path, mutate), cfg)
+    assert A in state.expanded and SIG_G_A not in _sigs(state)
+    _bfs(FixtureRpcSource(BASIC), cfg, state)
+    assert state.missing == {}
+    assert state.frontier_by_depth[1][A] == SIG_A_P2
+    assert _rows(state) == [r for r in EXPECTED["transfers"] if r["depth"] <= 2]
 
 
 def test_rpc_failure_for_one_wallet_mid_level_recorded_and_level_continues():
@@ -428,6 +462,18 @@ def test_rpc_failure_mid_history_keeps_records_collected_before_failure():
     assert (SIG_G_A, "0") in state.transfers           # зібрано до збою
     assert SIG_B_A not in _sigs(state)                  # після збою — не бачили
     assert A not in state.expanded
+
+
+def test_resume_after_mid_history_failure_expands_senders_and_matches_golden():
+    source = _FailOnNthPage(BASIC, address=A, n=3, exc=RpcRateLimited(1.0))
+    cfg = _cfg(3, page_size=1)
+    state = _bfs(source, cfg)
+    assert (A, MissingReason.RATE_LIMITED) in state.missing
+    assert not (set(state.frontier_by_depth[2]) & {B, D, G})
+    assert not [t for t in state.transfers.values() if t.depth == 3]
+    _bfs(FixtureRpcSource(BASIC), cfg, state)
+    assert state.missing == {}
+    assert _rows(state) == EXPECTED["transfers"]
 
 
 def test_rerun_with_same_state_is_idempotent():
@@ -585,3 +631,294 @@ def test_short_cycle_buyer_funder_buyer_terminates_without_duplicates(tmp_path):
 
 
 BUY_SIGS_BY_WALLET = {b["wallet"]: b["first_buy_signature"] for b in EXPECTED["buyers"]}
+
+
+# --- resume == свіжий прогін, коли вершина переходить на коротший шлях (ревʼю T-013) ------------
+
+SIG_B_P3 = _fake_sig("BtoP3")
+
+
+def _b_funds_p3(data: dict) -> None:
+    # B -> P3 (слот 140, до купівлі P3 @210): у свіжому прогоні B — вершина рівня 1 з межею 140,
+    # отже E->B (115) і C->B (100) — глибина 2, K->C (90) — глибина 3
+    _clone(data, SIG_G_A, SIG_B_P3, 140, {G: B, A: P3})
+    _insert(data, B, SIG_B_P3, 140)
+    _insert(data, P3, SIG_B_P3, 140)
+
+
+def _snapshot(state: CollectionState):
+    return (_rows(state), sorted(state.missing), list(state.unexpanded),
+            {d: dict(nodes) for d, nodes in state.frontier_by_depth.items()})
+
+
+def _fresh_b_p3(tmp_path) -> CollectionState:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    source = _variant(tmp_path, _b_funds_p3)
+    return _bfs(source, _cfg(3))
+
+
+def test_fresh_b_p3_variant_has_b_at_level1_with_minimal_depths(tmp_path):
+    state = _fresh_b_p3(tmp_path)
+    assert state.frontier_by_depth[1][B] == SIG_B_P3
+    depth = {sig: t.depth for (sig, _p), t in state.transfers.items()}
+    assert (depth[SIG_E_B], depth[SIG_C_B], depth[SIG_K_C]) == (2, 2, 3)
+
+
+@pytest.mark.parametrize("failure", ["rpc_history", "corrupt_self"])
+def test_resume_moves_node_to_shorter_path_and_equals_fresh_run(tmp_path, failure):
+    def mutate(data):
+        _b_funds_p3(data)
+        if failure == "corrupt_self":
+            data["getTransaction"][SIG_SELF]["meta"] = None
+
+    kwargs = {"failures": [FailFor(P3, RpcUnavailable("down"), times=1)]} if failure == "rpc_history" else {}
+    cfg = _cfg(3)
+    for sub in ("broken", "clean"):
+        (tmp_path / sub).mkdir()
+    state = _bfs(_variant(tmp_path / "broken", mutate, **kwargs), cfg)
+    assert any(k[0] == P3 for k in state.missing)
+    # перший прохід: B досяжний лише через A (рівень 2): C->B на глибині 3, E->B і K->C не видно
+    assert state.frontier_by_depth[2][B] == SIG_B_A
+
+    _bfs(_variant(tmp_path / "clean", _b_funds_p3), cfg, state)  # resume тим самим станом
+    assert state.missing == {}
+    assert _snapshot(state) == _snapshot(_fresh_b_p3(tmp_path / "fresh"))
+
+
+SIG_A_P3 = _fake_sig("AtoP3")
+
+
+def _a_funds_p3(data: dict) -> None:
+    # A -> P3 (слот 140): межа A стає 140, у вікні з'являється F->A (128) — четвертий унікальний відправник
+    _clone(data, SIG_G_A, SIG_A_P3, 140, {A: P3, G: A})  # спершу A, інакше G->A->P3
+    _insert(data, A, SIG_A_P3, 140)
+    _insert(data, P3, SIG_A_P3, 140)
+
+
+def test_resume_node_turns_high_degree_removes_previously_registered_senders(tmp_path):
+    # поріг 3. Перший прохід (P3 падає): межа A = 125, відправники G, B, D — рівно поріг, розгортаються.
+    # Resume: межа A = 140, F, G, B, D — A стає high_degree; B, D, G зникають з рівня 2 разом
+    # із переказами в них (C->B, A->D), як у свіжому прогоні
+    cfg = dataclasses.replace(_cfg(3), counterparty_threshold=3)
+    for sub in ("broken", "clean", "fresh"):
+        (tmp_path / sub).mkdir()
+    broken = _variant(tmp_path / "broken", _a_funds_p3, failures=[FailFor(P3, RpcUnavailable("down"), times=1)])
+    state = _bfs(broken, cfg)
+    assert {B, D, G} <= set(state.frontier_by_depth[2])
+    assert SIG_C_B in _sigs(state)
+
+    _bfs(_variant(tmp_path / "clean", _a_funds_p3), cfg, state)
+    fresh = _bfs(_variant(tmp_path / "fresh", _a_funds_p3), cfg)
+    assert [u.wallet for u in fresh.unexpanded] == [A]
+    assert _snapshot(state) == _snapshot(fresh)
+    assert SIG_C_B not in _sigs(state) and SIG_A_D not in _sigs(state)
+
+
+SIG_U_P2 = _fake_sig("UtoP2")
+
+
+def test_successful_retry_replaces_partial_transfers_with_full_scan(tmp_path):
+    # U -> P2 (128) лише в історії гаманця P2. Поріг 1. Перша спроба: історія гаманця P2 падає, видно лише
+    # токен-рахунок (S -> P2 двічі). Повторна: від найновішого U (128), далі S (127) — перевищення; у
+    # свіжому прогоні в P2 лише U -> P2, і повторна спроба має дати те саме, а не U + S + S
+    U_ = W["U"]
+
+    def mutate(data):
+        _clone(data, SIG_G_A, SIG_U_P2, 128, {G: U_, A: P2})
+        _insert(data, P2, SIG_U_P2, 128)
+
+    cfg = dataclasses.replace(_cfg(1), counterparty_threshold=1)
+    for sub in ("broken", "clean", "fresh"):
+        (tmp_path / sub).mkdir()
+    state = _bfs(_variant(tmp_path / "broken", mutate, failures=[FailFor(P2, RpcUnavailable("down"), times=1)]), cfg)
+    assert (P2, MissingReason.UNAVAILABLE) in state.missing
+    assert {SIG_S_P2, SIG_S_P2_TA} <= _sigs(state)
+
+    _bfs(_variant(tmp_path / "clean", mutate), cfg, state)
+    fresh = _bfs(_variant(tmp_path / "fresh", mutate), cfg)
+    assert [t.sender for t in fresh.transfers.values() if t.receiver == P2] == [U_]
+    assert _snapshot(state) == _snapshot(fresh)
+
+
+def _edge(data: dict, sender: str, receiver: str, slot: int) -> str:
+    """Простий SOL-переказ sender -> receiver (копія G->A) у історіях обох."""
+    sig = _fake_sig(f"e{slot}")
+    _clone(data, SIG_G_A, sig, slot, {A: receiver, G: sender})  # спершу A — інакше G->A->receiver
+    _insert(data, sender, sig, slot)
+    _insert(data, receiver, sig, slot)
+    return sig
+
+
+def _m_variant(extra):
+    def mutate(data):
+        _a_funds_p3(data)
+        for sender, receiver, slot in extra:
+            _edge(data, sender, receiver, slot)
+    return mutate
+
+
+def _resume_vs_fresh(tmp_path, mutate, failures, cfg):
+    for sub in ("broken", "clean", "fresh"):
+        (tmp_path / sub).mkdir()
+    state = _bfs(_variant(tmp_path / "broken", mutate, failures=failures), cfg)
+    first = (list(state.unexpanded), dict(state.missing))
+    _bfs(_variant(tmp_path / "clean", mutate), cfg, state)
+    return first, state, _bfs(_variant(tmp_path / "fresh", mutate), cfg)
+
+
+def test_resume_vanished_node_drops_its_unexpanded_entry(tmp_path):
+    # M1 ревʼю: + E->B@101, U->B@102, K->B@103; поріг 3. Перший прохід (P3 падає): межа A = 125, B — вершина
+    # рівня 2 з межею 110 і відправниками K, U, E, C → high_degree. Resume: A стає хабом, B зникає —
+    # його запис unexpanded зникає теж
+    E_, U_, K_ = W["E"], W["U"], W["K"]
+    mutate = _m_variant([(E_, B, 101), (U_, B, 102), (K_, B, 103)])
+    cfg = dataclasses.replace(_cfg(3), counterparty_threshold=3)
+    first, state, fresh = _resume_vs_fresh(tmp_path, mutate, [FailFor(P3, RpcUnavailable("down"), times=1)], cfg)
+    assert [(u.wallet, u.depth, u.reason) for u in first[0]] == [(B, 2, UnexpandedReason.HIGH_DEGREE)]
+    assert [u.wallet for u in fresh.unexpanded] == [A]
+    assert _snapshot(state) == _snapshot(fresh)
+
+
+def test_resume_vanished_node_drops_its_missing_entry(tmp_path):
+    # M4 ревʼю: поріг 3; у першому проході падають і P3, і B (рівень 2). Resume: A — хаб, B зникає —
+    # запис missing для B не лишається (інакше хибне «неповний» про вершину поза результатом)
+    cfg = dataclasses.replace(_cfg(3), counterparty_threshold=3)
+    failures = [FailFor(P3, RpcUnavailable("down"), times=1), FailFor(B, RpcUnavailable("down"), times=1)]
+    first, state, fresh = _resume_vs_fresh(tmp_path, _m_variant([]), failures, cfg)
+    assert (B, MissingReason.UNAVAILABLE) in first[1]
+    assert state.missing == {} == fresh.missing
+    assert _snapshot(state) == _snapshot(fresh)
+
+
+# --- signature_cap: група записів одного слота на межі ліміту (ревʼю T-013 №3) ---------------------
+
+
+def _oracle_window(data: dict, wallet: str, cutoff_sig: str, cutoff_slot: int, cap: int, spl: bool = True) -> list[str]:
+    """Оракул: перегорнути все → фільтр межі (R-1, R-8) → злиття за (slot, signature) спадно → cap."""
+    hist = data["getSignaturesForAddress"].get(wallet, [])
+    order = [e["signature"] for e in hist]
+    start = order.index(cutoff_sig) + 1 if cutoff_sig in order else 0
+    found = {e["signature"]: e["slot"] for e in hist[start:] if e.get("err") is None}
+    if spl:
+        for acc in data["getTokenAccountsByOwner"].get(wallet, []):
+            entries = [(e["signature"], e["slot"]) for e in data["getSignaturesForAddress"].get(acc["pubkey"], [])
+                       if e.get("err") is None]
+            sigs = [s for s, _ in entries]
+            kept = entries[sigs.index(cutoff_sig) + 1:] if cutoff_sig in sigs else [
+                (s, sl) for s, sl in entries if sl < cutoff_slot]
+            for s, sl in kept:
+                found.setdefault(s, sl)
+    found.pop(cutoff_sig, None)
+    return sorted(found, key=lambda s: (found[s], s), reverse=True)[:cap]
+
+
+def _tie_sigs(prefix: str, n: int) -> list[str]:
+    return sorted(_fake_sig(f"{prefix}{c}") for c in "abcdefgh"[:n])
+
+
+@pytest.mark.parametrize("order", ["ascending", "descending"])
+def test_wallet_same_slot_group_on_cap_boundary_is_page_size_independent(tmp_path, order):
+    # B -> P3@140 робить B вершиною рівня 1 з межею 140. В історії B до межі: E->B@115, B->A@110, далі
+    # чотири вхідні в B в одному слоті 105, C->B@100. Ліміт 4: межа вікна проходить усередині групи
+    # слота 105 — вікно мусить брати два найбільші за підписом, незалежно від сторінки й порядку в слоті
+    ties = _tie_sigs("tieB", 4)
+    senders = [W[k] for k in ("E", "F", "U", "K")]
+
+    def mutate(data):
+        _clone(data, SIG_G_A, SIG_B_P3, 140, {G: B, A: P3})
+        _insert(data, B, SIG_B_P3, 140)
+        _insert(data, P3, SIG_B_P3, 140)
+        pairs = list(zip(ties, senders))
+        for sig, sender in (pairs if order == "ascending" else pairs[::-1]):
+            _clone(data, SIG_G_A, sig, 105, {A: B, G: sender})
+            _insert(data, B, sig, 105)
+            _insert(data, sender, sig, 105)
+
+    results = []
+    for page in (1, 2, 1000):
+        sub = tmp_path / f"p{page}"
+        sub.mkdir()
+        source = _variant(sub, mutate)
+        cfg = dataclasses.replace(_cfg(2, page_size=page), max_signatures_per_wallet=4)
+        state = _bfs(source, cfg)
+        results.append(_snapshot(state))
+        data = json.loads((sub / "basic_variant" / "rpc.json").read_text())
+        window = _oracle_window(data, B, SIG_B_P3, 140, 4)
+        assert state.frontier_by_depth[1][B] == SIG_B_P3
+        got = {t.signature for t in state.transfers.values() if t.receiver == B and t.signature in ties}
+        assert got == set(window) & set(ties) == set(ties[-2:])
+    assert results[0] == results[1] == results[2]
+
+
+@pytest.mark.parametrize("order", ["ascending", "descending"])
+def test_token_account_same_slot_group_on_cap_boundary_is_page_size_independent(tmp_path, order):
+    # USDC-рахунок P2: три SPL-перекази S -> P2 в слоті 209 (межа — купівля @210, її в рахунку немає).
+    # Ліміт 1: у вікні — найбільший за підписом із групи, за будь-якої сторінки
+    ties = _tie_sigs("tieU", 3)
+    usdc_ta = P2_USDC_TA
+
+    def mutate(data):
+        for sig in (ties if order == "ascending" else ties[::-1]):
+            _clone(data, SIG_S_P2_TA, sig, 209)
+            data["getSignaturesForAddress"][usdc_ta].insert(
+                sum(1 for e in data["getSignaturesForAddress"][usdc_ta] if e["slot"] >= 209), _entry(sig, 209))
+
+    results = []
+    for page in (1, 2, 1000):
+        sub = tmp_path / f"p{page}"
+        sub.mkdir()
+        source = _variant(sub, mutate)
+        cfg = dataclasses.replace(_cfg(1, page_size=page), max_signatures_per_wallet=1)
+        state = _bfs(source, cfg)
+        results.append(_snapshot(state))
+        data = json.loads((sub / "basic_variant" / "rpc.json").read_text())
+        buy = next(b for b in EXPECTED["buyers"] if b["wallet"] == P2)
+        window = _oracle_window(data, P2, buy["first_buy_signature"], buy["first_buy_slot"], 1)
+        assert window == [ties[-1]]
+        assert {t.signature for t in state.transfers.values() if t.receiver == P2} == {ties[-1]}
+    assert results[0] == results[1] == results[2]
+
+
+# --- missing / unexpanded: дрібні інваріанти (ревʼю T-013 №3) ------------------------------------
+
+
+def test_successful_resume_clears_all_missing_reasons_of_wallet(tmp_path):
+    # N7: у A дві причини (None-транзакція й пошкоджена) → після успішного resume missing порожній
+    def mutate(data):
+        data["getTransaction"][SIG_G_A] = None
+        data["getTransaction"][SIG_B_A]["meta"] = None
+
+    cfg = _cfg(2)
+    state = _bfs(_variant(tmp_path, mutate), cfg)
+    assert {(A, MissingReason.UNAVAILABLE), (A, MissingReason.CORRUPT_DATA)} <= set(state.missing)
+    _bfs(FixtureRpcSource(BASIC), cfg, state)
+    assert state.missing == {}
+    assert _rows(state) == [r for r in EXPECTED["transfers"] if r["depth"] <= 2]
+
+
+def test_unexpanded_ordered_by_depth_then_wallet(tmp_path):
+    # N12: поріг 1; P3 (рівень 0, адреса «Hzwn…») і A (рівень 1, «BG2C…») — за адресою A < P3,
+    # але за (depth, wallet) P3 іде раніше
+    def mutate(data):
+        _a_funds_p3(data)
+        _edge(data, B, P3, 141)
+
+    cfg = dataclasses.replace(_cfg(2), counterparty_threshold=1)
+    state = _bfs(_variant(tmp_path, mutate), cfg)
+    got = [(u.depth, u.wallet) for u in state.unexpanded]
+    assert {P3, A} <= {w for _d, w in got}
+    assert got == sorted(got)
+    assert [w for _d, w in got] != sorted(w for _d, w in got)  # передумова: порядок за адресою інший
+
+
+def test_failed_retry_keeps_evidence_of_first_attempt():
+    # N22: перша спроба A падає на 3-й сторінці (зібрано G->A), повторна — одразу на першій.
+    # Стан лишається неповним, але докази першої спроби не губляться
+    cfg = _cfg(2, page_size=1)
+    first = _FailOnNthPage(BASIC, address=A, n=3, exc=RpcRateLimited(1.0))
+    state = _bfs(first, cfg)
+    kept = {k for k, t in state.transfers.items() if t.receiver == A}
+    assert (SIG_G_A, "0") in kept
+    _bfs(FixtureRpcSource(BASIC, failures=[FailFor(A, RpcUnavailable("down"), times=1)]), cfg, state)
+    assert (A, MissingReason.UNAVAILABLE) in state.missing or (A, MissingReason.RATE_LIMITED) in state.missing
+    assert kept <= {k for k, t in state.transfers.items() if t.receiver == A}
