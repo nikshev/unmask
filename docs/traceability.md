@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **38** · задач: **57** (виконано 47) · вимог у роботі: **12** · порушень: **0**
+Вимог: **38** · задач: **57** (виконано 48) · вимог у роботі: **12** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -39,14 +39,14 @@
 | `FR-002-08` | Пороги, списки адрес і версія MUST зберігатися у версіонованому YAML із журналом змін; зміна без запису в журн | `T-023`, `T-024`, `T-054` | `src/unmask/hubs/config.py` | `tests/test_hubs_config_robustness.py`, `tests/test_hubs_changelog_guard.py`, `tests/test_hubs_config.py` |
 | `FR-002-09` | Відсікання MUST виключати хаб і всі ребра, інцидентні йому, з графа для кластеризації й MUST зберігати їх у ок | `T-035`, `T-038` | `src/unmask/hubs/prune.py` | `tests/test_hubs_prune.py` |
 | `FR-002-10` | Покупці MUST NOT відсікатися; покупець, що відповідає критерію хаба, отримує пояснювальну позначку. | `T-035` | `src/unmask/hubs/prune.py` | `tests/test_hubs_prune.py` |
-| `FR-002-11` | Система MUST формувати звіт ефекту відсікання: кількість вершин і ребер, кількість компонент, частка найбільшо | `T-027`, `T-036`, `T-038`, `T-042` | `src/unmask/graph/components.py` | `tests/test_graph_components.py` |
-| `FR-002-12` | Якщо список відомих адрес не застосовано (порожній чи недоступний), результат MUST це явно показувати; відсутн | `T-023`, `T-035`, `T-036`, `T-037` | `src/unmask/hubs/prune.py`, `src/unmask/hubs/config.py` | `tests/test_hubs_config_robustness.py` |
+| `FR-002-11` | Система MUST формувати звіт ефекту відсікання: кількість вершин і ребер, кількість компонент, частка найбільшо | `T-027`, `T-036`, `T-038`, `T-042` | `src/unmask/graph/components.py`, `src/unmask/hubs/report.py` | `tests/test_graph_components.py`, `tests/test_hubs_report.py` |
+| `FR-002-12` | Якщо список відомих адрес не застосовано (порожній чи недоступний), результат MUST це явно показувати; відсутн | `T-023`, `T-035`, `T-036`, `T-037` | `src/unmask/hubs/prune.py`, `src/unmask/hubs/report.py`, `src/unmask/hubs/config.py` | `tests/test_hubs_config_robustness.py` |
 | `FR-002-13` | Результат MUST містити версію конфігу відсікання й версію списків адрес, щоб два результати з різними версіями | `T-023`, `T-039`, `T-040`, `T-054`, `T-055` | `src/unmask/hubs/config.py` | `tests/test_hubs_config.py` |
 | `FR-002-14` | Правило порогу (рівно поріг) MUST бути визначене однозначно й однаково для всіх критеріїв. | `T-023`, `T-033`, `T-057` | `src/unmask/hubs/criteria.py`, `src/unmask/hubs/config.py` | `tests/test_hubs_dust_fanout.py`, `tests/test_hubs_config.py`, `tests/test_hubs_threshold_rule.py` |
 | `FR-002-15` | Система MUST розпізнавати в транзакціях mint «делеговану купівлю»: платник витратив кошти й не отримав токен,  | `T-043`, `T-045` | `src/unmask/ingest/delegated.py` | `tests/test_delegated_fixtures.py`, `tests/test_delegated_rule.py` |
 | `FR-002-16` | Неоднозначні випадки (кілька платників чи отримувачів без однозначної відповідності) MUST фіксуватися як «канд | `T-043`, `T-045` | `src/unmask/ingest/delegated.py` | `tests/test_delegated_fixtures.py`, `tests/test_delegated_rule.py` |
 | `FR-002-17` | Розпізнавання swap-and-send MUST NOT змінювати склад, порядок і порядкові номери перших N покупців із фічі 001 | `T-046` | `src/unmask/ingest/buyers.py`, `src/unmask/ingest/cache.py` | `tests/test_delegated_wiring.py` |
-| `FR-002-18` | Зв'язки «делегована купівля» MUST потрапляти в граф як окремий вид ребра з первинним посиланням; ребра цього в | `T-025`, `T-028`, `T-047` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_build.py`, `tests/test_graph_model.py` |
+| `FR-002-18` | Зв'язки «делегована купівля» MUST потрапляти в граф як окремий вид ребра з первинним посиланням; ребра цього в | `T-025`, `T-028`, `T-047` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_build.py`, `tests/test_graph_model.py`, `tests/test_graph_delegated_edges.py` |
 | `FR-002-19` | Якщо транзакції не вдалося розібрати для цього аналізу, результат MUST це позначати як неповний щодо swap-and- | `T-039`, `T-044`, `T-045`, `T-046`, `T-048` | `src/unmask/ingest/parse.py`, `src/unmask/ingest/collector.py`, `src/unmask/ingest/service.py`, `src/unmask/ingest/delegated.py`, `src/unmask/ingest/model.py` | `tests/test_delegated_wiring.py`, `tests/test_ingest_delegated_model.py` |
 | `FR-002-20` | Усі зовнішні дані MUST надходити лише з результату збору (фіча 001); фіча не звертається до мережі напряму, те | `T-026`, `T-039`, `T-041`, `T-056` | `src/unmask/ingest/serialize.py` | `tests/test_ingest_from_dict.py` |
 | `FR-002-21` | Результат MUST серіалізуватися у JSON за контрактом, версіонованим окремо від контракту фічі 001; зміни контра | `T-039`, `T-040`, `T-044`, `T-048` | `src/unmask/ingest/serialize.py`, `src/unmask/ingest/model.py` | `tests/test_ingest_delegated_model.py` |
@@ -85,7 +85,7 @@
 - `T-057` (002-funding-graph-hub-pruning) — виконано
 - `T-034` (002-funding-graph-hub-pruning) — виконано
 - `T-035` (002-funding-graph-hub-pruning) — виконано
-- `T-036` (002-funding-graph-hub-pruning) — у роботі
+- `T-036` (002-funding-graph-hub-pruning) — виконано
 - `T-039` (002-funding-graph-hub-pruning) — у роботі
 - `T-044` (002-funding-graph-hub-pruning) — виконано
 - `T-045` (002-funding-graph-hub-pruning) — виконано
