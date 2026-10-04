@@ -25,7 +25,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import StrEnum
 from typing import Any, Iterable
 
@@ -261,6 +261,19 @@ class Node:
         if self.unexpanded is not None:
             _instance("node.unexpanded", self.unexpanded, UnexpandedMark)
         _instance("node.measures", self.measures, NodeMeasures)
+
+    def __repr__(self) -> str:
+        # FR-002-04: `frozenset` показує елементи в порядку хешів, а хеш рядка залежить від
+        # `PYTHONHASHSEED`; ролі виводяться впорядковано, решта полів — як у dataclass-repr.
+        parts = []
+        for f in fields(self):
+            value = getattr(self, f.name)
+            if f.name == "roles":
+                value = f"frozenset({{{', '.join(repr(r) for r in sorted(value))}}})"
+            else:
+                value = repr(value)
+            parts.append(f"{f.name}={value}")
+        return f"{type(self).__name__}({', '.join(parts)})"
 
 
 # --- Ребра -----------------------------------------------------------------------
