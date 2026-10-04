@@ -1,0 +1,390 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unmask.local/schemas/002/graph-result-1.json",
+  "title": "unmask graph result (feature 002, schema 002.1)",
+  "description": "Serialized GraphResult: funding graph for clustering (hubs removed, all buyers kept), prune records with explanations, effect report, inherited completeness. Versioned independently from feature 001 (FR-002-21). Amounts are integers in base units; shares are ratios of the integers stored beside them.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["metadata", "completeness", "graph", "pruned", "buyer_flags", "report"],
+  "properties": {
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "completeness": { "$ref": "#/$defs/completeness" },
+    "graph": { "$ref": "#/$defs/graph" },
+    "pruned": { "type": "array", "items": { "$ref": "#/$defs/pruneRecord" } },
+    "buyer_flags": { "type": "array", "items": { "$ref": "#/$defs/buyerFlag" } },
+    "report": { "$ref": "#/$defs/report" }
+  },
+  "allOf": [
+    {
+      "description": "FR-002-12: lists not applied must be visible as a warning, never silent",
+      "if": { "properties": { "metadata": { "properties": { "lists_applied": { "const": false } } } } },
+      "then": { "properties": { "report": { "properties": { "warnings": { "contains": { "const": "address_lists_not_applied" } } } } } }
+    },
+    {
+      "description": "FR-002-12: without lists no prune record may cite a list category",
+      "if": { "properties": { "metadata": { "properties": { "lists_applied": { "const": false } } } } },
+      "then": {
+        "properties": {
+          "pruned": {
+            "items": { "properties": { "criteria": { "items": { "properties": { "detail": { "not": { "pattern": "^list:" } } } } } } }
+          }
+        }
+      }
+    },
+    {
+      "description": "FR-002-05: graph over an incomplete ingest is never complete",
+      "if": {
+        "properties": { "completeness": { "anyOf": [
+          { "properties": { "ingest_status": { "const": "incomplete" } } },
+          { "properties": { "delegated_complete": { "const": false } } }
+        ] } }
+      },
+      "then": { "properties": { "completeness": { "properties": { "status": { "const": "incomplete" } } } } }
+    },
+    {
+      "description": "FR-002-05: complete requires complete ingest, empty missing, complete delegated analysis",
+      "if": { "properties": { "completeness": { "properties": { "status": { "const": "complete" } } } } },
+      "then": {
+        "properties": { "completeness": { "properties": {
+          "ingest_status": { "const": "complete" },
+          "missing": { "maxItems": 0 },
+          "buyers_complete": { "const": true },
+          "delegated_complete": { "const": true }
+        } } }
+      }
+    }
+  ],
+  "$defs": {
+    "address": { "type": "string", "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$" },
+    "signature": { "type": "string", "pattern": "^[1-9A-HJ-NP-Za-km-z]{64,88}$" },
+    "asset": { "type": "string", "pattern": "^(sol|spl:[1-9A-HJ-NP-Za-km-z]{32,44})$" },
+    "nonNegInt": { "type": "integer", "minimum": 0 },
+    "posInt": { "type": "integer", "minimum": 1 },
+    "share": { "type": "number", "minimum": 0, "maximum": 1 },
+    "optTime": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/nonNegInt" } ] },
+
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mint", "schema_version", "ingest_analyzed_at", "ingest_config_version", "ingest_source",
+        "wallets_analyzed", "hub_config_version", "address_lists_version", "lists_applied",
+        "thresholds", "nodes_total", "edges_total"
+      ],
+      "properties": {
+        "mint": { "$ref": "#/$defs/address" },
+        "schema_version": { "const": "002.1" },
+        "ingest_analyzed_at": { "$ref": "#/$defs/nonNegInt" },
+        "ingest_config_version": { "$ref": "#/$defs/posInt" },
+        "ingest_source": { "type": "string", "pattern": "^(fixture:[A-Za-z0-9_-]+|http)$" },
+        "wallets_analyzed": { "$ref": "#/$defs/nonNegInt" },
+        "hub_config_version": { "$ref": "#/$defs/posInt" },
+        "address_lists_version": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/posInt" } ] },
+        "lists_applied": { "type": "boolean" },
+        "thresholds": { "$ref": "#/$defs/thresholds" },
+        "nodes_total": { "$ref": "#/$defs/nonNegInt" },
+        "edges_total": { "$ref": "#/$defs/nonNegInt" }
+      },
+      "allOf": [
+        {
+          "description": "FR-002-13: lists_applied iff a lists version is present",
+          "if": { "properties": { "lists_applied": { "const": true } } },
+          "then": { "properties": { "address_lists_version": { "type": "integer" } } },
+          "else": { "properties": { "address_lists_version": { "type": "null" } } }
+        }
+      ]
+    },
+
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "degree_threshold", "one_off_senders_share", "one_off_min_senders",
+        "giant_component_warn_share", "prune_off_curve", "prune_ingest_high_degree"
+      ],
+      "properties": {
+        "degree_threshold": { "$ref": "#/$defs/posInt" },
+        "one_off_senders_share": { "$ref": "#/$defs/share" },
+        "one_off_min_senders": { "type": "integer", "minimum": 2 },
+        "giant_component_warn_share": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "prune_off_curve": { "type": "boolean" },
+        "prune_ingest_high_degree": { "type": "boolean" }
+      }
+    },
+
+    "completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "ingest_status", "missing", "buyers_complete", "buyers_reason",
+        "delegated_complete", "delegated_reason"
+      ],
+      "properties": {
+        "status": { "enum": ["complete", "incomplete"] },
+        "ingest_status": { "enum": ["complete", "incomplete"] },
+        "missing": { "type": "array", "items": { "$ref": "#/$defs/missingRef" } },
+        "buyers_complete": { "type": "boolean" },
+        "buyers_reason": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/missingReason" } ] },
+        "delegated_complete": { "type": "boolean" },
+        "delegated_reason": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/missingReason" }, { "const": "not_analyzed" } ] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "delegated_complete": { "const": true } } },
+          "then": { "properties": { "delegated_reason": { "type": "null" } } },
+          "else": { "properties": { "delegated_reason": { "type": "string" } } }
+        },
+        {
+          "if": { "properties": { "buyers_complete": { "const": true } } },
+          "then": { "properties": { "buyers_reason": { "type": "null" } } },
+          "else": { "properties": { "buyers_reason": { "type": "string" } } }
+        }
+      ]
+    },
+
+    "missingReason": { "enum": ["rate_limited", "timeout", "unavailable", "corrupt_data", "budget_exhausted"] },
+
+    "missingRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wallet", "depth", "reason", "detail"],
+      "properties": {
+        "wallet": { "$ref": "#/$defs/address" },
+        "depth": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "reason": { "$ref": "#/$defs/missingReason" },
+        "detail": { "type": "string" }
+      }
+    },
+
+    "graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodes", "edges"],
+      "properties": {
+        "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+        "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } }
+      }
+    },
+
+    "measures": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["degree", "unique_senders", "one_off_senders", "one_off_share"],
+      "properties": {
+        "degree": { "$ref": "#/$defs/nonNegInt" },
+        "unique_senders": { "$ref": "#/$defs/nonNegInt" },
+        "one_off_senders": { "$ref": "#/$defs/nonNegInt" },
+        "one_off_share": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/share" } ] }
+      },
+      "allOf": [
+        {
+          "description": "share is null exactly when there are no senders",
+          "if": { "properties": { "unique_senders": { "const": 0 } } },
+          "then": { "properties": { "one_off_share": { "type": "null" } } },
+          "else": { "properties": { "one_off_share": { "type": "number" } } }
+        }
+      ]
+    },
+
+    "unexpandedMark": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "counterparties_seen", "signatures_seen", "signatures_truncated"],
+      "properties": {
+        "reason": { "enum": ["high_degree", "signature_cap"] },
+        "counterparties_seen": { "$ref": "#/$defs/nonNegInt" },
+        "signatures_seen": { "$ref": "#/$defs/nonNegInt" },
+        "signatures_truncated": { "type": "boolean" }
+      }
+    },
+
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["address", "roles", "depth", "buyer_rank", "address_type", "unexpanded", "measures"],
+      "properties": {
+        "address": { "$ref": "#/$defs/address" },
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["buyer", "funder", "delegated_payer", "delegated_receiver"] }
+        },
+        "depth": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "buyer_rank": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/posInt" } ] },
+        "address_type": { "enum": ["wallet", "off_curve"] },
+        "unexpanded": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/unexpandedMark" } ] },
+        "measures": { "$ref": "#/$defs/measures" }
+      },
+      "allOf": [
+        {
+          "description": "FR-002-03: buyer role iff rank present; buyers sit at depth 0",
+          "if": { "properties": { "roles": { "contains": { "const": "buyer" } } } },
+          "then": { "properties": { "buyer_rank": { "type": "integer" }, "depth": { "const": 0 } } },
+          "else": { "properties": { "buyer_rank": { "type": "null" } } }
+        }
+      ]
+    },
+
+    "edgeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signature", "slot", "instruction_path"],
+      "properties": {
+        "signature": { "$ref": "#/$defs/signature" },
+        "slot": { "$ref": "#/$defs/nonNegInt" },
+        "instruction_path": { "oneOf": [ { "type": "null" }, { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" } ] }
+      }
+    },
+
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind", "sender", "receiver", "asset", "amount", "decimals", "count",
+        "first_slot", "last_slot", "first_time", "last_time", "refs"
+      ],
+      "properties": {
+        "kind": { "enum": ["transfer", "delegated_buy"] },
+        "sender": { "$ref": "#/$defs/address" },
+        "receiver": { "$ref": "#/$defs/address" },
+        "asset": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/asset" } ] },
+        "amount": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/posInt" } ] },
+        "decimals": { "oneOf": [ { "type": "null" }, { "type": "integer", "minimum": 0, "maximum": 255 } ] },
+        "count": { "$ref": "#/$defs/posInt" },
+        "first_slot": { "$ref": "#/$defs/nonNegInt" },
+        "last_slot": { "$ref": "#/$defs/nonNegInt" },
+        "first_time": { "$ref": "#/$defs/optTime" },
+        "last_time": { "$ref": "#/$defs/optTime" },
+        "refs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/edgeRef" } }
+      },
+      "allOf": [
+        {
+          "description": "FR-002-18: transfer edges carry asset, amount and instruction paths; delegated_buy edges carry none (FR-002-02)",
+          "if": { "properties": { "kind": { "const": "transfer" } } },
+          "then": {
+            "properties": {
+              "asset": { "type": "string" },
+              "amount": { "type": "integer" },
+              "refs": { "items": { "properties": { "instruction_path": { "type": "string" } } } }
+            }
+          },
+          "else": {
+            "properties": {
+              "asset": { "type": "null" },
+              "amount": { "type": "null" },
+              "decimals": { "type": "null" },
+              "refs": { "items": { "properties": { "instruction_path": { "type": "null" } } } }
+            }
+          }
+        },
+        {
+          "description": "sol carries no decimals",
+          "if": { "properties": { "asset": { "const": "sol" } } },
+          "then": { "properties": { "decimals": { "type": "null" } } }
+        }
+      ]
+    },
+
+    "criterionHit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criterion", "measured", "threshold", "detail", "lists_version"],
+      "properties": {
+        "criterion": { "enum": ["known_list", "degree", "one_off_senders", "ingest_high_degree"] },
+        "measured": { "oneOf": [ { "type": "null" }, { "type": "number" } ] },
+        "threshold": { "oneOf": [ { "type": "null" }, { "type": "number" } ] },
+        "detail": { "type": "string", "pattern": "^(list:[a-z_]+|address_type:off_curve|unexpanded:high_degree|measured)$" },
+        "lists_version": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/posInt" } ] }
+      },
+      "allOf": [
+        {
+          "description": "FR-002-09: measured criteria always carry the measured value and the threshold",
+          "if": { "properties": { "criterion": { "enum": ["degree", "one_off_senders", "ingest_high_degree"] } } },
+          "then": { "properties": { "measured": { "type": "number" }, "threshold": { "type": "number" } } },
+          "else": { "properties": { "measured": { "type": "null" }, "threshold": { "type": "null" } } }
+        },
+        {
+          "description": "a list hit cites the list version; any other hit does not",
+          "if": { "properties": { "detail": { "pattern": "^list:" } } },
+          "then": { "properties": { "lists_version": { "type": "integer" } } },
+          "else": { "properties": { "lists_version": { "type": "null" } } }
+        },
+        {
+          "description": "known_list hits come from a list or from the address type",
+          "if": { "properties": { "criterion": { "const": "known_list" } } },
+          "then": { "properties": { "detail": { "pattern": "^(list:|address_type:off_curve)" } } }
+        }
+      ]
+    },
+
+    "pruneRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["address", "criteria", "incident_edges", "measures", "config_version", "lists_version"],
+      "properties": {
+        "address": { "$ref": "#/$defs/address" },
+        "criteria": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/criterionHit" } },
+        "incident_edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
+        "measures": { "$ref": "#/$defs/measures" },
+        "config_version": { "$ref": "#/$defs/posInt" },
+        "lists_version": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/posInt" } ] }
+      }
+    },
+
+    "buyerFlag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["address", "buyer_rank", "criteria", "measures"],
+      "properties": {
+        "address": { "$ref": "#/$defs/address" },
+        "buyer_rank": { "$ref": "#/$defs/posInt" },
+        "criteria": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/criterionHit" } },
+        "measures": { "$ref": "#/$defs/measures" }
+      }
+    },
+
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodes", "edges", "components", "buyers_total", "buyers_in_largest_component",
+        "largest_component_buyer_share", "isolated_buyers"
+      ],
+      "properties": {
+        "nodes": { "$ref": "#/$defs/nonNegInt" },
+        "edges": { "$ref": "#/$defs/nonNegInt" },
+        "components": { "$ref": "#/$defs/nonNegInt" },
+        "buyers_total": { "$ref": "#/$defs/nonNegInt" },
+        "buyers_in_largest_component": { "$ref": "#/$defs/nonNegInt" },
+        "largest_component_buyer_share": { "$ref": "#/$defs/share" },
+        "isolated_buyers": { "$ref": "#/$defs/nonNegInt" }
+      }
+    },
+
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before", "after", "pruned_nodes", "pruned_edges", "warn_share", "warnings"],
+      "properties": {
+        "before": { "$ref": "#/$defs/snapshot" },
+        "after": { "$ref": "#/$defs/snapshot" },
+        "pruned_nodes": { "$ref": "#/$defs/nonNegInt" },
+        "pruned_edges": { "$ref": "#/$defs/nonNegInt" },
+        "warn_share": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "warnings": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["address_lists_not_applied", "giant_component", "empty_graph", "all_sources_pruned", "delegated_incomplete"] }
+        }
+      },
+      "allOf": [
+        {
+          "description": "FR-002-11: an empty graph is reported, not silently 'clean'",
+          "if": { "properties": { "before": { "properties": { "buyers_total": { "const": 0 } } } } },
+          "then": { "properties": { "warnings": { "contains": { "const": "empty_graph" } } } }
+        }
+      ]
+    }
+  }
+}
