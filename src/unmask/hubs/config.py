@@ -1,14 +1,17 @@
-# impl: FR-002-08, FR-002-12, FR-002-13, FR-002-14
+# impl: FR-002-08, FR-002-12, FR-002-13, FR-002-14, FR-002-22
 """Завантаження й валідація `config/hubs.yaml` і `config/hub_addresses.yaml` (принцип III;
 specs/002-funding-graph-hub-pruning/contracts/config-hubs.md).
 
 Тихих умовчань немає: відсутнє чи невідоме поле та значення поза межами дають `ConfigError` з назвою поля.
 
-Правило порогу (FR-002-14, research R-9) — одне для всіх критеріїв: критерій спрацьовує, коли виміряне значення
-СТРОГО БІЛЬШЕ (`>`) за поріг; рівно поріг — не хаб. Це стосується `degree_threshold`, `one_off_senders_share`
-і `giant_component_warn_share`. `one_off_min_senders` — не поріг хаба, а передумова застосовності критерію
-часток: застосовний при `unique_senders >= one_off_min_senders` (включно). Самі порівняння роблять
-`hubs.criteria` і `hubs.report`; тут лише значення й межі їхньої коректності.
+Правило порогу (FR-002-14, research R-9, R-22) — спільне для всіх критеріїв: рівно поріг НІКОЛИ не спрацьовує,
+нерівність строга; напрямок — властивість критерію. `degree_threshold`, `one_off_senders_share` і
+`giant_component_warn_share` — СТРОГО БІЛЬШЕ (`>`; багато — хаб). `dust_amount_lamports` (критерій `dust_fanout`,
+FR-002-22) — СТРОГО МЕНШЕ (`<`; мало — пил): хаб, якщо верхня медіана SOL-сум ребер до різних покупців менша за
+поріг; значення 1 вимикає критерій (жодна сума ребра не менша за 1), окремого перемикача немає. Передумови —
+не пороги хаба, а умови застосовності критерію, «>=» включно: `one_off_min_senders` (`unique_senders >=`) і
+`dust_min_fanout` (`buyer_fanout >=`). Самі порівняння роблять `hubs.criteria` і `hubs.report`; тут лише значення
+й межі їхньої коректності (`dust_amount_lamports >= 1`, `dust_min_fanout >= 2` — ціле, не bool).
 
 Список адрес (FR-002-12): файл відсутній або нечитабельний (`OSError`) чи шлях не заданий → `lists=None`
 (`HubConfig.lists_applied == False`) — це умова виконання, не помилка. Файл присутній, але вміст некоректний
@@ -89,6 +92,8 @@ class HubThresholds:
     giant_component_warn_share: float
     prune_off_curve: bool
     prune_ingest_high_degree: bool
+    dust_amount_lamports: int  # FR-002-22, research R-22; >= 1 (1 вимикає критерій)
+    dust_min_fanout: int  # передумова dust_fanout, >= 2
 
 
 @dataclass(frozen=True)
@@ -482,6 +487,8 @@ def _parse_thresholds(raw: Any) -> HubThresholds:
         giant_component_warn_share=_share(data, "giant_component_warn_share", lo_inclusive=False),
         prune_off_curve=_bool(data, "prune_off_curve"),
         prune_ingest_high_degree=_bool(data, "prune_ingest_high_degree"),
+        dust_amount_lamports=_int(data, "dust_amount_lamports", 1),
+        dust_min_fanout=_int(data, "dust_min_fanout", 2),
     )
 
 

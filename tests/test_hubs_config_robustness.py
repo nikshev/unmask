@@ -12,6 +12,7 @@ PyYAML кидає на межі розбору, → `ConfigError("<path>: invali
 """
 
 import random
+import re
 import time
 from pathlib import Path
 
@@ -42,6 +43,8 @@ THRESHOLD_FIELDS = (
     "giant_component_warn_share",
     "prune_off_curve",
     "prune_ingest_high_degree",
+    "dust_amount_lamports",  # T-054: hubs.yaml v2
+    "dust_min_fanout",
 )
 # Відтворення ревʼю №2, п.1: цілі, що PyYAML розбирає, а int→str (ліміт 4300 цифр) потім падає.
 HUGE_NUMBERS = {
@@ -436,8 +439,11 @@ def test_non_canonicalizable_or_odd_content_is_config_error_or_digest(tmp_path, 
 
 
 def test_nul_byte_is_config_error(tmp_path):
-    for src in (THRESHOLDS, LISTS):
-        bad = _write(tmp_path, src.name, src.read_bytes().replace(b"version: 1", b"version: 1\x00", 1))
+    # версії поставлених файлів різні (hubs.yaml v2 з T-054, hub_addresses.yaml v1)
+    for src, line in ((THRESHOLDS, b"version: 2"), (LISTS, b"version: 1")):
+        data = src.read_bytes()
+        assert data.count(b"\n" + line + b"\n") == 1  # інакше заміна нижче мовчки нічого б не зробила
+        bad = _write(tmp_path, src.name, data.replace(line, line + b"\x00", 1))
         _all_reject(bad, lists=src is LISTS)
 
 
@@ -500,7 +506,9 @@ def _mutate(rng: random.Random, data: bytes) -> bytes:
         return data + b"\n" + _laughs(rng.randint(1, 6)).encode()
     if kind == 8:  # глибока вкладеність
         n = rng.randint(1, 60)
-        return data.replace(b"version: 1", b"version: " + b"[" * n + b"1" + b"]" * n, 1)
+        # будь-яка версія (hubs.yaml v2, hub_addresses.yaml v1): із літералом `version: 1` заміна на v2 мовчки
+        # перестала б щось робити й перебір глибини для hubs.yaml вироджувався б
+        return re.sub(rb"version: (\d+)", lambda m: b"version: " + b"[" * n + m.group(1) + b"]" * n, data, count=1)
     pos = rng.randrange(len(data) + 1)  # вставка YAML-сміття
     return data[:pos] + rng.choice(_JUNK) * rng.randint(1, 3) + data[pos:]
 

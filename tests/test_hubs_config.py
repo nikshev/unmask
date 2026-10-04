@@ -1,9 +1,13 @@
-# verifies: FR-002-08, FR-002-13, FR-002-14
+# verifies: FR-002-08, FR-002-13, FR-002-14, FR-002-22
 """Версіонована конфігурація відсікання хабів (T-023): `config/hubs.yaml`, `config/hub_addresses.yaml`,
 `hubs.config.load_hub_config`. Контракт — specs/002-funding-graph-hub-pruning/contracts/config-hubs.md.
 
 Мережі немає. Дайджест-захист журналу (`content_digest`, `changelog_entries`) — T-024; тут лише перевірка, що
-журнал має розділи й запис версії 1 з коректним sha256 (локальний допоміжний дайджест за правилом R-14).
+журнал має розділи й записи з коректним sha256 (локальний допоміжний дайджест за правилом R-14).
+
+T-054 (FR-002-22, research R-22, `calibration.md`): `config/hubs.yaml` — версія 2 з `dust_amount_lamports`
+(int ≥ 1) і `dust_min_fanout` (int ≥ 2). Golden-значення нижче (`BASE_THRESHOLDS`, перевірки поставних файлів і
+журналу) свідомо оновлено з v1 на v2; запис журналу версії 1 — історичний, його sha256 незмінний.
 """
 
 import dataclasses
@@ -15,6 +19,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from unmask.graph.model import ThresholdsSnapshot
 from unmask.hubs import config as hubs_config
 from unmask.hubs.config import (
     AddressLists,
@@ -45,14 +50,21 @@ TOKEN = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 JUPITER = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
 
 BASE_THRESHOLDS = {
-    "version": 1,
+    "version": 2,
     "degree_threshold": 100,
     "one_off_senders_share": 0.8,
     "one_off_min_senders": 10,
     "giant_component_warn_share": 0.5,
     "prune_off_curve": True,
     "prune_ingest_high_degree": True,
+    "dust_amount_lamports": 1_000_000,  # 0,001 SOL — calibration.md, research R-22
+    "dust_min_fanout": 5,
 }
+DUST_FIELDS = ("dust_amount_lamports", "dust_min_fanout")
+
+# Незалежний еталон: sha256 запису 1 журналу (T-023), обчислений із канонічного вмісту v1. Запис історичний —
+# T-054 його не змінює; v1 = v2 без `dust_*` і з `version: 1` (решта значень v1 без змін).
+HUBS_V1_SHA = "c410d677279d02687928b12fcf490e4685007c0bb499e12c2fbfb1ca6d25c63c"
 
 
 def _base_lists() -> dict:
@@ -93,20 +105,63 @@ def _digest(path: Path) -> str:
 # --- поставні файли ----------------------------------------------------------------------------------
 
 
-def test_shipped_thresholds_load_with_version_1_and_documented_values():
+def test_shipped_thresholds_load_with_version_2_and_documented_values():
     cfg = load_hub_config(THRESHOLDS, None)
 
     assert isinstance(cfg, HubConfig)
     t = cfg.thresholds
     assert isinstance(t, HubThresholds)
-    assert t.version == 1
+    assert t.version == 2
     assert t.degree_threshold == 100
     assert t.one_off_senders_share == 0.8
     assert t.one_off_min_senders == 10
     assert t.giant_component_warn_share == 0.5
     assert t.prune_off_curve is True
     assert t.prune_ingest_high_degree is True
+    assert t.dust_amount_lamports == 1_000_000 and type(t.dust_amount_lamports) is int
+    assert t.dust_min_fanout == 5 and type(t.dust_min_fanout) is int
+    assert dataclasses.asdict(t) == BASE_THRESHOLDS  # рівно дев'ять полів, жодного зайвого
     assert cfg.lists is None  # шлях до списків не передано
+
+
+def test_hub_thresholds_match_thresholds_snapshot_fields():
+    # Знімок у метаданих результату (T-055) — усі поля HubThresholds, крім version, у тому самому порядку.
+    names = [f.name for f in dataclasses.fields(HubThresholds)]
+    snapshot_names = [f.name for f in dataclasses.fields(ThresholdsSnapshot)]
+    assert names == ["version", *snapshot_names]
+    assert len(snapshot_names) == 8
+    t = load_hub_config(THRESHOLDS, None).thresholds
+    snap = ThresholdsSnapshot(**{k: v for k, v in dataclasses.asdict(t).items() if k != "version"})
+    assert (snap.dust_amount_lamports, snap.dust_min_fanout) == (1_000_000, 5)
+
+
+def test_v1_file_without_dust_fields_is_rejected_naming_the_field(tmp_path):
+    v1 = {k: v for k, v in BASE_THRESHOLDS.items() if k not in DUST_FIELDS} | {"version": 1}
+    path = _write(tmp_path, "hubs.yaml", v1)
+    # копія v1 — це рівно історичний вміст запису 1 журналу: решта значень v1 у v2 не змінились
+    assert _digest(path) == HUBS_V1_SHA
+    with pytest.raises(ConfigError, match=r"^dust_amount_lamports: missing required field$"):
+        load_hub_config(path, None)
+    only_amount = _write(tmp_path, "hubs.yaml", {**v1, "dust_amount_lamports": 1_000_000})
+    with pytest.raises(ConfigError, match=r"^dust_min_fanout: missing required field$"):
+        load_hub_config(only_amount, None)
+
+
+def test_dust_amount_one_loads_as_valid_off_switch(tmp_path):
+    # 1 — найменше допустиме значення; вимикає критерій (жодна сума ребра не < 1). Окремого перемикача немає.
+    t = load_hub_config(_thresholds(tmp_path, dust_amount_lamports=1), None).thresholds
+    assert t.dust_amount_lamports == 1
+    assert not hasattr(t, "prune_dust_fanout")
+    with pytest.raises(ConfigError, match=r"^dust_amount_lamports: must be >= 1$"):
+        load_hub_config(_thresholds(tmp_path, dust_amount_lamports=0), None)
+
+
+@pytest.mark.parametrize("value", [1, 0, -5])
+def test_dust_min_fanout_below_two_is_config_error(tmp_path, value):
+    with pytest.raises(ConfigError, match=r"^dust_min_fanout: must be >= 2$"):
+        load_hub_config(_thresholds(tmp_path, dust_min_fanout=value), None)
+    # межа включна: 2 — найменший осмислений fan-out (медіана щонайменше двох значень)
+    assert load_hub_config(_thresholds(tmp_path, dust_min_fanout=2), None).thresholds.dust_min_fanout == 2
 
 
 def test_shipped_address_lists_load_with_seven_categories_and_version_1():
@@ -154,6 +209,15 @@ def test_shipped_files_state_strictly_greater_rule_and_min_senders_precondition(
     assert "Рівно поріг — не хаб" in text
     assert "включно" in text  # one_off_min_senders — передумова «>=», не поріг
     assert "СТРОГО БІЛЬШЕ" in (hubs_config.__doc__ or "")
+    # Напрямковий варіант правила (R-22): dust_amount_lamports — «СТРОГО МЕНШЕ», передумова dust_min_fanout — «>=».
+    assert any("dust_amount_lamports" in ln and "СТРОГО МЕНШЕ" in ln for ln in text.splitlines())
+    assert "СТРОГО МЕНШЕ" in (hubs_config.__doc__ or "")
+    assert "dust_min_fanout" in (hubs_config.__doc__ or "")
+    dust_comment = text[text.index("dust_amount_lamports:"):text.index("dust_min_fanout:")]
+    assert "Рівно поріг — не хаб" in dust_comment
+    assert "вимикає" in dust_comment  # значення 1 — вимикач, задокументований біля поля
+    fanout_comment = text[text.index("dust_min_fanout:"):]
+    assert "ПЕРЕДУМОВА" in fanout_comment and ">= 5 (включно)" in fanout_comment
 
 
 def test_shipped_changelog_has_hubs_sections_with_matching_sha256_and_keeps_ingest_entries():
@@ -175,18 +239,65 @@ def test_shipped_changelog_has_hubs_sections_with_matching_sha256_and_keeps_inge
     ingest = section("ingest.yaml")
     assert "## 1 — 2026-10-03" in ingest and "## 2 — 2026-10-04" in ingest
 
-    for name, path in (("hubs.yaml", THRESHOLDS), ("hub_addresses.yaml", LISTS)):
-        body = section(name)
-        assert [ln for ln in body.splitlines() if ln.startswith("## ")][0].startswith("## 1 — ")
-        last = [ln for ln in body.splitlines() if ln.strip()][-1]
-        assert last == f"sha256: {_digest(path)}"
-    hubs_body = section("hubs.yaml")
-    assert "не калібровано" in hubs_body
+    addresses_body = section("hub_addresses.yaml")
+    assert [ln for ln in addresses_body.splitlines() if ln.startswith("## ")][0].startswith("## 1 — ")
+    assert [ln for ln in addresses_body.splitlines() if ln.strip()][-1] == f"sha256: {_digest(LISTS)}"
+
+    # hubs.yaml: ОБИДВА записи — 1 (історичний, sha незмінний) і 2 (поточний файл)
+    entries = _hubs_entries(section("hubs.yaml"))
+    assert [header.split(" — ")[0] for header, _ in entries] == ["## 1", "## 2"]
+    (_, body1), (_, body2) = entries
+    assert body1[-1] == f"sha256: {HUBS_V1_SHA}"
+    assert body2[-1] == f"sha256: {_digest(THRESHOLDS)}"
+    entry1 = "\n".join(body1)
+    assert "не калібровано" in entry1
     for fragment in ("degree_threshold=100", "one_off_senders_share=0.8", "one_off_min_senders=10",
                      "giant_component_warn_share=0.5", "prune_off_curve=true", "prune_ingest_high_degree=true"):
-        assert fragment in hubs_body
-    addresses_body = section("hub_addresses.yaml")
+        assert fragment in entry1
+    entry2 = "\n".join(body2)
+    for fragment in ("dust_amount_lamports=1000000", "dust_min_fanout=5", "calibration.md"):
+        assert fragment in entry2
     assert "exchanges(0), market_makers(0)" in addresses_body
+
+
+def _hubs_entries(body: str) -> list[tuple[str, list[str]]]:
+    """Записи розділу: (заголовок `## …`, непорожні рядки тіла)."""
+    entries: list[tuple[str, list[str]]] = []
+    for line in body.splitlines():
+        if line.startswith("## "):
+            entries.append((line, []))
+        elif line.strip():
+            assert entries, "текст до першого запису"
+            entries[-1][1].append(line)
+    return entries
+
+
+def _changelog_section(name: str) -> str:
+    lines = CHANGELOG.read_text(encoding="utf-8").splitlines()
+    start = lines.index(f"# config/{name}")
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("# ")), len(lines))
+    return "\n".join(lines[start + 1 : end])
+
+
+def test_shipped_changelog_entry_2_cites_calibration_and_keeps_entry_1_digest():
+    entries = _hubs_entries(_changelog_section("hubs.yaml"))
+    assert len(entries) == 2
+    (head1, body1), (head2, body2) = entries
+    assert head1 == "## 1 — 2026-10-04"  # історичний запис T-023: заголовок, текст і sha не змінено
+    assert body1 == [
+        "Початкова версія, не калібровано на реальних токенах: degree_threshold=100, one_off_senders_share=0.8,",
+        "one_off_min_senders=10, giant_component_warn_share=0.5, prune_off_curve=true, prune_ingest_high_degree=true.",
+        "Правило порогу — строго «більше» (рівно поріг — не хаб), одне для всіх критеріїв; one_off_min_senders — передумова «>=».",
+        "Обґрунтування — specs/002-funding-graph-hub-pruning/research.md R-12.",
+        f"sha256: {HUBS_V1_SHA}",
+    ]
+    assert head2.startswith("## 2 — 2026-")
+    text2 = " ".join(body2)
+    # що змінено, чому, на яких токенах (контракт config-hubs.md: «Кожен наступний запис…»)
+    for fragment in ("9 реальних токенах", "calibration.md", "FR-002-22", "R-22", "dust_amount_lamports=1000000",
+                     "СТРОГО МЕНША", "dust_min_fanout=5", "degree_threshold=100 лишено", "Решта значень v1 без змін"):
+        assert fragment in text2, fragment
+    assert body2[-1] == f"sha256: {_digest(THRESHOLDS)}"
 
 
 # --- кожне значення читається з YAML (тихих умовчань у коді немає) ------------------------------------
@@ -202,6 +313,8 @@ def test_shipped_changelog_has_hubs_sections_with_matching_sha256_and_keeps_inge
         ("giant_component_warn_share", 0.9),
         ("prune_off_curve", False),
         ("prune_ingest_high_degree", False),
+        ("dust_amount_lamports", 250_000),
+        ("dust_min_fanout", 7),
     ],
 )
 def test_each_threshold_round_trips_from_yaml(tmp_path, field, value):
@@ -223,6 +336,8 @@ def test_each_threshold_round_trips_from_yaml(tmp_path, field, value):
         ("giant_component_warn_share", 1),
         ("giant_component_warn_share", 0.0001),
         ("version", 1),
+        ("dust_amount_lamports", 1),
+        ("dust_min_fanout", 2),
     ],
 )
 def test_threshold_boundary_values_are_accepted(tmp_path, field, value):
@@ -261,6 +376,18 @@ INVALID_THRESHOLDS = [
     pytest.param({"one_off_senders_share": True}, "one_off_senders_share", id="share-bool"),
     pytest.param({"one_off_senders_share": math.nan}, "one_off_senders_share", id="share-nan"),
     pytest.param({"giant_component_warn_share": math.nan}, "giant_component_warn_share", id="warn-nan"),
+    # dust_* (T-054, R-22): ціле, не bool, межі `>= 1` і `>= 2`, обов'язкові
+    pytest.param({"dust_amount_lamports": 0}, "dust_amount_lamports", id="dust_amount=0"),
+    pytest.param({"dust_amount_lamports": -1}, "dust_amount_lamports", id="dust_amount=-1"),
+    pytest.param({"dust_amount_lamports": True}, "dust_amount_lamports", id="dust_amount=true"),
+    pytest.param({"dust_amount_lamports": 1000000.0}, "dust_amount_lamports", id="dust_amount-float"),
+    pytest.param({"dust_amount_lamports": "1000000"}, "dust_amount_lamports", id="dust_amount-str"),
+    pytest.param({"dust_min_fanout": 1}, "dust_min_fanout", id="dust_min_fanout=1"),
+    pytest.param({"dust_min_fanout": True}, "dust_min_fanout", id="dust_min_fanout=true"),
+    pytest.param({"dust_min_fanout": 5.0}, "dust_min_fanout", id="dust_min_fanout-float"),
+    pytest.param("MISSING:dust_amount_lamports", "dust_amount_lamports", id="missing-dust_amount"),
+    pytest.param("MISSING:dust_min_fanout", "dust_min_fanout", id="missing-dust_min_fanout"),
+    pytest.param({"prune_dust_fanout": True}, "prune_dust_fanout", id="unknown-dust-switch"),
 ]
 
 
@@ -334,7 +461,7 @@ def test_missing_lists_file_yields_lists_none_not_error(tmp_path):
 
     assert cfg.lists is None
     assert cfg.lists_applied is False  # FR-002-12: недоступний список явно позначений
-    assert cfg.thresholds.version == 1
+    assert cfg.thresholds.version == 2
 
 
 def test_lists_path_none_and_unreadable_file_yield_lists_none(tmp_path):

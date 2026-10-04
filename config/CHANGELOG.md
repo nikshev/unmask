@@ -7,6 +7,16 @@ one_off_min_senders=10, giant_component_warn_share=0.5, prune_off_curve=true, pr
 Обґрунтування — specs/002-funding-graph-hub-pruning/research.md R-12.
 sha256: c410d677279d02687928b12fcf490e4685007c0bb499e12c2fbfb1ca6d25c63c
 
+## 2 — 2026-10-04
+Калібрування на 9 реальних токенах pump.fun (5 інсайдерських за MELT, 4 чисті; Helius, N=30, depth=2, кап 30;
+specs/002-funding-graph-hub-pruning/calibration.md). Додано критерій dust_fanout (FR-002-22, research R-22):
+dust_amount_lamports=1000000 (0,001 SOL; хаб, якщо медіана SOL-сум до різних покупців СТРОГО МЕНША),
+dust_min_fanout=5 (передумова, включно). Чому: пилові джерела (fan-out 5–23, медіана < 0,001 SOL) є в кожному
+токені й склеюють до 21/30 покупців; жоден критерій v1 їх не ловить. degree_threshold=100 лишено свідомо: на цих
+даних неактивний (макс. ступінь 45), зниження до ~30 відсікло б справжнього фінансиста ins1 (ступінь 45, медіана
+≥ 0,7 SOL). Решта значень v1 без змін. Пил/фінансист розділяє сума, не ступінь.
+sha256: fdf65bb5369e4e40e629ca4cd45f4952466ee21447ae8bbe79a4ee0035f45409
+
 # config/hub_addresses.yaml
 
 ## 1 — 2026-10-04
