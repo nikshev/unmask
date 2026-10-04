@@ -1,4 +1,4 @@
-# impl: FR-001-01, FR-001-02, FR-001-09, FR-001-10, FR-001-13, FR-001-14, FR-001-16
+# impl: FR-001-01, FR-001-02, FR-001-09, FR-001-10, FR-001-13, FR-001-14, FR-001-16, FR-002-19
 """Стан збору та оркестрація (data-model.md, «Стан збору і кеш»; contracts/ingest-service.md, крок 5).
 
 Що робить:
@@ -8,6 +8,13 @@
   кешу; у результат (`IngestResult`) не потрапляє.
 - `collect(state, source, config, clock) -> IngestResult`: `enumerate_buyers` → `expand_level` для
   глибин 1…`funding_depth` → `Completeness.derive(state.missing, buyers_completeness)` → `RunMetadata`.
+
+Делеговані купівлі (swap-and-send, фіча 002, T-046; research R-3, R-4): `enumerate_buyers` на тих самих
+розібраних транзакціях mint заповнює `state.delegated_by_signature` (перевиводиться з нуля на кожному
+проході, як `purchases_by_wallet`), а `collect` будує `IngestResult.delegated` лише через
+`DelegatedAnalysis.derive(links, unpaired, buyers_completeness)` — повнота аналізу та сама, що в перелічення
+покупців (одне джерело істини, FR-002-19), тож колектор `not_analyzed` ніколи не емітує. Склад, порядок і
+`rank` покупців, `transactions_scanned` і журнал звернень від цього не змінюються (FR-002-17).
 
 Статус повноти ніколи не задається тут вручну: його виводить `Completeness.derive` з даних —
 `complete` лише коли `missing` порожній **і** перелічення покупців повне (FR-001-09/10, принцип V).
@@ -84,12 +91,15 @@ from unmask.ingest.budget import Deadline
 from unmask.ingest.model import (
     Buyer,
     Completeness,
+    DelegatedAnalysis,
+    DelegatedLink,
     IngestResult,
     MissingHistory,
     MissingReason,
     RunMetadata,
     Transfer,
     UnexpandedNode,
+    UnpairedCandidate,
     buyer_sort_key,
     transfer_sort_key,
 )
@@ -115,6 +125,9 @@ class CollectionState:
     mint_signatures: list[MintSignature] = field(default_factory=list)
     mint_history_exhausted: bool = False
     purchases_by_wallet: dict[str, Purchase] = field(default_factory=dict)
+    # T-046: підпис транзакції mint -> непорожній кортеж результатів `delegated.detect_delegated` (frozen);
+    # перевиводиться на кожному `enumerate_buyers` з тих самих транзакцій, що й `purchases_by_wallet` (R-4)
+    delegated_by_signature: dict[str, tuple[DelegatedLink | UnpairedCandidate, ...]] = field(default_factory=dict)
     buyers: tuple[Buyer, ...] = ()
     # BFS фінансування (R-1): глибина -> {гаманець: підпис-межа}
     frontier_by_depth: dict[int, dict[str, str]] = field(default_factory=dict)
@@ -157,6 +170,12 @@ def collect(state: CollectionState, source: RpcSource, config: IngestConfig, clo
         expand_level(source, state, depth, config, deadline)
 
     buyers = tuple(sorted(state.buyers, key=buyer_sort_key))
+    found = [item for items in state.delegated_by_signature.values() for item in items]
+    delegated = DelegatedAnalysis.derive(  # порядок і повнота — у derive (R-3 п. 5)
+        [i for i in found if isinstance(i, DelegatedLink)],
+        [i for i in found if isinstance(i, UnpairedCandidate)],
+        buyers_completeness,
+    )
     metadata = RunMetadata(
         mint=state.mint,
         analyzed_at=analyzed_at,
@@ -181,6 +200,7 @@ def collect(state: CollectionState, source: RpcSource, config: IngestConfig, clo
         buyers=buyers,
         transfers=tuple(sorted(state.transfers.values(), key=transfer_sort_key)),
         unexpanded=tuple(sorted(state.unexpanded, key=lambda u: (u.depth, u.wallet))),
+        delegated=delegated,
     )
 
 

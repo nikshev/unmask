@@ -1,4 +1,4 @@
-# impl: FR-001-12, FR-001-13
+# impl: FR-001-12, FR-001-13, FR-002-17
 """Дворівневий кеш результатів у пам'яті процесу (data-model.md, «`ResultCache`»).
 
 Що робить: за адресою mint тримає два незалежні сховища.
@@ -20,7 +20,8 @@
 КОНТЕЙНЕРИ стану (dict/list/set верхнього рівня й вкладені словники `frontier_by_depth`), а значення
 ділиться між копіями. Це коректно, бо значення незмінні — ІНВАРІАНТ, який перевіряє тест
 (`tests/test_resume.py::test_collection_state_values_are_immutable`): `ParsedTx`, `Transfer`,
-`Purchase`, `Buyer`, `MissingHistory`, `UnexpandedNode`, а також ключі й знімки `scan_memo`
+`Purchase`, `Buyer`, `MissingHistory`, `UnexpandedNode`, кортежі `DelegatedLink`/`UnpairedCandidate`
+(`delegated_by_signature`, T-046), а також ключі й знімки `scan_memo`
 (`funding.ScanKey`, `HistoryScan`, `TokenAccountsListing`, T-022) — frozen-дата-класи, чиї поля — кортежі,
 рядки, числа, enum'и або такі самі frozen-об'єкти. Єдиний виняток — `err` у записах
 `mint_signatures`: це сирий JSON від RPC (dict/list), тож він копіюється глибоко (лише коли не
@@ -68,6 +69,7 @@ _FIELD_COPY: dict[str, Callable[[Any], Any]] = {
     "mint_signatures": _mint_signatures,
     "mint_history_exhausted": _same,
     "purchases_by_wallet": dict,
+    "delegated_by_signature": dict,  # значення — кортежі frozen DelegatedLink/UnpairedCandidate (T-046)
     "buyers": _same,
     "frontier_by_depth": lambda by_depth: {depth: dict(level) for depth, level in by_depth.items()},
     "expanded": set,

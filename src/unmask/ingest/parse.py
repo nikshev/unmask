@@ -1,4 +1,4 @@
-# impl: FR-001-03, FR-001-04, FR-001-06, FR-001-09
+# impl: FR-001-03, FR-001-04, FR-001-06, FR-001-09, FR-002-19
 """Розбір сирої транзакції (`getTransaction`, jsonParsed) у `ParsedTx` або `CorruptRecord`.
 
 Що робить: витягує вхідні перекази (доказ FR-001-06) з інструкцій верхнього рівня й
@@ -59,7 +59,9 @@ WSOL свопу), не потрапляє ні в pre-, ні в postTokenBalance
 Пошкодження (T-009, принцип V): `parse_transaction` не кидає виняток і не пропускає
 мовчки, а повертає `CorruptRecord(signature, reason, detail, partial)`, якщо немає
 підпису, `meta`, `slot` чи `accountKeys`; ціле поле (сума, slot, blockTime, fee,
-баланси) не є точним цілим; бракує полів у розпізнаній структурі (`malformed`); або
+баланси) не є точним цілим; бракує полів у розпізнаній структурі (`malformed`); масиви
+`pre/postBalances` не тієї довжини, що `accountKeys`, чи `accountIndex` токен-балансу поза ключами
+(`malformed`, T-046: інакше дельти рахувались би по обрізаних `zip` масивах); або
 `unresolved` непорожній (`partial` — `ParsedTx` з розібраними сусідами й переліком
 `unresolved`, щоб нічого не губилось). `None` (транзакцію не отримано) — не пошкоджений
 запис, а `unavailable`; його трактує викликач, тут це `TypeError`.
@@ -585,6 +587,23 @@ def parse_transaction(raw: Mapping[str, Any]) -> ParsedTx | CorruptRecord:
     return tx
 
 
+def _check_alignment(account_keys: tuple[str, ...], pre_balances: tuple[int, ...], post_balances: tuple[int, ...],
+                     token_balances: tuple[TokenBalance, ...]) -> None:
+    """Масиви балансів індексуються `accountKeys`: різні довжини чи `accountIndex` поза ключами — `malformed`.
+
+    Без цієї перевірки `zip` у `sol_delta`/`created_accounts_lamports` мовчки обрізав би рахунки, а
+    токен-баланс із чужим індексом приписав би власнику не той рахунок: правило купівлі й правило
+    делегованої купівлі (T-045/T-046) працювали б на спотворених дельтах замість явної неповноти."""
+    n = len(account_keys)
+    if len(pre_balances) != n or len(post_balances) != n:
+        raise _Corrupt("malformed", f"accountKeys={n}, preBalances={len(pre_balances)}, "
+                                    f"postBalances={len(post_balances)}: lengths differ")
+    for b in token_balances:
+        if not 0 <= b.account_index < n:
+            raise _Corrupt("malformed", f"token balance accountIndex {b.account_index} is outside "
+                                        f"accountKeys (0..{n - 1})")
+
+
 def _parse(raw: Mapping[str, Any], signature: str) -> ParsedTx:
     meta = raw["meta"]
     message = raw["transaction"]["message"]
@@ -637,18 +656,24 @@ def _parse(raw: Mapping[str, Any], signature: str) -> ParsedTx:
                 **common, sender=sender, receiver=receiver, asset=asset, amount=amount, decimals=decimals,
             ))
 
+    # Порядок перевірок як до T-046 (fee, programs, баланси); узгодженість масивів — після них.
+    fee = _raw_int("fee", meta["fee"])
+    programs = tuple(ix["programId"] for ix in message["instructions"])
+    pre_balances = tuple(_raw_int("preBalances", b) for b in meta["preBalances"])
+    post_balances = tuple(_raw_int("postBalances", b) for b in meta["postBalances"])
+    _check_alignment(account_keys, pre_balances, post_balances, pre_tokens + post_tokens)
     return ParsedTx(
         signature=signature,
         slot=slot,
         block_time=block_time,
         failed=failed,
         fee_payer=account_keys[0],
-        fee=_raw_int("fee", meta["fee"]),
-        programs=tuple(ix["programId"] for ix in message["instructions"]),
+        fee=fee,
+        programs=programs,
         transfers=tuple(transfers),
         account_keys=account_keys,
-        pre_balances=tuple(_raw_int("preBalances", b) for b in meta["preBalances"]),
-        post_balances=tuple(_raw_int("postBalances", b) for b in meta["postBalances"]),
+        pre_balances=pre_balances,
+        post_balances=post_balances,
         unresolved=tuple(unresolved),
         pre_token_balances=pre_tokens,
         post_token_balances=post_tokens,

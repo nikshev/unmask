@@ -1,4 +1,4 @@
-# impl: FR-001-11, FR-001-12, FR-001-13
+# impl: FR-001-11, FR-001-12, FR-001-13, FR-002-19
 """Публічний вхід фічі 001: `IngestService` (contracts/ingest-service.md).
 
 Що робить: `IngestService(config, source, clock, cache).collect(mint) -> IngestOutcome` — один
@@ -76,6 +76,7 @@ from unmask.ingest.model import (
     BuyersCompleteness,
     Completeness,
     CompletenessStatus,
+    DelegatedAnalysis,
     IngestOutcome,
     IngestResult,
     MissingReason,
@@ -174,7 +175,9 @@ class IngestService:
         """Результат прогону, обірваного збоєм джерела на кроці 4: нічого не зібрано, `buyers.complete=false`.
 
         Будується напряму (не через `collect`): колектор не має що робити без перевіреного токена, а
-        порожній результат із причиною в `buyers` — рівно те, що сталося. Статус — лише з `derive`."""
+        порожній результат із причиною в `buyers` — рівно те, що сталося. Статус — лише з `derive`;
+        `delegated` — `DelegatedAnalysis.derive((), (), failure)`: неповний з тією самою причиною, а не
+        `not_analyzed` і не «зв'язків немає» (FR-002-19, research R-3 п. 4)."""
         cfg = self._config
         metadata = RunMetadata(
             mint=mint,
@@ -200,6 +203,7 @@ class IngestService:
             buyers=(),
             transfers=(),
             unexpanded=(),
+            delegated=DelegatedAnalysis.derive((), (), failure),
         )
 
     # --- Кроки 1 і 4 (FR-001-11) ---------------------------------------------------------------

@@ -1,4 +1,4 @@
-# impl: FR-001-01, FR-001-02, FR-001-09, FR-001-10, FR-001-13, FR-001-16
+# impl: FR-001-01, FR-001-02, FR-001-09, FR-001-10, FR-001-13, FR-001-16, FR-002-17
 """Перші N покупців токена з курсором (research R-6, R-7).
 
 Що робить: `enumerate_buyers(source, mint, state, config, deadline) -> BuyersCompleteness`
@@ -39,6 +39,13 @@
 перевиводиться з нуля (кеш відтворюється, решта дозапитується), тож повтор після збою дає ту саму
 вибірку, що й свіжий прогін (T-014).
 
+Делегована купівля (фіча 002, T-046; research R-4): кожна транзакція, яку бачить правило купівлі (і
+запитана, і з `state.tx_cache`, і `CorruptRecord.partial`), іде також у `delegated.detect_delegated`;
+непорожній результат пишеться в `state.delegated_by_signature[signature]`. Поле скидається на початку
+кожного проходу разом із `purchases_by_wallet`, тож resume == свіжому прогону. На відбір покупців це не
+впливає: `purchases_by_wallet`, ключі R-6, `cut_slot`, `transactions_scanned` і запити — ті самі
+(отримувач делегованої купівлі не є покупцем і місця в N не займає, FR-002-17).
+
 Запити транзакцій ліниві: пакет (до `rpc.tx_batch_size` ще не закешованих підписів від поточного, а після
 досягнення N — лише зі слота N-го покупця) запитується, лише коли розбір дійшов до незакешованого
 підпису. У свіжому прогоні пакети ті самі, що й «вікно `tx_batch_size` від поточного»; на повторі,
@@ -57,7 +64,8 @@
 `budget_exhausted` навіть якщо раніше була інша проблема (перелічення незавершене — головний факт;
 попередні проблеми лишаються в `detail`). Повтор добирає з курсора й кешу, як після збою.
 
-Залежить від: `rpc.protocol` (джерело, винятки, `Deadline`), `budget`, `parse`, `purchases`, `model`, `collector.CollectionState`.
+Залежить від: `rpc.protocol` (джерело, винятки, `Deadline`), `budget`, `parse`, `purchases`, `delegated`, `model`,
+`collector.CollectionState`.
 """
 
 from __future__ import annotations
@@ -67,6 +75,7 @@ from typing import Iterable
 from unmask.ingest.budget import BudgetExhausted, deadline_timeouts, ensure_time
 from unmask.ingest.collector import CollectionState
 from unmask.ingest.config import IngestConfig, require_tx_batch_size
+from unmask.ingest.delegated import detect_delegated
 from unmask.ingest.model import Buyer, BuyersCompleteness, MissingReason
 from unmask.ingest.parse import CorruptRecord, ParsedTx, parse_transaction
 from unmask.ingest.purchases import Purchase, detect_purchases
@@ -133,6 +142,10 @@ def _record_first(state: CollectionState, parsed: ParsedTx, mint: str) -> None:
         known = state.purchases_by_wallet.get(purchase.wallet)
         if known is None or (purchase.slot, purchase.signature) < (known.slot, known.signature):
             state.purchases_by_wallet[purchase.wallet] = purchase
+    # Та сама транзакція — правилом делегованої купівлі (T-046); на purchases_by_wallet не впливає.
+    delegated = detect_delegated(parsed, mint)
+    if delegated:
+        state.delegated_by_signature[parsed.signature] = tuple(delegated)
 
 
 def _scan(state: CollectionState, mint: str, sig: str, raw: object) -> tuple[MissingReason, str] | None:
@@ -191,6 +204,7 @@ def enumerate_buyers(source: RpcSource, mint: str, state: CollectionState, confi
     # повторний виклик не запитує їх знову. Купівлі минулого проходу не переносяться: інакше вони
     # передчасно «заповнюють» N, і раніший покупець, недоступний минулого разу, у вибірку не потрапить.
     state.purchases_by_wallet = {}
+    state.delegated_by_signature = {}  # T-046: так само перевиводиться з тих самих транзакцій (R-4)
     problems: list[tuple[MissingReason, str]] = []  # у порядку обробки
     cut_slot: int | None = None  # слот, у якому знайдено N-го покупця
     fetched: dict[str, object] = {}
