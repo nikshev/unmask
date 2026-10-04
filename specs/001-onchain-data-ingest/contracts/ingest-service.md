@@ -29,7 +29,7 @@ def collect(self, mint: str) -> IngestOutcome   # IngestResult | Rejection
 
 Гарантії:
 
-- `collect` **ніколи не піднімає** виняток через дані (адреса, відсутній токен, збій джерела, пошкоджені записи, вичерпаний бюджет) — усе це відображається у `Rejection` або у `completeness`. Винятки можливі лише через дефект програми (`CacheInvariantError`, `ConfigError`) — вони мають падати гучно.
+- `collect` **ніколи не піднімає** виняток через дані (адреса, відсутній токен, збій джерела, пошкоджені записи, вичерпаний бюджет) — усе це відображається у `Rejection` або у `completeness`. Винятки можливі лише через дефект програми (`CacheInvariantError`, `ConfigError`, а також будь-який виняток джерела поза ієрархією `RpcError` — дефект адаптера) — вони мають падати гучно й не маскуватися ні під `Rejection`, ні під `incomplete`.
 - Два виклики з однаковими `config`, `source`-даними й `clock` дають результати, що відрізняються лише `metadata.analyzed_at`, `elapsed_seconds`, `rpc_calls`, `served_from_cache`, `resumed` (детермінізм, FR-001-02).
 - Виклик `collect` блокує потік не довше `time_budget_seconds` + один `rpc.request_timeout_seconds` (хвіст поточного запиту).
 

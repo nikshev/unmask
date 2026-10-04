@@ -8,7 +8,9 @@
   відкидається — сервіс ніколи не передає його в `collect` (там це `ValueError`);
 - крок 6: `complete` → `put_complete` (partial чиститься), `incomplete` → лише `put_partial`;
   результат повертається в обох випадках із чесним статусом.
-Кроки 1 і 4 (адреса, існування токена) — T-019, тут не перевіряються. Мережі немає: лише
+Кроки 1 і 4 (адреса, існування токена) перевіряє `tests/test_service_rejections.py` (T-019); тут
+важливо лише, що кожен шлях, який не віддається з кешу, робить рівно одне звернення `getAccountInfo`
+перед збором (журнал сервісу = `[getAccountInfo(mint)] + журнал колектора`). Мережі немає: лише
 `FixtureRpcSource` і `FakeClock`.
 """
 
@@ -220,7 +222,9 @@ def test_stale_partial_is_discarded_without_value_error_and_equals_fresh():
     assert _stable(result) == _stable(fresh)
     assert result.metadata.config_version == new_cfg.version
     assert result.metadata.resumed is False
-    assert source.calls == fresh_calls  # збір заново, нічого зі старого стану не використано
+    # збір заново, нічого зі старого стану не використано; перед збором — рівно одне звернення
+    # кроку 4 (існування токена, T-019), якого колектор сам не робить
+    assert source.calls == [("getAccountInfo", {"address": M})] + fresh_calls
     assert cache.get_partial(M) is None and cache.get_complete(M) == result
 
 

@@ -50,7 +50,10 @@ len(buyers)`; `source = source.name`; `analyzed_at = clock.wall()` на поча
 станом — гучний `ValueError` (дефект викликача, стани різних версій не змішуються).
 
 Бюджет часу (FR-001-16, T-015): `budget.Deadline(clock, config.time_budget_seconds)` створюється на
-початку `collect` (відлік — від початку цього виклику; час до нього в бюджет не входить) і передається в
+початку `collect` (відлік — від початку цього виклику; час до нього в бюджет не входить), якщо викликач
+не передав готовий (`deadline=`, T-019: сервіс створює один дедлайн на свій прогін, і перевірка
+існування токена та збір ділять один бюджет; `elapsed_seconds`/`rpc_calls` тоді виправляє сервіс —
+колектор міряє лише власну частину), і передається в
 `enumerate_buyers` і кожен `expand_level`, а звідти — у кожен виклик джерела. Перевірка `expired()`
 стоїть перед КОЖНИМ зверненням до джерела (`budget.ensure_time`: сторінка історії, пакет транзакцій,
 токен-рахунки), тож після спливу звернень немає, а `RpcTimeout`, спричинений дедлайном, стає
@@ -120,8 +123,12 @@ class CollectionState:
     transactions_scanned: int = 0
 
 
-def collect(state: CollectionState, source: RpcSource, config: IngestConfig, clock: Clock) -> IngestResult:
-    """Зібрати покупців і їхнє фінансування в `state`; повернути результат із виведеною повнотою."""
+def collect(state: CollectionState, source: RpcSource, config: IngestConfig, clock: Clock, *,
+            deadline: Deadline | None = None) -> IngestResult:
+    """Зібрати покупців і їхнє фінансування в `state`; повернути результат із виведеною повнотою.
+
+    `deadline` — готовий бюджет викликача (сервіс, T-019: крок 4 і збір під одним бюджетом); `None` —
+    новий `Deadline(clock, config.time_budget_seconds)` від початку цього виклику (див. модуль)."""
     from unmask.ingest.buyers import enumerate_buyers  # цикл імпорту: buyers/funding імпортують
     from unmask.ingest.funding import expand_level      # CollectionState з цього модуля
 
@@ -133,7 +140,8 @@ def collect(state: CollectionState, source: RpcSource, config: IngestConfig, clo
     started = clock.monotonic()
     analyzed_at = clock.wall()
     calls_before = state.rpc_calls
-    deadline = Deadline(clock, config.time_budget_seconds)  # відлік бюджету — від початку collect
+    if deadline is None:
+        deadline = Deadline(clock, config.time_budget_seconds)  # відлік бюджету — від початку collect
 
     buyers_completeness = enumerate_buyers(source, state.mint, state, config, deadline)
     for depth in range(1, config.funding_depth + 1):
@@ -168,7 +176,8 @@ def collect(state: CollectionState, source: RpcSource, config: IngestConfig, clo
     )
 
 
-def resume(state: CollectionState, source: RpcSource, config: IngestConfig, clock: Clock) -> IngestResult:
+def resume(state: CollectionState, source: RpcSource, config: IngestConfig, clock: Clock, *,
+           deadline: Deadline | None = None) -> IngestResult:
     """Продовжити збір із партиційного стану (FR-001-13); `metadata.resumed=true`.
 
     Добирає лише недоотримане — це робить сам `collect` на частковому стані (див. модуль): курсор
@@ -183,6 +192,6 @@ def resume(state: CollectionState, source: RpcSource, config: IngestConfig, cloc
         fresh = CollectionState(mint=state.mint, config_version=config.version)
         for f in fields(CollectionState):
             setattr(state, f.name, getattr(fresh, f.name))
-        return collect(state, source, config, clock)
-    result = collect(state, source, config, clock)
+        return collect(state, source, config, clock, deadline=deadline)
+    result = collect(state, source, config, clock, deadline=deadline)
     return replace(result, metadata=replace(result.metadata, resumed=True))
