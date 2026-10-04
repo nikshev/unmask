@@ -108,7 +108,11 @@ class RpcSource(Protocol):
 - `failures` — політика: `FailAfter(n_calls, exc)`, `FailFor(address|signature, exc, times)`; `clock` — `FakeClock`, який просувається на `advance_per_call` на кожному виклику.
 - Адреса, відсутня в `rpc.json`, → порожня історія (не помилка): це покриває edge case «гаманець без вхідних переказів».
 
-**`HttpRpcSource(url, config.rpc, transport=None)`**
+**`HttpRpcSource(url, config.rpc, transport=None, *, commitment, clock=None, sleep=None)`** (`commitment` — keyword-only, береться з `IngestConfig`, умовчання немає: принцип III; `from_env(...)` — зручність для `UNMASK_RPC_URL`)
 - JSON-RPC 2.0 через `httpx.Client`; `transport` підмінний (`httpx.MockTransport` у тестах).
-- `get_transactions` — один JSON-RPC batch на ≤ `rpc.page_size` підписів або пул на `rpc.max_concurrency` потоків; порядок результату відповідає порядку аргументів.
+- `get_transactions` — один JSON-RPC batch на кожні `rpc.page_size` підписів (реалізовано batch; `rpc.max_concurrency` адаптер не використовує); порядок результату береться за JSON-RPC `id` (позицією підпису), а не за порядком відповіді. Помилка одного елемента batch → помилка всього виклику (`None` лише для `result: null`): інакше збій став би «відсутністю даних» (принцип V).
+- Секрет (URL з ключем) не потрапляє в `repr`/`str`, у виключення (включно з `__cause__`/`__context__`), `detail` і логи. `detail` і тексти винятків адаптера **ніколи не містять вільного тексту ззовні** (ні `error.message`/`error.data`, ні тіла, ні заголовків, ні назви класу винятку транспорту): лише категорію з фіксованої таблиці адаптера — за HTTP-статусом (`http 401 unauthorized (check API key)`, `http 5xx server error`, …), за кодом JSON-RPC (`jsonrpc error code=<int> (<мітка>)`; код — лише справжній `int` у межах int32, невідомий — без мітки, інший тип — `jsonrpc error (malformed code)`), за класом мережевої помилки (`network error: ConnectError`), `invalid JSON in response`, `unexpected response shape: …`. Причина: «очищення» довільного тексту від ключа принципово ненадійне (кожне оборотне кодування його обходить). Редиректи не виконуються (3xx → `RpcUnavailable`).
+- Конструктор повністю валідує URL (схема http/https, хост, порт 1..65535); будь-яка відмова → одне `ValueError("invalid RPC URL")` без URL і без ланцюга винятків; `from_env` → `ConfigError` без URL.
+- Усі записи логерів `httpx`/`httpcore*` відкидаються (у них URL, хост або сирі заголовки відповіді); транспортна діагностика цих бібліотек недоступна.
+- `before=` передається як є; наявність підпису в історії адреси адаптер не перевіряє (на живому RPC поведінка за слотом/позицією).
 - Ключ API — лише зі змінної середовища (`UNMASK_RPC_URL` із вбудованим ключем); у YAML і в git не потрапляє.
