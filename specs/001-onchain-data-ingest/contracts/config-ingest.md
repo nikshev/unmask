@@ -4,10 +4,10 @@
 
 Завантаження: `config.py::load_config(path: Path) -> IngestConfig`. Невідоме поле, відсутнє поле або значення поза межами → `ConfigError` з назвою поля. Тихих умовчань у коді немає.
 
-## Схема (версія 1)
+## Схема (версія 2)
 
 ```yaml
-version: 1                       # int ≥ 1. Підіймається при будь-якій зміні нижче.
+version: 2                       # int ≥ 1. Підіймається при будь-якій зміні нижче.
 
 first_buyers_n: 300              # int, 1..500. Скільки перших покупців брати (FR-001-01).
                                  # У робочому конфігу тримати в 200..500 (spec); менші значення — лише для тестових конфігів.
@@ -20,7 +20,8 @@ time_budget_seconds: 40          # float > 0. Бюджет холодного з
 commitment: finalized            # finalized | confirmed. Рівень підтвердження для всіх RPC-викликів.
 
 rpc:
-  page_size: 1000                # int, 1..1000. limit для getSignaturesForAddress і розмір batch getTransaction.
+  page_size: 1000                # int, 1..1000. ЛИШЕ limit сторінки getSignaturesForAddress (з версії 2 розмір пачки транзакцій не задає).
+  tx_batch_size: 25              # int, 1..1000. Скільки підписів ядро (buyers, funding) просить одним get_transactions. На результат не впливає — лише на розбиття звернень і прогрес: адаптер «все або нічого» викидає виклик, що не вмістився в бюджет, тож значення не має перевищувати під-batch адаптера (max_batch=25). Обов'язкове.
   request_timeout_seconds: 10    # float > 0. Таймаут одного запиту (обрізається залишком бюджету).
   max_retries: 2                 # int ≥ 0. Повторів на RpcRateLimited / RpcUnavailable у межах бюджету.
   retry_backoff_seconds: 0.5     # float ≥ 0. База експоненційної паузи між повторами.

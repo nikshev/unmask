@@ -63,7 +63,8 @@ def _cfg(**overrides):
 
 
 def _page_size(n: int):
-    return dataclasses.replace(load_config(SHIPPED).rpc, page_size=n)
+    # T-052: пара page_size = tx_batch_size відтворює журнал викликів до T-052 (тоді page_size задавав обидва)
+    return dataclasses.replace(load_config(SHIPPED).rpc, page_size=n, tx_batch_size=n)
 
 
 def _plain(obj) -> object:

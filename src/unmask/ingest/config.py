@@ -1,8 +1,15 @@
-# impl: FR-001-01, FR-001-05, FR-001-08, FR-001-14, FR-001-16
+# impl: FR-001-01, FR-001-05, FR-001-08, FR-001-13, FR-001-14, FR-001-16
 """Завантаження й валідація config/ingest.yaml (принцип III, contracts/config-ingest.md).
 
 Тихих умовчань немає: відсутнє чи невідоме поле та значення поза межами дають
 ConfigError з назвою поля.
+
+`rpc.page_size` — лише `limit` сторінки `getSignaturesForAddress`; `rpc.tx_batch_size` (версія 2, T-052) —
+скільки підписів ядро просить одним `get_transactions` (`buyers`, `funding`). На результат збору
+`tx_batch_size` не впливає — лише на шаблон звернень і прогрес під лімітом швидкості провайдера: адаптер
+«все або нічого» викидає весь виклик, що не вмістився в бюджет, тож пачка не має перевищувати під-batch
+адаптера (25). У `RpcConfig` поле має умовчання `None` лише для прямої побудови в обхід YAML (адаптер його не
+читає); завантажувач вимагає його в YAML, а ядро на `None` гучно відмовляє (`require_tx_batch_size`).
 """
 
 from __future__ import annotations
@@ -25,6 +32,9 @@ class RpcConfig:
     max_retries: int
     retry_backoff_seconds: float
     max_concurrency: int
+    # Останнє й з умовчанням лише заради прямої побудови `RpcConfig(...)` в обхід YAML (адаптер поле не читає);
+    # `load_config` вимагає його, як і решту (`_check_keys` бере всі поля), ядро на `None` відмовляє.
+    tx_batch_size: int | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +51,7 @@ class IngestConfig:
 
 
 _COMMITMENTS = ("finalized", "confirmed")
+_MAX_TX_BATCH = 1000
 
 
 def _int(data: dict, key: str, path: str, lo: int | None = None, hi: int | None = None) -> int:
@@ -115,5 +126,14 @@ def load_config(path: Path) -> IngestConfig:
                 rpc, "retry_backoff_seconds", "rpc.retry_backoff_seconds", positive=False
             ),
             max_concurrency=_int(rpc, "max_concurrency", "rpc.max_concurrency", lo=1),
+            tx_batch_size=_int(rpc, "tx_batch_size", "rpc.tx_batch_size", lo=1, hi=_MAX_TX_BATCH),
         ),
     )
+
+
+def require_tx_batch_size(config: IngestConfig) -> int:
+    """`rpc.tx_batch_size` для ядра; відсутнє (побудова в обхід YAML) чи поза 1..1000 → `ValueError`."""
+    value = config.rpc.tx_batch_size
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= _MAX_TX_BATCH:
+        raise ValueError(f"rpc.tx_batch_size: {value!r} must be an int in 1..{_MAX_TX_BATCH}")
+    return value

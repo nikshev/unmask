@@ -1,9 +1,10 @@
-# impl: FR-001-15
+# impl: FR-001-15, FR-001-16
 """Межа зовнішнього світу (contracts/rpc-source.md).
 
 Ядро збору викликає лише `RpcSource`. Типи-значення дослівно повторюють поле
 `result` відповідних методів Solana JSON-RPC, тож записані з живого RPC фікстури
-підходять без перетворень. Адаптер піднімає лише три винятки нижче.
+підходять без перетворень. Адаптер піднімає лише три винятки нижче (і `RpcBudgetTimeout` —
+підклас `RpcTimeout`, T-051).
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ class Deadline(Protocol):
 
     Структурний тип: реалізація — `budget.Deadline(clock, seconds)`; протокол тут, щоб межа джерела
     не імпортувала `budget` (той сам імпортує цей модуль). Адаптер перед кожним запитом:
-    `if deadline.expired(): raise RpcTimeout("budget")`, таймаут запиту — `deadline.request_timeout(cap)`.
+    `if deadline.expired(): raise RpcBudgetTimeout()`, таймаут запиту — `deadline.request_timeout(cap)`.
     """
 
     def remaining(self) -> float: ...
@@ -81,6 +82,20 @@ class RpcRateLimited(RpcError):
 
 class RpcTimeout(RpcError):
     pass
+
+
+class RpcBudgetTimeout(RpcTimeout):
+    """Таймаут, у якому винен бюджет (T-051): адаптер вирішив, що звернення не вміститься в дедлайн.
+
+    Піднімається адаптером замість запиту: `deadline.expired()` перед запитом; `request_timeout() <= 0`
+    (або NaN); пейсер — очікування токенів не вміщається в `deadline.remaining()` (тоді `expired()` ще
+    хибне). Підклас `RpcTimeout` — зворотно сумісний (`except RpcTimeout` його ловить). Текст фіксований —
+    `budget`, без жодного тексту ззовні (політика `detail`). Ядро (`budget.deadline_timeouts`) перетворює
+    його на `budget_exhausted` безумовно; звичайний `RpcTimeout` — лише коли дедлайн уже сплив.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("budget")
 
 
 class RpcUnavailable(RpcError):

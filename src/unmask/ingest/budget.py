@@ -7,10 +7,10 @@
 `Deadline(clock, seconds)` — бюджет `time_budget_seconds` (версіонований параметр конфігу, принцип III);
 колектор створює його на початку `collect` і передає в кожен виклик джерела. Ядро перед кожним
 зверненням викликає `ensure_time` (сплив → `BudgetExhausted`, звернення не робиться), а саме звернення
-обгортає в `deadline_timeouts` (`RpcTimeout` через дедлайн → `BudgetExhausted`). `BudgetExhausted`
+обгортає в `deadline_timeouts` (`RpcTimeout` через дедлайн або `RpcBudgetTimeout` → `BudgetExhausted`). `BudgetExhausted`
 перетворюють на чесну неповноту `buyers` і `funding` (`budget_exhausted`).
 
-Залежить від: `rpc.protocol` (`Deadline`-протокол, `RpcTimeout`).
+Залежить від: `rpc.protocol` (`Deadline`-протокол, `RpcTimeout`, `RpcBudgetTimeout`).
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from typing import Iterator, Protocol
 
 from unmask.ingest.rpc.protocol import Deadline as DeadlineLike
-from unmask.ingest.rpc.protocol import RpcTimeout
+from unmask.ingest.rpc.protocol import RpcBudgetTimeout, RpcTimeout
 
 
 class Clock(Protocol):
@@ -137,7 +137,12 @@ def ensure_time(deadline: DeadlineLike, what: str) -> None:
 def deadline_timeouts(deadline: DeadlineLike, what: str) -> Iterator[None]:
     """`RpcTimeout` усередині звернення, спричинений дедлайном, → `BudgetExhausted`; звичайний — далі.
 
-    Як розрізняємо: адаптер обрізає таймаут запиту залишком (`request_timeout(cap) = min(remaining, cap)`),
+    `RpcBudgetTimeout` (T-051) → `BudgetExhausted` БЕЗУМОВНО, навіть коли `deadline.expired()` ще хибне: це
+    вже рішення адаптера «звернення не вміститься в бюджет» (пейсер: очікування токенів ≥ `remaining()`;
+    `expired()` чи `request_timeout() <= 0` перед запитом). Без цього та сама ситуація давала `timeout` або
+    `budget_exhausted` залежно від того, чи встиг годинник дійти до межі (знахідка живого прогону).
+
+    Звичайний `RpcTimeout` — як і раніше: адаптер обрізає таймаут запиту залишком (`request_timeout(cap) = min(remaining, cap)`),
     тож запит, обірваний через дедлайн, закінчується не раніше за межу бюджету — і на момент обробки
     винятку `deadline.expired()` істинне. Таймаут, що настав раніше межі (`cap < remaining`), — звичайний
     `timeout`: бюджет ще є, збір триває. Таймаут, що збігся з межею, — `budget_exhausted` (далі звертатись
@@ -147,6 +152,6 @@ def deadline_timeouts(deadline: DeadlineLike, what: str) -> Iterator[None]:
     try:
         yield
     except RpcTimeout as exc:
-        if deadline.expired():
+        if isinstance(exc, RpcBudgetTimeout) or deadline.expired():
             raise BudgetExhausted(f"{what}: {exc}") from exc
         raise

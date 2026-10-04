@@ -20,8 +20,10 @@
    При `collect_spl_inbound=false` токен-рахунки не запитуються і SPL-перекази не збираються взагалі
    (і з історії гаманця теж) — так визначено еталон `basic` («усі `spl:*` відсутні»).
 4. Записи з `err != null` не запитуються; транзакції — через `state.tx_cache` (один запит на підпис за
-   прогін; спільний підпис історії гаманця й токен-рахунку запитується раз). Транзакція з `meta.err`
-   (`failed`) переказів не дає.
+   прогін; спільний підпис історії гаманця й токен-рахунку запитується раз) пакетами `rpc.tx_batch_size`
+   (T-052; `page_size` — лише сторінка історії). Розмір пакета на результат не впливає: кешується й
+   переглядається лише розібране від найновішого, тож від нього залежить тільки розбиття звернень і запас,
+   прихоплений за точкою зупинки. Транзакція з `meta.err` (`failed`) переказів не дає.
 5. Беруться лише перекази з `receiver == W` і `sender != W`, з глибиною `depth`. Ключ дедупу —
    `(signature, instruction_path)` (R-9); при повторній зустрічі зберігається мінімальна глибина.
 6. Відправники стають вершинами рівня `depth` (`frontier_by_depth[depth]`, межа — найпізніше ребро)
@@ -124,7 +126,7 @@ from dataclasses import dataclass, field
 
 from unmask.ingest.budget import BudgetExhausted, deadline_timeouts, ensure_time
 from unmask.ingest.collector import CollectionState
-from unmask.ingest.config import IngestConfig
+from unmask.ingest.config import IngestConfig, require_tx_batch_size
 from unmask.ingest.model import Asset, MissingHistory, MissingReason, Transfer, UnexpandedNode, UnexpandedReason
 from unmask.ingest.parse import CorruptRecord, ParsedTransfer, ParsedTx, parse_transaction
 from unmask.ingest.rpc.protocol import Deadline, RpcError, RpcRateLimited, RpcSource, RpcTimeout, RpcUnavailable
@@ -435,9 +437,9 @@ def _scan_node(source: RpcSource, state: CollectionState, scan: _NodeScan, cutof
     newest_first, scan.signatures_truncated = _node_signatures(
         source, state, wallet, cutoff, config, deadline, scan.problems,
     )
-    # Транзакції, яких немає в кеші, запитуються пакетами `page_size` (у порядку від найновішого)
+    # Транзакції, яких немає в кеші, запитуються пакетами `tx_batch_size` (у порядку від найновішого)
     # ліниво — лише коли перегляд до них дійшов; після відмови пакети більше не запитуються.
-    page_size = config.rpc.page_size
+    tx_batch_size = require_tx_batch_size(config)
     to_fetch = [sig for sig in newest_first if sig not in state.tx_cache]
     fetched: dict[str, object] = {}
     next_batch = 0
@@ -448,8 +450,8 @@ def _scan_node(source: RpcSource, state: CollectionState, scan: _NodeScan, cutof
         parsed: ParsedTx | None = state.tx_cache.get(sig)
         if parsed is None:
             if sig not in fetched and not fetch_failed and next_batch < len(to_fetch):
-                batch = to_fetch[next_batch:next_batch + page_size]
-                next_batch += page_size
+                batch = to_fetch[next_batch:next_batch + tx_batch_size]
+                next_batch += tx_batch_size
                 got = _fetch_batch(source, state, batch, deadline, scan.problems)
                 if got is None:
                     fetch_failed = True

@@ -70,7 +70,7 @@ SIG_G_A = _sig("2avhiv")   # G->A, глибина 2
 
 
 def _cfg(expected_config: dict | None = None, **overrides):
-    """Поставлений конфіг (версія 1) зі значеннями еталона й точковими замінами."""
+    """Поставлений конфіг (версія 2) зі значеннями еталона й точковими замінами."""
     cfg = load_config(SHIPPED)
     values = dict(expected_config or EXPECTED["config"])
     values.update(overrides)
@@ -211,8 +211,9 @@ def test_null_transaction_marks_unavailable_not_silently_dropped(tmp_path):
 def test_unexpanded_does_not_affect_status(name):
     case = HUB_CASES[name]
     source = FixtureRpcSource(HUB)
-    state = CollectionState(mint=HUB_EXPECTED["mint"], config_version=1)
-    result = collect(state, source, _cfg(case["config"]), FakeClock())
+    cfg = _cfg(case["config"])
+    state = CollectionState(mint=HUB_EXPECTED["mint"], config_version=cfg.version)
+    result = collect(state, source, cfg, FakeClock())
     assert result.unexpanded, "сценарій мусить мати нерозгорнуту вершину"
     assert result.completeness.status is CompletenessStatus.COMPLETE
     assert result.completeness.missing == ()
@@ -374,9 +375,9 @@ class _FailTransactionsOnce(FixtureRpcSource):
 
 @pytest.mark.parametrize("exc", RPC_ERRORS, ids=lambda e: type(e).__name__)
 def test_recollect_after_partial_enumeration_equals_fresh_run(exc):
-    # page_size=2: пакети транзакцій mint від найстаріших; пакет [P2, P4] падає один раз, тож у першій
-    # вибірці лише P1, P3 — без P2, у якого є власне фінансування (A->P2, S->P2)
-    cfg = _cfg(rpc=dataclasses.replace(load_config(SHIPPED).rpc, page_size=2))
+    # tx_batch_size=2 (T-052; до нього — page_size=2): пакети транзакцій mint від найстаріших; пакет [P2, P4]
+    # падає один раз, тож у першій вибірці лише P1, P3 — без P2, у якого є власне фінансування (A->P2, S->P2)
+    cfg = _cfg(rpc=dataclasses.replace(load_config(SHIPPED).rpc, page_size=2, tx_batch_size=2))
     state, first = _run(_FailTransactionsOnce(BASIC, BUY_SIG[W["P2"]], exc), cfg)
     assert first.completeness.buyers.complete is False
     assert [b.wallet for b in first.buyers] == [W["P1"], W["P3"]]  # вибірку обірвано — частина покупців
@@ -530,9 +531,10 @@ class _NullTransactionOnce(FixtureRpcSource):
 
 
 def test_transactions_scanned_after_recollect_equals_fresh_run():
-    # page_size=1: найстаріша транзакція mint (36vrgL…, слот 10) спершу недоступна; на повторі її вже
-    # закешувало фінансування — правило купівлі її однаково проходить, і лічильник = свіжому прогону
-    cfg = _cfg(funding_depth=1, rpc=dataclasses.replace(load_config(SHIPPED).rpc, page_size=1))
+    # tx_batch_size=1 (T-052; до нього — page_size=1): найстаріша транзакція mint (36vrgL…, слот 10) спершу
+    # недоступна; на повторі її вже закешувало фінансування — правило купівлі її однаково проходить, і
+    # лічильник = свіжому прогону
+    cfg = _cfg(funding_depth=1, rpc=dataclasses.replace(load_config(SHIPPED).rpc, page_size=1, tx_batch_size=1))
     state, first = _run(_NullTransactionOnce(BASIC, _sig("36vrgL")), cfg)
     assert first.completeness.buyers.complete is False
     second = collect(state, FixtureRpcSource(BASIC), cfg, FakeClock())
@@ -541,12 +543,14 @@ def test_transactions_scanned_after_recollect_equals_fresh_run():
 
 @pytest.mark.parametrize("n", [1, 2, 3, 4])
 def test_recollect_on_complete_state_makes_no_source_calls_even_when_cut_inside_batch(n):
-    # page_size=1000: пакет транзакцій mint захоплює й транзакції за слотом N-го покупця
+    # tx_batch_size=1000 (T-052; до нього — page_size=1000): пакет транзакцій mint захоплює й транзакції за
+    # слотом N-го покупця
+    cfg = _cfg(first_buyers_n=n, rpc=dataclasses.replace(load_config(SHIPPED).rpc, tx_batch_size=1000))
     source = FixtureRpcSource(BASIC)
-    state, first = _run(source, _cfg(first_buyers_n=n))
+    state, first = _run(source, cfg)
     assert first.completeness.status is CompletenessStatus.COMPLETE
     calls = len(source.calls)
-    second = collect(state, source, _cfg(first_buyers_n=n), FakeClock())
+    second = collect(state, source, cfg, FakeClock())
     assert source.calls[calls:] == []
     assert _stable(second) == _stable(first)
 
@@ -575,10 +579,11 @@ def _mint_tx_batches(calls) -> list[list[str]]:
 
 
 def test_recollect_fetches_only_uncached_mint_transactions_in_one_batch():
-    # page_size=2; перший прохід: купівлі P1 і P2 недоступні (між ними — закешована P3); повтор запитує
-    # рівно [P1, P2] одним пакетом — закешовані не перезапитуються й не «з'їдають» місце в пакеті
-    # N=2: у першій вибірці P3, P4 (пул P5, чия історія містить усі купівлі, не розгортається)
-    cfg = _cfg(first_buyers_n=2, rpc=dataclasses.replace(load_config(SHIPPED).rpc, page_size=2))
+    # tx_batch_size=2 (T-052; до нього — page_size=2); перший прохід: купівлі P1 і P2 недоступні (між ними —
+    # закешована P3); повтор запитує рівно [P1, P2] одним пакетом — закешовані не перезапитуються й не
+    # «з'їдають» місце в пакеті. N=2: у першій вибірці P3, P4 (пул P5, чия історія містить усі купівлі, не
+    # розгортається)
+    cfg = _cfg(first_buyers_n=2, rpc=dataclasses.replace(load_config(SHIPPED).rpc, page_size=2, tx_batch_size=2))
     state, first = _run(_NullTransactionOnce(BASIC, BUY_SIG[W["P1"]], BUY_SIG[W["P2"]]), cfg)
     assert [b.wallet for b in first.buyers] == [W["P3"], W["P4"]]
     assert first.completeness.buyers.complete is False
@@ -590,10 +595,11 @@ def test_recollect_fetches_only_uncached_mint_transactions_in_one_batch():
 
 
 def test_after_nth_buyer_only_rest_of_its_slot_is_fetched():
-    # N=2, page_size=4: перший пакет [10, 12, P1, P3] дає N у слоті 210; добирається лише P2 (той самий
-    # слот), а не наступні P4/P5
+    # N=2, tx_batch_size=4 (T-052; до нього — page_size=4): перший пакет [10, 12, P1, P3] дає N у слоті 210;
+    # добирається лише P2 (той самий слот), а не наступні P4/P5
     source = FixtureRpcSource(BASIC)
-    _state, result = _run(source, _cfg(first_buyers_n=2, rpc=dataclasses.replace(load_config(SHIPPED).rpc, page_size=4)))
+    _state, result = _run(source, _cfg(first_buyers_n=2, rpc=dataclasses.replace(
+        load_config(SHIPPED).rpc, page_size=4, tx_batch_size=4)))
     batches = _mint_tx_batches(source.calls)
     assert batches[-1] == [BUY_SIG[W["P2"]]]
     assert not {BUY_SIG[W["P4"]], BUY_SIG[W["P5"]]} & {s for b in batches for s in b}

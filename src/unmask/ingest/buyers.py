@@ -1,12 +1,12 @@
-# impl: FR-001-01, FR-001-02, FR-001-09, FR-001-10, FR-001-16
+# impl: FR-001-01, FR-001-02, FR-001-09, FR-001-10, FR-001-13, FR-001-16
 """Перші N покупців токена з курсором (research R-6, R-7).
 
 Що робить: `enumerate_buyers(source, mint, state, config, deadline) -> BuyersCompleteness`
 1. перегортає `get_signatures_for_address(mint)` від найновішого через `before` сторінками
-   `rpc.page_size`, доки джерело не поверне порожню сторінку (кінець історії за контрактом);
+   `rpc.page_size` (лише limit сторінки), доки джерело не поверне порожню сторінку (кінець історії);
    у `state` зберігає `(signature, slot, block_time, err)` і `signature_cursor`;
 2. лише після вичерпання історії бере транзакції **від найстаріших** — упорядковані за
-   `(slot, signature)`, а не за порядком відповіді, — пакетами `rpc.page_size`; записи з
+   `(slot, signature)`, а не за порядком відповіді, — пакетами `rpc.tx_batch_size` (T-052); записи з
    `err != null` не запитуються; кожну розібрану транзакцію пропускає через `detect_purchases`;
 3. для кожного гаманця тримає першу купівлю за ключем `(slot, signature)` (повтор не займає
    місця в N); коли унікальних покупців стало N, **добиває поточний слот до кінця**, далі не йде;
@@ -39,11 +39,15 @@
 перевиводиться з нуля (кеш відтворюється, решта дозапитується), тож повтор після збою дає ту саму
 вибірку, що й свіжий прогін (T-014).
 
-Запити транзакцій ліниві: пакет (до `rpc.page_size` ще не закешованих підписів від поточного, а після
+Запити транзакцій ліниві: пакет (до `rpc.tx_batch_size` ще не закешованих підписів від поточного, а після
 досягнення N — лише зі слота N-го покупця) запитується, лише коли розбір дійшов до незакешованого
-підпису. У свіжому прогоні пакети ті самі, що й «вікно `page_size` від поточного»; на повторі,
+підпису. У свіжому прогоні пакети ті самі, що й «вікно `tx_batch_size` від поточного»; на повторі,
 коли N досягається на закешованих транзакціях, транзакції за межею слота (отримані, але не розібрані
 першим проходом) не запитуються — повторний виклик на повному стані не звертається до джерела.
+Розмір пачки на результат не впливає (кешується лише розібране, купівлі — лише з розібраного): від нього
+залежить тільки розбиття звернень і те, скільки транзакцій прихоплено про запас. Окремо від `page_size`
+(T-052, known-issues §6.6): адаптер «все або нічого» викидає виклик, що не вмістився в бюджет, тож пачка
+понад під-batch адаптера під лімітом швидкості провайдера не дає прогресу ніколи.
 
 Бюджет часу (FR-001-16): перед кожною сторінкою історії й кожним пакетом транзакцій —
 `budget.ensure_time(deadline)`; після спливу звернень немає. `RpcTimeout`, спричинений дедлайном,
@@ -62,7 +66,7 @@ from typing import Iterable
 
 from unmask.ingest.budget import BudgetExhausted, deadline_timeouts, ensure_time
 from unmask.ingest.collector import CollectionState
-from unmask.ingest.config import IngestConfig
+from unmask.ingest.config import IngestConfig, require_tx_batch_size
 from unmask.ingest.model import Buyer, BuyersCompleteness, MissingReason
 from unmask.ingest.parse import CorruptRecord, ParsedTx, parse_transaction
 from unmask.ingest.purchases import Purchase, detect_purchases
@@ -146,12 +150,12 @@ def _scan(state: CollectionState, mint: str, sig: str, raw: object) -> tuple[Mis
     return None
 
 
-def _next_batch(eligible: list[tuple[int, str]], start: int, state: CollectionState, page_size: int,
+def _next_batch(eligible: list[tuple[int, str]], start: int, state: CollectionState, tx_batch_size: int,
                 cut_slot: int | None) -> list[str]:
-    """До `page_size` ще не закешованих підписів від позиції `start` (після N — лише слот `cut_slot`)."""
+    """До `tx_batch_size` ще не закешованих підписів від позиції `start` (після N — лише слот `cut_slot`)."""
     batch: list[str] = []
     for slot, sig in eligible[start:]:
-        if len(batch) == page_size or (cut_slot is not None and slot > cut_slot):
+        if len(batch) == tx_batch_size or (cut_slot is not None and slot > cut_slot):
             break
         if sig not in state.tx_cache:
             batch.append(sig)
@@ -164,7 +168,8 @@ def enumerate_buyers(source: RpcSource, mint: str, state: CollectionState, confi
     n = config.first_buyers_n
     if isinstance(n, bool) or not isinstance(n, int) or n < 1:
         raise ValueError(f"first_buyers_n: {n!r} must be an int >= 1")
-    page_size = config.rpc.page_size
+    page_size = config.rpc.page_size  # лише сторінка історії mint
+    tx_batch_size = require_tx_batch_size(config)  # пачка get_transactions (T-052)
 
     state.transactions_scanned = 0  # лічильник останнього проходу (детермінований)
     try:
@@ -198,7 +203,7 @@ def enumerate_buyers(source: RpcSource, mint: str, state: CollectionState, confi
             _record_first(state, state.tx_cache[sig], mint)
         else:
             if sig not in fetched:
-                to_fetch = _next_batch(eligible, i, state, page_size, cut_slot)
+                to_fetch = _next_batch(eligible, i, state, tx_batch_size, cut_slot)
                 what = f"getTransaction from {to_fetch[0]}"
                 try:
                     ensure_time(deadline, what)  # перед кожним пакетом

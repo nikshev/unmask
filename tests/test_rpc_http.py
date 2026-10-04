@@ -1,4 +1,4 @@
-# verifies: FR-001-15
+# verifies: FR-001-15, FR-001-16
 """HttpRpcSource: JSON-RPC 2.0 через httpx.MockTransport — жодного сокета (принцип II).
 
 Усе, що тут моделюється «мережею», — це `httpx.MockTransport(handler)`: handler бачить справжній
@@ -28,6 +28,7 @@ from unmask.ingest.rpc.http import HttpRpcSource
 from unmask.ingest.serialize import to_dict
 from unmask.ingest.service import IngestService
 from unmask.ingest.rpc.protocol import (
+    RpcBudgetTimeout,
     RpcError,
     RpcRateLimited,
     RpcTimeout,
@@ -1004,6 +1005,128 @@ def test_budget_ending_in_the_pacer_after_a_429_surfaces_as_budget_timeout():
         h.source.get_transactions([f"s{i}" for i in range(25)], deadline=h.deadline)
     assert str(ei.value) == "budget"
     assert len(h.requests) == 1 and h.sleeps == [0.5]
+
+
+# --------------------------------------------------------------------------- RpcBudgetTimeout (T-051)
+# Усі три місця, де адаптер вирішує «винен бюджет» (пейсер не вміщається; `expired()` перед запитом;
+# `request_timeout() <= 0`/NaN), піднімають саме `RpcBudgetTimeout` — ядро мапить його в `budget_exhausted`
+# безумовно (навіть коли `expired()` ще хибне). Транспортні таймаути лишаються звичайним `RpcTimeout`.
+
+
+def test_rpc_budget_timeout_is_an_rpc_timeout():
+    exc = RpcBudgetTimeout()
+    assert issubclass(RpcBudgetTimeout, RpcTimeout) and isinstance(exc, RpcTimeout) and isinstance(exc, RpcError)
+    assert not isinstance(exc, (RpcRateLimited, RpcUnavailable))
+    assert str(exc) == "budget" and exc.args == ("budget",)  # фіксований текст: нічого ззовні
+    try:  # зворотна сумісність: старі `except RpcTimeout` ловлять і його
+        raise exc
+    except RpcTimeout as caught:
+        assert caught is exc
+
+
+def test_pacer_wait_not_fitting_raises_rpc_budget_timeout_subclass():
+    h, bucket, sigs = paced(50, rpc_cfg=cfg(request_timeout_seconds=1000))
+    h.source.get_transactions(sigs[:25], deadline=h.deadline)  # лишилось 5 токенів
+    before = len(h.requests)
+    short = Deadline(h.clock, 1.0)  # потрібно (25 − 5) / 12 ≈ 1.67 с > 1 с, але дедлайн ще живий
+    with pytest.raises(RpcBudgetTimeout) as ei:
+        h.source.get_transactions(sigs[25:], deadline=short)
+    assert type(ei.value) is RpcBudgetTimeout and str(ei.value) == "budget"
+    assert not short.expired() and short.remaining() == 1.0
+    assert len(h.requests) == before and h.sleeps == []
+    assert ei.value.__cause__ is None and ei.value.__context__ is None
+    # і після 429: пейсер не дочекається -> теж RpcBudgetTimeout (а не RpcRateLimited)
+    h2 = Harness(one_shot(httpx.Response(429, json=RATE_LIMITED_429)), budget=1.0)
+    with pytest.raises(RpcBudgetTimeout) as ei2:
+        h2.source.get_transactions([f"s{i}" for i in range(25)], deadline=h2.deadline)
+    assert type(ei2.value) is RpcBudgetTimeout and not h2.deadline.expired()
+
+
+def test_expired_deadline_and_nonpositive_request_timeout_raise_rpc_budget_timeout():
+    # (1) expired() перед запитом — для кожного методу
+    h = Harness(good, budget=5.0)
+    h.clock.advance(5.0)
+    s, d = h.source, h.deadline
+    for c in (
+        lambda: s.get_account_info("A", deadline=d),
+        lambda: s.get_signatures_for_address("A", before=None, until=None, limit=5, deadline=d),
+        lambda: s.get_transactions(["x"], deadline=d),
+        lambda: s.get_token_accounts_by_owner("A", deadline=d),
+    ):
+        with pytest.raises(RpcBudgetTimeout) as ei:
+            c()
+        assert type(ei.value) is RpcBudgetTimeout and str(ei.value) == "budget"
+    assert h.requests == []
+
+    # (2) request_timeout() <= 0 або NaN, хоча expired() хибне — для кожного методу
+    for value in (0.0, -1.0, float("nan")):
+        class D(_ZeroTimeoutDeadline):
+            def request_timeout(self, cap, _v=value):
+                return _v
+
+        h = Harness(good, tx_rate_per_second=math.inf)
+        s = h.source
+        for c in (
+            lambda: s.get_account_info("A", deadline=D()),
+            lambda: s.get_signatures_for_address("A", before=None, until=None, limit=5, deadline=D()),
+            lambda: s.get_transactions(["x"], deadline=D()),
+            lambda: s.get_token_accounts_by_owner("A", deadline=D()),
+        ):
+            with pytest.raises(RpcBudgetTimeout) as ei:
+                c()
+            assert type(ei.value) is RpcBudgetTimeout
+        assert h.requests == []
+
+
+@pytest.mark.parametrize("exc", [
+    httpx.ReadTimeout("t"), httpx.ConnectTimeout("t"), httpx.WriteTimeout("t"), httpx.PoolTimeout("t"),
+])
+def test_transport_timeouts_stay_plain_rpc_timeout_not_budget(exc):
+    h = Harness(one_shot(exc))
+    with pytest.raises(RpcTimeout) as ei:
+        call(h)
+    assert type(ei.value) is RpcTimeout  # таймаут запиту до межі — звичайний `timeout`, не бюджет
+
+
+def test_total_request_duration_over_timeout_stays_plain_rpc_timeout():
+    def slow(request, h):
+        h.clock.advance(11.0)  # довше за request_timeout=10, але бюджет 40 ще є
+        return good(request, h)
+
+    h = Harness(slow)
+    with pytest.raises(RpcTimeout) as ei:
+        call(h)
+    assert type(ei.value) is RpcTimeout
+
+
+def test_pacer_budget_cut_before_deadline_expiry_is_budget_exhausted_through_the_service():
+    # Відтворення знахідки живого прогону: дедлайн сервісу живий (годинник стоїть), але пейсер каже
+    # «не вмістимось» -> buyers.reason = budget_exhausted (а не timeout); detail — мітка без ключа й URL.
+    directory = SCENARIOS / "basic"
+    rpc = json.loads((directory / "rpc.json").read_text())
+    expected = json.loads((directory / "expected.json").read_text())
+    config = dataclasses.replace(
+        load_config(Path(__file__).parent.parent / "config" / "ingest.yaml"),
+        **expected["config"], time_budget_seconds=5.0,
+    )
+    source_clock = FakeClock()
+    bucket = ProviderBucket(source_clock)
+    http_source = HttpRpcSource(
+        URL, config.rpc, transport=httpx.MockTransport(_emulator(rpc, config.commitment, bucket)),
+        commitment=config.commitment, clock=source_clock, sleep=source_clock.advance,
+        max_batch=1, tx_burst=1, tx_rate_per_second=0.1,  # друга транзакція — через 10 с > бюджету 5 с
+    )
+    service_clock = FakeClock()  # стоїть: deadline.expired() так і не стає істинним
+    result = IngestService(config, http_source, clock=service_clock).collect(expected["mint"])
+    out = to_dict(result)
+    b = out["completeness"]["buyers"]
+    assert (b["complete"], b["reason"]) == (False, "budget_exhausted")
+    assert "getTransaction" in b["detail"] and "budget" in b["detail"]
+    reasons = {m["reason"] for m in out["completeness"]["missing"]} | {b["reason"]}
+    assert "timeout" not in reasons
+    rendered = json.dumps(out)
+    assert SECRET not in rendered and "rpc.example" not in rendered and "://" not in b["detail"]
+    assert bucket.rejected == []
 
 
 # --------------------------------------------------------------------------- мапування помилок

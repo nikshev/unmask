@@ -70,13 +70,19 @@ def _fake_sig(label: str) -> str:
 SIG_A_P3 = _fake_sig("AtoP3")  # A -> P3, слот 140 (варіант): пізніше ребро → нова межа A
 
 
-def _cfg(config: dict | None = None, *, page_size: int | None = None, **overrides):
+def _cfg(config: dict | None = None, *, page_size: int | None = None, tx_batch_size: int | None = None,
+         **overrides):
     cfg = load_config(SHIPPED)
     values = dict(EXPECTED["config"] if config is None else config)
     values.update(overrides)
     cfg = dataclasses.replace(cfg, **values)
     if page_size is not None:
-        cfg = dataclasses.replace(cfg, rpc=dataclasses.replace(cfg.rpc, page_size=page_size))
+        # T-052: page_size — лише сторінка підписів; до T-052 він задавав і пачку транзакцій. Без явного
+        # tx_batch_size пара зберігається — журнал викликів тесту той самий, що до T-052 (див. HEAD_CALL_LOG_SHA256)
+        cfg = dataclasses.replace(cfg, rpc=dataclasses.replace(
+            cfg.rpc, page_size=page_size, tx_batch_size=page_size if tx_batch_size is None else tx_batch_size))
+    elif tx_batch_size is not None:
+        cfg = dataclasses.replace(cfg, rpc=dataclasses.replace(cfg.rpc, tx_batch_size=tx_batch_size))
     return cfg
 
 
@@ -446,7 +452,7 @@ def test_page_size_not_in_key_memo_records_identical_for_every_page_size():
                                     (HUB, HUB_MINT, HUB_CASES["hub_signature_cap"])]:
         records = []
         for page_size in (1, 2, 3, 7, 1000):
-            state = CollectionState(mint=mint, config_version=1, scan_memo=_Recorder())
+            state = CollectionState(mint=mint, config_version=load_config(SHIPPED).version, scan_memo=_Recorder())
             collect(state, FixtureRpcSource(directory), _cfg(config, page_size=page_size), FakeClock())
             records.append(state.scan_memo.records)
         assert records[0], directory
@@ -483,7 +489,7 @@ def _call_log_cases():
     yield "basic_caps|2", BASIC, M, _cfg(counterparty_threshold=1, max_signatures_per_wallet=2, page_size=2)
     for name, config in hub_cfg.items():
         yield f"hub|{name}|7", HUB, HUB_MINT, _cfg(config, page_size=7)
-    yield "corrupt|1000", CORRUPT, CORRUPT_MINT, _cfg({"first_buyers_n": 3, "funding_depth": 2})
+    yield "corrupt|1000", CORRUPT, CORRUPT_MINT, _cfg({"first_buyers_n": 3, "funding_depth": 2}, page_size=1000)
 
 
 def _log_hash(calls) -> str:

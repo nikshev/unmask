@@ -53,13 +53,16 @@ class _StubDeadline:
 DEADLINE = _StubDeadline()
 
 
-def _cfg(n: int, page_size: int = 1000):
+def _cfg(n: int, page_size: int = 1000, tx_batch_size: int = 1000):
+    # T-052: сторінка підписів (page_size) і пачка транзакцій (tx_batch_size) — окремі параметри; умовчання
+    # 1000/1000 відтворює поведінку до T-052 (тоді page_size задавав обидва)
     cfg = load_config(SHIPPED)
-    return dataclasses.replace(cfg, first_buyers_n=n, rpc=dataclasses.replace(cfg.rpc, page_size=page_size))
+    return dataclasses.replace(cfg, first_buyers_n=n, rpc=dataclasses.replace(
+        cfg.rpc, page_size=page_size, tx_batch_size=tx_batch_size))
 
 
-def _run(source, n: int, page_size: int = 1000):
-    cfg = _cfg(n, page_size)
+def _run(source, n: int, page_size: int = 1000, tx_batch_size: int = 1000):
+    cfg = _cfg(n, page_size, tx_batch_size)
     state = CollectionState(mint=M, config_version=cfg.version)
     completeness = enumerate_buyers(source, M, state, cfg, DEADLINE)
     return state, completeness
@@ -198,10 +201,11 @@ def test_same_slot_tie_broken_by_signature_then_wallet_and_stable_across_runs(tm
 
     reference = [_as_dict(b) for b in state.buyers]
     for page_size in (1, 2, 3, 1000):
-        for source in (_basic(), _variant(tmp_path, swap_slot_210)):
-            again, completeness = _run(source, n=5, page_size=page_size)
-            assert [_as_dict(b) for b in again.buyers] == reference
-            assert completeness == COMPLETE
+        for tx_batch_size in (1, 2, 3, 1000):
+            for source in (_basic(), _variant(tmp_path, swap_slot_210)):
+                again, completeness = _run(source, n=5, page_size=page_size, tx_batch_size=tx_batch_size)
+                assert [_as_dict(b) for b in again.buyers] == reference
+                assert completeness == COMPLETE
 
     # Однаковий слот і підпис (кілька покупців в одній транзакції) — далі за wallet,
     # незалежно від порядку входу.
@@ -222,7 +226,7 @@ def test_nth_buyer_boundary_inside_slot_processes_whole_slot_before_cut():
     # N=2: другий покупець (P3) знайдено в слоті 210, де є ще купівля P2 — слот добивається
     # до кінця, наступний слот (220) уже не розбирається.
     source = _basic()
-    state, completeness = _run(source, n=2, page_size=1)
+    state, completeness = _run(source, n=2, page_size=1, tx_batch_size=1)
 
     assert _wallets(state) == [P1, P3]
     assert completeness == COMPLETE
@@ -233,7 +237,7 @@ def test_nth_buyer_boundary_inside_slot_processes_whole_slot_before_cut():
 
     # N досягнуто на єдиній купівлі слота: наступний слот не чіпається взагалі
     source = _basic()
-    state, _ = _run(source, n=1, page_size=1)
+    state, _ = _run(source, n=1, page_size=1, tx_batch_size=1)
     assert _wallets(state) == [P1]
     assert state.transactions_scanned == 3
     assert not {BUY_SIG[P2], BUY_SIG[P3]} & set(_fetched(source))
@@ -258,7 +262,7 @@ def test_repeat_purchase_in_same_slot_resolved_by_order_key_not_response_order(t
     history = json.loads((tmp_path / "basic_variant" / "rpc.json").read_text())["getSignaturesForAddress"][M]
     assert [e["signature"] for e in history].index(sig) < [e["signature"] for e in history].index(BUY_SIG[P1])
     for page_size in (1, 1000):
-        state, _ = _run(source, n=5, page_size=page_size)
+        state, _ = _run(source, n=5, page_size=page_size, tx_batch_size=page_size)
         assert _wallets(state) == [P1, P3, P2, P4, P5]
         assert state.buyers[0].first_buy_signature == sig
 
@@ -346,10 +350,11 @@ def test_source_failure_mid_pagination_marks_buyers_incomplete_with_reason(exc, 
 
 
 def test_source_failure_while_fetching_transactions_marks_buyers_incomplete():
-    # page_size=1: 8 викликів перегортання (7 сторінок + порожня), далі по одній транзакції
-    # від найстаріших: 10, 12, 200, 210, 210, 220 — шоста (купівля P4) = 14-й виклик падає.
+    # page_size=1: 8 викликів перегортання (7 сторінок + порожня); tx_batch_size=1 (T-052; до нього — той
+    # самий page_size): далі по одній транзакції від найстаріших: 10, 12, 200, 210, 210, 220 — шоста
+    # (купівля P4) = 14-й виклик падає.
     source = _basic(failures=[FailAfter(14, RpcUnavailable("boom"))])
-    state, completeness = _run(source, n=5, page_size=1)
+    state, completeness = _run(source, n=5, page_size=1, tx_batch_size=1)
 
     assert completeness.complete is False
     assert completeness.reason is MissingReason.UNAVAILABLE

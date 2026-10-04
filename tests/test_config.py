@@ -12,7 +12,7 @@ SHIPPED = Path(__file__).resolve().parent.parent / "config" / "ingest.yaml"
 CHANGELOG = Path(__file__).resolve().parent.parent / "config" / "CHANGELOG.md"
 
 BASE = {
-    "version": 1,
+    "version": 2,
     "first_buyers_n": 300,
     "funding_depth": 2,
     "counterparty_threshold": 200,
@@ -22,6 +22,7 @@ BASE = {
     "commitment": "finalized",
     "rpc": {
         "page_size": 1000,
+        "tx_batch_size": 25,
         "request_timeout_seconds": 10,
         "max_retries": 2,
         "retry_backoff_seconds": 0.5,
@@ -47,10 +48,11 @@ def _variant(**changes):
 
 
 def test_shipped_config_loads_with_version_1():
+    # Назва — з T-002 (на неї посилається tasks.md); з T-052 поставлено версію 2 (rpc.tx_batch_size).
     cfg = load_config(SHIPPED)
 
     assert isinstance(cfg, IngestConfig)
-    assert cfg.version == 1
+    assert cfg.version == 2
     assert cfg.first_buyers_n == 300
     assert cfg.funding_depth == 2
     assert cfg.counterparty_threshold == 200
@@ -59,12 +61,14 @@ def test_shipped_config_loads_with_version_1():
     assert cfg.time_budget_seconds == 40
     assert cfg.commitment == "finalized"
     assert cfg.rpc.page_size == 1000
+    assert cfg.rpc.tx_batch_size == 25
     assert cfg.rpc.request_timeout_seconds == 10
     assert cfg.rpc.max_retries == 2
     assert cfg.rpc.retry_backoff_seconds == 0.5
     assert cfg.rpc.max_concurrency == 8
-    # принцип III: версія має запис у changelog
+    # принцип III: кожна версія має запис у changelog (дайджест версії 2 — tests/test_tx_batch_size.py)
     assert "## 1 " in CHANGELOG.read_text(encoding="utf-8")
+    assert "## 2 " in CHANGELOG.read_text(encoding="utf-8")
 
 
 def test_each_field_round_trips_from_yaml(tmp_path):
@@ -79,6 +83,7 @@ def test_each_field_round_trips_from_yaml(tmp_path):
         "commitment": "confirmed",
         "rpc": {
             "page_size": 500,
+            "tx_batch_size": 7,
             "request_timeout_seconds": 3.5,
             "max_retries": 0,
             "retry_backoff_seconds": 0,
@@ -97,6 +102,7 @@ def test_each_field_round_trips_from_yaml(tmp_path):
     assert cfg.time_budget_seconds == 12.5
     assert cfg.commitment == "confirmed"
     assert cfg.rpc.page_size == 500
+    assert cfg.rpc.tx_batch_size == 7
     assert cfg.rpc.request_timeout_seconds == 3.5
     assert cfg.rpc.max_retries == 0
     assert cfg.rpc.retry_backoff_seconds == 0
@@ -135,9 +141,12 @@ def _with_unknown(where):
         pytest.param(_variant(commitment="processed"), "commitment", id="commitment=processed"),
         pytest.param(_variant(**{"rpc.page_size": 0}), "page_size", id="page_size=0"),
         pytest.param(_variant(**{"rpc.page_size": 1001}), "page_size", id="page_size=1001"),
+        pytest.param(_variant(**{"rpc.tx_batch_size": 0}), "rpc.tx_batch_size", id="tx_batch_size=0"),
+        pytest.param(_variant(**{"rpc.tx_batch_size": 1001}), "rpc.tx_batch_size", id="tx_batch_size=1001"),
         pytest.param(_variant(collect_spl_inbound="yes"), "collect_spl_inbound", id="spl_not_bool"),
         pytest.param(_without("version"), "version", id="missing-version"),
         pytest.param(_without("rpc.page_size"), "page_size", id="missing-rpc-field"),
+        pytest.param(_without("rpc.tx_batch_size"), "rpc.tx_batch_size", id="missing-tx_batch_size"),
         pytest.param(_with_unknown("top"), "bogus_field", id="unknown-field"),
         pytest.param(_with_unknown("rpc"), "bogus_field", id="unknown-rpc-field"),
     ],

@@ -1,4 +1,4 @@
-# impl: FR-001-15
+# impl: FR-001-15, FR-001-16
 """Живий адаптер `RpcSource`: Solana JSON-RPC 2.0 через `httpx` (contracts/rpc-source.md).
 
 Єдиний модуль, що імпортує `httpx` (принцип IV). Адаптер лише транспортує й мапить помилки: типи
@@ -30,12 +30,13 @@
   інʼєктованим `clock.monotonic()`, не більше `tx_burst`; дефолти навмисно з запасом ≈ 20–25% і за ємністю,
   і за швидкістю (20/40 на живому вузлі давали 429 у кожному прогоні). Перед КОЖНОЮ спробою під-batch на k елементів (також повтором): поповнити; бракує —
   чекати `(k − tokens) / rate` інʼєктованим `sleep`, але лише якщо очікування МЕНШЕ за `deadline.remaining()`;
-  інакше `RpcTimeout("budget")` без запиту, без сну і без зміни стану кошика (чесно: бюджет вичерпано; ядро
-  мапить у `budget_exhausted`, resume продовжить). Після паузи — списати k і далі звичайний `_send_once`
+  інакше `RpcBudgetTimeout` (текст `budget`) без запиту, без сну і без зміни стану кошика (чесно: бюджет
+  вичерпано; `expired()` тут ще хибне, тому ядро мапить саме цей підклас у `budget_exhausted` безумовно — T-051;
+  resume продовжить). Після паузи — списати k і далі звичайний `_send_once`
   (перевірка `expired()`/`request_timeout()` — після паузи). HTTP 429 на під-batch -> локальні токени = 0
   (кошик провайдера порожній), далі звичайний шлях повтору; повтор знову йде через пейсер. 5xx і мережеві
   збої кошик не обнуляють (це не ліміт швидкості). Якщо після 429 бюджет не дозволяє дочекатись токенів,
-  назовні виходить `RpcTimeout("budget")`, а не `RpcRateLimited` (контракт це дозволяє: винен бюджет).
+  назовні виходить `RpcBudgetTimeout`, а не `RpcRateLimited` (контракт це дозволяє: винен бюджет).
   `tx_rate_per_second = math.inf` вимикає пейсер; скінченна швидкість — не менше 0.1/с, тож одна пауза
   пейсера не перевищує `tx_burst / 0.1` с (10·`tx_burst`, навіть за безкінечного дедлайну) і завжди менша
   за `deadline.remaining()`. `max_batch <= tx_burst` (інакше під-batch ніколи не
@@ -53,9 +54,11 @@
   бюджет запиту вже витрачено. Пауза робиться лише якщо вона **менша за `deadline.remaining()`**; інакше
   повтор однаково не вмістився б, і піднімається остання справжня помилка (а не «бюджет»), без сну.
   Сон — через інʼєктований `sleep`, час — через інʼєктований `clock`.
-- Перед КОЖНИМ запитом (також повтором і кожним під-batch): `deadline.expired()` -> `RpcTimeout("budget")`;
-  `request_timeout() <= 0` (або NaN) — теж `RpcTimeout("budget")`, нуль запитів (на 0 httpx/urllib3 можуть
-  кидати ValueError).
+- Перед КОЖНИМ запитом (також повтором і кожним під-batch): `deadline.expired()` -> `RpcBudgetTimeout`;
+  `request_timeout() <= 0` (або NaN) — теж `RpcBudgetTimeout`, нуль запитів (на 0 httpx/urllib3 можуть
+  кидати ValueError). `RpcBudgetTimeout` (T-051) — підклас `RpcTimeout` з фіксованим текстом `budget`: усі три
+  місця, де адаптер сам вирішує «винен бюджет», піднімають саме його; таймаути транспорту (httpx, загальна
+  тривалість запиту) лишаються звичайним `RpcTimeout`.
 - Загальний таймаут запиту: `httpx.Timeout` з усіма чотирма полями = `deadline.request_timeout(cap)`, і
   додатково адаптер міряє загальну тривалість сам (від відправки до кінця тіла) — і при отриманні заголовків,
   і між шматками тіла. Перевищення -> `RpcTimeout`, навіть якщо відповідь прийшла. Лишковий ризик: заголовки,
@@ -121,6 +124,7 @@ from unmask.ingest.rpc.protocol import (
     AccountInfo,
     Deadline,
     RawTransaction,
+    RpcBudgetTimeout,
     RpcError,
     RpcRateLimited,
     RpcTimeout,
@@ -526,7 +530,7 @@ class HttpRpcSource:
         if tokens < k:
             wait = (k - tokens) / self._tx_rate
             if wait >= deadline.remaining():
-                raise RpcTimeout("budget")  # дочекатись не дозволяє бюджет: ні сну, ні запиту, стан не змінено
+                raise RpcBudgetTimeout()  # дочекатись не дозволяє бюджет: ні сну, ні запиту, стан не змінено
             self._sleep(wait)
             after = self._clock.monotonic()
             tokens = min(float(self._tx_burst), tokens + max(after - now, 0.0) * self._tx_rate)
@@ -560,10 +564,10 @@ class HttpRpcSource:
 
     def _send_once(self, payload: Any, deadline: Deadline) -> Any:
         if deadline.expired():
-            raise RpcTimeout("budget")
+            raise RpcBudgetTimeout()
         timeout = deadline.request_timeout(self._cfg.request_timeout_seconds)
         if not timeout > 0:  # <= 0 і NaN
-            raise RpcTimeout("budget")
+            raise RpcBudgetTimeout()
         failure, raw = self._exchange(payload, timeout)
         if failure is not None:
             raise failure

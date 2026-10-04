@@ -22,13 +22,13 @@ from pathlib import Path
 
 import pytest
 
-from unmask.ingest.budget import Deadline, FakeClock
+from unmask.ingest.budget import BudgetExhausted, Deadline, FakeClock, deadline_timeouts
 from unmask.ingest.buyers import enumerate_buyers
 from unmask.ingest.collector import CollectionState, collect
 from unmask.ingest.config import load_config
 from unmask.ingest.model import CompletenessStatus, IngestResult, MissingReason
-from unmask.ingest.rpc.fixture import FailFor, FixtureRpcSource
-from unmask.ingest.rpc.protocol import RpcTimeout
+from unmask.ingest.rpc.fixture import FailAfter, FailFor, FixtureRpcSource
+from unmask.ingest.rpc.protocol import RpcBudgetTimeout, RpcTimeout
 
 ROOT = Path(__file__).resolve().parent.parent
 SCENARIOS = ROOT / "tests" / "fixtures" / "scenarios"
@@ -234,7 +234,7 @@ def test_budget_reason_takes_precedence_when_enumeration_cut_after_other_problem
     data["getTransaction"][oldest] = None
     (tmp_path / "basic").mkdir()
     (tmp_path / "basic" / "rpc.json").write_text(json.dumps(data))
-    cfg = _cfg(rpc=dataclasses.replace(load_config(SHIPPED).rpc, page_size=1))
+    cfg = _cfg(rpc=dataclasses.replace(load_config(SHIPPED).rpc, page_size=1, tx_batch_size=1))
     pages = len(data["getSignaturesForAddress"][M]) + 1  # по одному запису на сторінку + порожня
     _state, source, result = _timed_run(tmp_path / "basic", cfg, float(pages + 2))  # + два пакети
     assert [m for m, _p in source.calls[pages:]] == ["getTransaction", "getTransaction"]
@@ -384,6 +384,144 @@ def test_rpc_timeout_during_enumeration_caused_by_deadline_maps_to_budget_exhaus
     assert (b.complete, b.reason) == (False, MissingReason.TIMEOUT)
 
 
+# --- RpcBudgetTimeout (T-051): «бюджет не дозволяє» від адаптера -> budget_exhausted безумовно ---------
+#
+# Знахідка живого прогону: пейсер адаптера піднімає бюджетний таймаут, коли очікування токенів не вміщається
+# в залишок бюджету, але `deadline.expired()` у цей момент ще хибне. Мітка `RpcBudgetTimeout` (підклас
+# `RpcTimeout`) — це вже рішення адаптера «винен бюджет», тож ядро перетворює його на `budget_exhausted`
+# незалежно від `expired()`; звичайний `RpcTimeout` — як і раніше лише коли дедлайн сплив.
+
+
+class _RaiseOnNth(FixtureRpcSource):
+    """`nth`-те звернення методом `method` (рахунок з 1) закінчується винятком `exc` (журнал і годинник — до нього)."""
+
+    def __init__(self, scenario_dir, method: str, nth: int, exc: Exception, **kwargs) -> None:
+        super().__init__(scenario_dir, **kwargs)
+        self._method, self._nth, self._exc, self._seen = method, nth, exc, 0
+
+    def _enter(self, method, params):
+        super()._enter(method, params)
+        if method == self._method:
+            self._seen += 1
+            if self._seen == self._nth:
+                raise self._exc
+
+
+P2 = W["P2"]
+# Кожне місце виклику джерела в ядрі (basic, крок 1 с): (id, метод, n-те звернення цим методом, кого стосується).
+# Звернення basic: 1 — історія mint; 3 — пакет транзакцій покупців; 4 — історія P2; 6 — токен-рахунки P2;
+# 7 — історія токен-рахунку P2; 11 — пакет транзакцій вершини P2; service крок 4 — getAccountInfo(mint).
+CALL_SITES = [
+    ("buyers_history", "getSignaturesForAddress", 1, None),
+    ("buyers_transactions", "getTransaction", 1, None),
+    ("funding_history", "getSignaturesForAddress", 3, P2),
+    ("funding_token_accounts", "getTokenAccountsByOwner", 1, P2),
+    ("funding_token_account_history", "getSignaturesForAddress", 5, P2),
+    ("funding_transactions", "getTransaction", 2, P2),
+    ("service_step4", "getAccountInfo", 1, None),
+]
+
+
+def _run_site(method: str, nth: int, exc: Exception):
+    """Збір під великим бюджетом (дедлайн НЕ спливає), `nth`-те звернення `method` падає з `exc`."""
+    from unmask.ingest.service import IngestService
+
+    clock = FakeClock(advance_per_call=1.0)
+    cfg = dataclasses.replace(_cfg(), time_budget_seconds=1000.0)
+    source = _RaiseOnNth(BASIC, method, nth, exc, clock=clock)
+    if method == "getAccountInfo":
+        result = IngestService(cfg, source, clock=clock).collect(M)
+    else:
+        result = collect(CollectionState(mint=M, config_version=cfg.version), source, cfg, clock)
+    assert clock.monotonic() < 1000.0  # дедлайн так і не сплив
+    assert source._seen >= nth  # збій справді стався в цьому місці
+    return result
+
+
+def _problem_details(result: IngestResult, reason: MissingReason) -> list[str]:
+    c = result.completeness
+    details = [m.detail for m in c.missing if m.reason is reason]
+    return details + ([c.buyers.detail] if not c.buyers.complete and c.buyers.reason is reason else [])
+
+
+@pytest.mark.parametrize(("site", "method", "nth", "wallet"), CALL_SITES, ids=[s[0] for s in CALL_SITES])
+def test_budget_label_timeout_maps_to_budget_exhausted_even_if_deadline_not_expired(site, method, nth, wallet):
+    result = _run_site(method, nth, RpcBudgetTimeout())
+    reasons = _reasons(result)
+    assert BUDGET in reasons and MissingReason.TIMEOUT not in reasons
+    if wallet is None:  # перелічення покупців (або крок 4 сервісу) обірвав бюджет
+        b = result.completeness.buyers
+        assert (b.complete, b.reason) == (False, BUDGET)
+    else:
+        assert (wallet, BUDGET) in _missing(result)
+    assert result.completeness.status is CompletenessStatus.INCOMPLETE
+    details = _problem_details(result, BUDGET)
+    assert details and all(method in d and "budget" in d for d in details)
+    assert all("://" not in d for d in details)  # мітка адаптера фіксована: ні URL, ні тексту ззовні
+    assert all("timeout" not in d for d in details)  # і в detail проблема не підписана як `timeout`
+
+
+@pytest.mark.parametrize(("site", "method", "nth", "wallet"), CALL_SITES, ids=[s[0] for s in CALL_SITES])
+def test_plain_rpc_timeout_before_deadline_stays_timeout(site, method, nth, wallet):
+    result = _run_site(method, nth, RpcTimeout("request timed out"))
+    reasons = _reasons(result)
+    assert MissingReason.TIMEOUT in reasons and BUDGET not in reasons
+    if wallet is None:
+        assert result.completeness.buyers.reason is MissingReason.TIMEOUT
+    else:
+        assert (wallet, MissingReason.TIMEOUT) in _missing(result)
+
+
+def test_deadline_timeouts_converts_budget_label_unconditionally_and_plain_timeout_only_after_expiry():
+    clock = FakeClock()
+    alive = Deadline(clock, 10.0)
+    with pytest.raises(BudgetExhausted) as ei:
+        with deadline_timeouts(alive, "getTransaction from s1"):
+            raise RpcBudgetTimeout()
+    assert not alive.expired()
+    assert ei.value.detail == "getTransaction from s1: budget"
+    with pytest.raises(RpcTimeout) as plain:  # звичайний таймаут до межі — далі як є
+        with deadline_timeouts(alive, "x"):
+            raise RpcTimeout("request timed out")
+    assert type(plain.value) is RpcTimeout
+    clock.advance(10.0)
+    with pytest.raises(BudgetExhausted):  # звичайний таймаут на межі — як і раніше budget_exhausted
+        with deadline_timeouts(alive, "x"):
+            raise RpcTimeout("request timed out")
+    with pytest.raises(BudgetExhausted):
+        with deadline_timeouts(alive, "x"):
+            raise RpcBudgetTimeout()
+
+
+def test_failure_policies_raising_rpc_budget_timeout_work_and_mean_budget_exhausted():
+    # FailFor: перше звернення про P2 — бюджетний таймаут при живому дедлайні. Вершину P2 це зупиняє
+    # одразу (як будь-яке BudgetExhausted), а решта вершин рівня розгортаються далі: дедлайн ще не сплив.
+    _state, source, result = _timed_run(BASIC, _cfg(), 1000.0, failures=[FailFor(P2, RpcBudgetTimeout(), times=1)])
+    missing = _missing(result)
+    assert (P2, BUDGET) in missing and (P2, MissingReason.TIMEOUT) not in missing
+    assert "budget" in missing[(P2, BUDGET)].detail and "://" not in missing[(P2, BUDGET)].detail
+    assert sum(1 for _m, p in source.calls if P2 in p.values()) == 1  # жодного звернення про P2 після мітки
+    assert any(p.get("address") == W["P4"] for _m, p in source.calls)  # наступна вершина рівня розгорнута
+    # FailAfter: з першого звернення — бюджетний таймаут; перелічення — budget_exhausted, не timeout
+    _state, _source, result = _timed_run(BASIC, _cfg(), 1000.0, failures=[FailAfter(1, RpcBudgetTimeout())])
+    b = result.completeness.buyers
+    assert (b.complete, b.reason) == (False, BUDGET) and "budget" in b.detail
+    assert MissingReason.TIMEOUT not in _reasons(result)
+
+
+@pytest.mark.parametrize("key", ["M", "A", "P2"])
+def test_resume_after_rpc_budget_timeout_equals_fresh(key):
+    cfg = _cfg()
+    _fresh_source, fresh = _fresh(BASIC, cfg)
+    target = M if key == "M" else W[key]
+    state, _source, partial = _timed_run(BASIC, cfg, 1000.0, failures=[FailFor(target, RpcBudgetTimeout(), times=1)])
+    assert partial.completeness.status is CompletenessStatus.INCOMPLETE
+    assert BUDGET in _reasons(partial)
+    resumed = collect(state, FixtureRpcSource(BASIC), cfg, FakeClock())
+    assert _stable(resumed) == _stable(fresh)
+    assert resumed.metadata.transactions_scanned == fresh.metadata.transactions_scanned
+
+
 # --- Повтор після вичерпання == свіжий прогін; жодного звернення після спливу ------------------
 
 CASES = [
@@ -398,7 +536,7 @@ CASES = [
 def _case_cfg(config: dict):
     config = dict(config)
     if config.pop("rpc", None) == "ps2":
-        return _cfg(config, rpc=dataclasses.replace(load_config(SHIPPED).rpc, page_size=2))
+        return _cfg(config, rpc=dataclasses.replace(load_config(SHIPPED).rpc, page_size=2, tx_batch_size=2))
     return _cfg(config)
 
 

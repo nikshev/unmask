@@ -86,7 +86,9 @@ def _cfg(config: dict | None = None, *, page_size: int | None = None, **override
     values.update(overrides)
     cfg = dataclasses.replace(cfg, **values)
     if page_size is not None:
-        cfg = dataclasses.replace(cfg, rpc=dataclasses.replace(cfg.rpc, page_size=page_size))
+        # T-052: page_size — лише сторінка підписів; до T-052 він задавав і пачку транзакцій — тут пара
+        # зберігається, тож журнал викликів тесту той самий, що до T-052
+        cfg = dataclasses.replace(cfg, rpc=dataclasses.replace(cfg.rpc, page_size=page_size, tx_batch_size=page_size))
     return cfg
 
 
@@ -253,7 +255,7 @@ def test_failure_during_buyer_enumeration_marks_buyers_incomplete_with_reason(ex
 
 @pytest.mark.parametrize(("exc", "reason"), SOURCE_ERRORS, ids=_ids(SOURCE_ERRORS))
 def test_partial_transfers_retained_alongside_missing(exc, reason):
-    # page_size=1: транзакції A запитуються по одній від найновішого (G->A, B->A, D->A, …); пакет D->A падає
+    # page_size=1 (і tx_batch_size=1, T-052): транзакції A запитуються по одній від найновішого (G->A, B->A, D->A, …); пакет D->A падає
     cfg = _cfg(page_size=1)
     _fs, fresh = _collect(FixtureRpcSource(BASIC), cfg)
     state, result = _collect(_FailTransactionsOnce(BASIC, SIG_D_A, exc), cfg)

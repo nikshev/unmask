@@ -29,7 +29,8 @@
 | `collect_spl_inbound` | bool | — | true |
 | `time_budget_seconds` | float | > 0 | 40 |
 | `commitment` | str | `finalized` \| `confirmed` | finalized |
-| `rpc.page_size` | int | 1 ≤ p ≤ 1000 | 1000 |
+| `rpc.page_size` | int | 1 ≤ p ≤ 1000 | 1000 (лише limit сторінки підписів) |
+| `rpc.tx_batch_size` | int | 1 ≤ b ≤ 1000 | 25 (пачка `get_transactions` у ядрі; з версії 2) |
 | `rpc.request_timeout_seconds` | float | > 0 | 10 |
 | `rpc.max_retries` | int | ≥ 0 | 2 |
 | `rpc.retry_backoff_seconds` | float | ≥ 0 | 0.5 |

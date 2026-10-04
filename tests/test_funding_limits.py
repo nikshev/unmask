@@ -76,12 +76,16 @@ class _StubDeadline:
 DEADLINE = _StubDeadline()
 
 
-def _cfg(*, threshold: int, cap: int, depth: int = 3, n: int = 2, page_size: int = 1000, spl: bool = True):
+def _cfg(*, threshold: int, cap: int, depth: int = 3, n: int = 2, page_size: int = 1000, spl: bool = True,
+         tx_batch_size: int | None = None):
+    # T-052: page_size — лише сторінка підписів; до T-052 він задавав і пачку транзакцій. tx_batch_size=None
+    # при явному page_size бере те саме значення — журнал викликів тесту той самий, що до T-052.
     cfg = load_config(SHIPPED)
     return dataclasses.replace(
         cfg, first_buyers_n=n, funding_depth=depth, collect_spl_inbound=spl,
         counterparty_threshold=threshold, max_signatures_per_wallet=cap,
-        rpc=dataclasses.replace(cfg.rpc, page_size=page_size),
+        rpc=dataclasses.replace(cfg.rpc, page_size=page_size,
+                                tx_batch_size=page_size if tx_batch_size is None else tx_batch_size),
     )
 
 

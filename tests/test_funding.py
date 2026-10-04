@@ -76,11 +76,14 @@ class _StubDeadline:
 DEADLINE = _StubDeadline()
 
 
-def _cfg(depth: int = 3, *, spl: bool = True, page_size: int = 1000, n: int = 5):
+def _cfg(depth: int = 3, *, spl: bool = True, page_size: int = 1000, n: int = 5, tx_batch_size: int | None = None):
+    # T-052: page_size — лише сторінка підписів; до T-052 він задавав і пачку транзакцій. tx_batch_size=None
+    # при явному page_size бере те саме значення — журнал викликів тесту той самий, що до T-052.
     cfg = load_config(SHIPPED)
     return dataclasses.replace(
         cfg, first_buyers_n=n, funding_depth=depth, collect_spl_inbound=spl,
-        rpc=dataclasses.replace(cfg.rpc, page_size=page_size),
+        rpc=dataclasses.replace(cfg.rpc, page_size=page_size,
+                                tx_batch_size=page_size if tx_batch_size is None else tx_batch_size),
     )
 
 
