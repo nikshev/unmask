@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **38** · задач: **57** (виконано 41) · вимог у роботі: **18** · порушень: **0**
+Вимог: **38** · задач: **57** (виконано 42) · вимог у роботі: **16** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -32,7 +32,7 @@
 | `FR-002-01` | Система MUST будувати орієнтований граф з результату збору: вершини — гаманці (покупці й джерела фінансування) | `T-028` | `src/unmask/graph/build.py` | `tests/test_graph_build.py` |
 | `FR-002-02` | Кожне ребро MUST нести суму, кількість переказів, час першого й останнього переказу та перелік первинних посил | `T-025`, `T-028` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_build.py`, `tests/test_graph_model.py` |
 | `FR-002-03` | Кожна вершина MUST нести ролі (покупець, джерело) і мінімальну глибину від покупців; для покупців — порядковий | `T-025`, `T-028`, `T-029` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_model.py`, `tests/test_graph_build_nodes.py` |
-| `FR-002-04` | Побудова графа MUST бути детермінованою: той самий вхід дає побітово той самий граф і порядок. | `T-028`, `T-031`, `T-039`, `T-040` | `src/unmask/graph/build.py` | — |
+| `FR-002-04` | Побудова графа MUST бути детермінованою: той самий вхід дає побітово той самий граф і порядок. | `T-028`, `T-031`, `T-039`, `T-040` | `src/unmask/graph/build.py` | `tests/test_graph_determinism.py` |
 | `FR-002-05` | Граф MUST успадковувати статус повноти результату збору й перелік причин неповноти; граф над неповним збором M | `T-025`, `T-028`, `T-030` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_model.py`, `tests/test_graph_completeness.py` |
 | `FR-002-06` | Граф MUST зберігати нерозгорнуті вершини з результату збору з причиною (висока зв'язність, ліміт підписів) як  | `T-025`, `T-028`, `T-030` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_model.py`, `tests/test_graph_completeness.py` |
 | `FR-002-07` | Система MUST позначати вершину хабом за кожним із незалежних критеріїв: (а) належність до відомих списків адре | `T-032`, `T-033`, `T-034`, `T-035`, `T-055`, `T-057` | `src/unmask/graph/measures.py`, `src/unmask/hubs/criteria.py` | `tests/test_hubs_dust_fanout.py`, `tests/test_hubs_measures.py`, `tests/test_hubs_threshold_rule.py` |
@@ -88,6 +88,6 @@
 - `T-036` (002-funding-graph-hub-pruning) — у роботі
 - `T-039` (002-funding-graph-hub-pruning) — у роботі
 - `T-044` (002-funding-graph-hub-pruning) — виконано
-- `T-045` (002-funding-graph-hub-pruning) — у роботі
+- `T-045` (002-funding-graph-hub-pruning) — виконано
 - `T-046` (002-funding-graph-hub-pruning) — у роботі
 - `T-047` (002-funding-graph-hub-pruning) — у роботі
