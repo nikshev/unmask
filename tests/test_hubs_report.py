@@ -6,7 +6,7 @@ contracts/graph-service.md §6; data-model «EffectSnapshot», «EffectReport»)
 пропущене `giant_component` показує «розсипаний» граф там, де кластеризація дасть одну грудку (принцип V: звіт
 ніколи не каже «чисто» і не мовчить про концентрацію). Тому, крім щасливого шляху:
 
-- еталони незалежні від коду: розділ `report` у `expected.json` усіх 11 сценаріїв (оракул генератора — BFS) і
+- еталони незалежні від коду: розділ `report` у `expected.json` усіх 12 сценаріїв (оракул генератора — BFS) і
   власний BFS-оракул цього тесту над тими самими графами; порівняння — повна рівність поле за полем;
 - межі: частка рівно на порозі (строго більше — `>`→`>=` червоний на 5/10), найбільша компонента — за кількістю
   ПОКУПЦІВ, а не вершин (50 джерел і 1 покупець проти 3 покупців), знаменник — усі покупці, включно з
@@ -15,8 +15,9 @@ contracts/graph-service.md §6; data-model «EffectSnapshot», «EffectReport»)
 - інваріанти типів звіту гучні; `after` не підграф `before` чи втрачений покупець — гучно, а не тихо;
 - у звіті немає поля «ok»/«clean».
 
-Попередження `address_lists_not_applied` (T-037), `empty_graph` і `all_sources_pruned` (T-038) у цій задачі не
-перевіряються: звірка з `expected.json` порівнює решту попереджень повністю, а ці три — поза обсягом T-036.
+Звірка з `expected.json` порівнює ВСІ попередження повністю, разом із порядком (включно з `empty_graph` і
+`all_sources_pruned` з T-038 та `address_lists_not_applied` з T-037). Крайові випадки цих попереджень — у
+`tests/test_hubs_edge_cases.py`.
 """
 
 import ast
@@ -52,12 +53,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SHIPPED_HUBS = ROOT / "config" / "hubs.yaml"
 SHIPPED_LISTS = ROOT / "config" / "hub_addresses.yaml"
 
-# Зафіксований набір із 11 сценаріїв (а не «усе, що лежить у каталозі»): нові сценарії додаються сюди свідомо.
-SCENARIOS = ["g_all_hubs", "g_basic", "g_buyer_hub", "g_dust", "g_dust_mixed", "g_empty",
+# Зафіксований набір із 12 сценаріїв (а не «усе, що лежить у каталозі»): нові сценарії додаються сюди свідомо.
+SCENARIOS = ["g_all_hubs", "g_basic", "g_buyer_hub", "g_delegated", "g_dust", "g_dust_mixed", "g_empty",
              "g_financier", "g_hub", "g_incomplete", "g_known", "g_unexpanded"]
-
-# Попередження, що з'являються в T-037/T-038 (поза обсягом T-036).
-DEFERRED = {"address_lists_not_applied", "empty_graph", "all_sources_pruned"}
 
 BUYER, FUNDER = NodeRole.BUYER, NodeRole.FUNDER
 GIANT, DELEGATED_INCOMPLETE = GraphWarning.GIANT_COMPONENT, GraphWarning.DELEGATED_INCOMPLETE
@@ -200,6 +198,8 @@ def _same(graph: FundingGraph, config: HubConfig | None = None, *, delegated_com
 def test_fixture_set_is_present():
     for name in SCENARIOS:
         assert (Path(GRAPH_FIXTURES) / name / "expected.json").is_file(), name
+    on_disk = sorted(p.name for p in Path(GRAPH_FIXTURES).iterdir() if (p / "expected.json").is_file())
+    assert on_disk == SCENARIOS  # новий каталог сценарію без запису тут — червоний, а не мовчки пропущений
 
 
 @pytest.mark.parametrize("name", SCENARIOS)
@@ -212,11 +212,8 @@ def test_snapshots_match_bfs_oracle_from_expected_json(name):
 @pytest.mark.parametrize("name", SCENARIOS)
 def test_report_equals_expected_json_report_section(name):
     expected, _, _, report = _report(name)
-    got, want = _report_dict(report), dict(expected["report"])
-    # Попередження T-037/T-038 — поза обсягом; решта попереджень — повна рівність, разом із порядком.
-    assert [w for w in got.pop("warnings") if w not in DEFERRED] == \
-        [w for w in want.pop("warnings") if w not in DEFERRED]
-    assert got == want
+    # Повна рівність разом з усіма попередженнями й їхнім порядком.
+    assert _report_dict(report) == expected["report"]
 
 
 @pytest.mark.parametrize("name", SCENARIOS)
@@ -420,6 +417,19 @@ def test_after_must_be_a_pruning_of_before():
         effect_report(before, swapped_buyer, _config(), lists_applied=True, delegated_complete=True)
 
 
+def test_after_with_a_different_node_but_same_counts_and_edges_is_rejected():
+    # before: F -> B0..B2 і ізольований X; after: ті самі ребра й покупці, але Z замість X. Кількості вершин, ребер
+    # і покупців збігаються, ребра — підмножина: лише перевірка «вершини after ⊂ вершини before» це бачить.
+    buyers = [_buyer(f"B{i}", rank=i + 1) for i in range(3)]
+    edges = [_edge("F", b.address) for b in buyers]
+    before = _graph([_node("F"), _node("X"), *buyers], edges)
+    after = _graph([_node("F"), _node("Z"), *buyers], edges)
+    with pytest.raises(ValueError, match="after has nodes absent from before"):
+        effect_report(before, after, _config(), lists_applied=True, delegated_complete=True)
+    effect_report(before, _graph([_node("F"), _node("X"), *buyers], edges), _config(),
+                  lists_applied=True, delegated_complete=True)  # той самий склад — гаразд
+
+
 def test_argument_types_are_checked():
     g, c = _fan(1, 2), _config()
     with pytest.raises(TypeError):
@@ -458,12 +468,36 @@ def test_snapshot_invariants_are_loud():
     with pytest.raises(ValueError):
         _snap(components=6)  # компонент більше, ніж вершин
     with pytest.raises(ValueError):
+        _snap(buyers_total=6, largest_component_buyer_share=2 / 6)  # покупців більше, ніж вершин
+    with pytest.raises(ValueError):
         _snap(buyers_in_largest_component=0, largest_component_buyer_share=0.0)  # покупці є, а в найбільшій — 0
     with pytest.raises(TypeError):
         _snap(nodes=True)
     with pytest.raises(TypeError):
         _snap(largest_component_buyer_share=1)
     _snap(buyers_total=0, buyers_in_largest_component=0, largest_component_buyer_share=0.0, isolated_buyers=0)
+
+
+@pytest.mark.parametrize("changes", [
+    dict(edges=-1),
+    dict(components=-1),
+    dict(isolated_buyers=-1),
+    dict(buyers_in_largest_component=-1, largest_component_buyer_share=-1 / 4),
+], ids=["edges", "components", "isolated_buyers", "buyers_in_largest_component"])
+def test_snapshot_rejects_negative_counters_on_their_own(changes):
+    # Кожне поле — окремо, так, щоб жодна інша перевірка знімка не спрацювала раніше: лише межа `>= 0`.
+    # (`_snap(nodes=-1)` маскується `components > nodes`, тому тут його немає.)
+    with pytest.raises(ValueError, match="< 0"):
+        _snap(**changes)
+
+
+def test_snapshot_rejects_more_buyers_than_nodes_on_its_own():
+    # Усі інші нерівності виконано: buyers_total=6 > nodes=5 — єдина причина відмови.
+    snap = dict(nodes=5, edges=2, components=3, buyers_total=6, buyers_in_largest_component=2,
+                largest_component_buyer_share=2 / 6, isolated_buyers=1)
+    with pytest.raises(ValueError, match="buyers_total=6 > nodes=5"):
+        EffectSnapshot(**snap)
+    EffectSnapshot(**{**snap, "buyers_total": 5, "largest_component_buyer_share": 2 / 5})
 
 
 def _rep(**changes) -> EffectReport:
@@ -482,17 +516,24 @@ def test_report_invariants_are_loud():
         _rep(pruned_nodes=1)
     with pytest.raises(ValueError):
         _rep(pruned_edges=1)
-    with pytest.raises(ValueError):  # покупців стало менше
-        _rep(after=_snap(nodes=4, buyers_total=3, buyers_in_largest_component=2,
-                         largest_component_buyer_share=2 / 3), pruned_nodes=1)
+    # Покупців стало менше. Частка після 1/3 ≤ 0.5 — `giant_component` не потрібен, тож жодна інша перевірка
+    # не спрацьовує раніше за перевірку кількості покупців.
+    with pytest.raises(ValueError, match="buyers_total changed 4 -> 3"):
+        _rep(after=_snap(nodes=4, buyers_total=3, buyers_in_largest_component=1,
+                         largest_component_buyer_share=1 / 3), pruned_nodes=1)
     with pytest.raises(ValueError):  # не впорядковано
         _rep(warnings=(GraphWarning.EMPTY_GRAPH, DELEGATED_INCOMPLETE))
     with pytest.raises(ValueError):  # дубль
         _rep(warnings=(DELEGATED_INCOMPLETE, DELEGATED_INCOMPLETE))
-    with pytest.raises(ValueError):
-        _rep(warn_share=0.0)
-    with pytest.raises(ValueError):
+    # `giant_component` присутній (частка 0.5 > 0.0 / > -0.1), тож узгодженість попередження не спрацьовує
+    # раніше за перевірку діапазону: поріг 0 і від'ємний недопустимі (інтервал (0, 1]).
+    with pytest.raises(ValueError, match="out of"):
+        _rep(warn_share=0.0, warnings=(GIANT,))
+    with pytest.raises(ValueError, match="out of"):
+        _rep(warn_share=-0.1, warnings=(GIANT,))
+    with pytest.raises(ValueError, match="out of"):
         _rep(warn_share=1.5)
+    assert _rep(warn_share=1.0).warn_share == 1.0 and _rep(warn_share=0.4, warnings=(GIANT,)).warn_share == 0.4
     with pytest.raises((TypeError, ValueError)):
         _rep(warnings=("no_such_warning",))
     with pytest.raises(TypeError):

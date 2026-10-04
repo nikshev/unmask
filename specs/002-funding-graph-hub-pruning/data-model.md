@@ -218,7 +218,7 @@ EffectReport(before: EffectSnapshot, after: EffectSnapshot, pruned_nodes: int, p
              warn_share: float, warnings: tuple[GraphWarning, …])
 ```
 
-Інваріанти: `after.largest_component_buyer_share > warn_share` ⇔ `giant_component ∈ warnings`; `before.buyers_total == 0` ⇔ `empty_graph ∈ warnings`; `pruned_nodes == before.nodes − after.nodes`. Поля «ok/clean» немає.
+Інваріанти: `after.largest_component_buyer_share > warn_share` ⇔ `giant_component ∈ warnings`; `before.buyers_total == 0` ⇔ `empty_graph ∈ warnings`; `(before.nodes − before.buyers_total ≥ 1 ∧ after.nodes − after.buyers_total == 0)` ⇔ `all_sources_pruned ∈ warnings` (вершина покупець+джерело вважається покупцем; граф без покупців і всі вершини відсічені дає обидва попередження); `pruned_nodes == before.nodes − after.nodes`. Поля «ok/clean» немає.
 
 ## Результат (`src/unmask/graph/model.py`)
 

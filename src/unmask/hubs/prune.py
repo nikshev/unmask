@@ -21,7 +21,10 @@
 інцидентні ребра — у канонічному порядку графа (`edge_sort_key`). Вхідний граф не змінюється (усі типи frozen).
 
 Типи перевіряють себе при побудові (стиль `graph.model`): запис без хітів (SC-002), невпорядковані хіти, чуже
-ребро, покупець у записах чи хаб у графі результату — гучно (`TypeError`/`ValueError`), а не тихо.
+ребро, відсічена адреса, що досі в графі результату (`PruneOutcome`) — гучно (`TypeError`/`ValueError`), а не
+тихо. Що в записи потрапляють лише не-покупці, гарантує `prune_hubs` (покупець із хітами — `BuyerFlag`):
+`PruneRecord` ролей не несе, тож «покупець у записах» тип не ловить — крім випадку, коли його вершина лишилась у
+графі результату.
 
 Залежності: `graph.model`, `hubs.criteria`, `hubs.config` (plan «Правило залежностей»); жодного `ingest`-коду,
 мережі, файлів чи годинника.
@@ -204,11 +207,9 @@ class PruneOutcome:
             for hit in f.criteria:
                 if _is_list_hit(hit) and hit.lists_version != self.lists_version:
                     raise ValueError(f"prune_outcome: flag {f.address} list hit lists_version != outcome")
-
-        if not self.lists_applied:
-            hits = [h for item in (*records, *flags) for h in item.criteria]
-            if any(_is_list_hit(h) for h in hits):
-                raise ValueError("prune_outcome: lists not applied but a list:* hit is present (FR-002-12)")
+        # Ще одна перевірка «списки не застосовано, а хіт `list:*` є» не потрібна й була б недосяжною: хіт за списком
+        # вимагає `lists_version >= 1` (`CriterionHit`), а `lists_applied=False` ⇔ `lists_version is None`, тож
+        # запис (`PruneRecord`) і позначка (цикл вище) з таким хітом не проходять власних перевірок версії.
 
 
 # --- Відсікання ------------------------------------------------------------------

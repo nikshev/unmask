@@ -638,6 +638,45 @@ def test_outcome_rejects_broken_state():
         PruneOutcome(after, (record,), (flag,), "yes", 2, 1)
 
 
+_LIST_DEX = CriterionHit(HubCriterion.KNOWN_LIST, None, None, "list:dex_routers", 1)
+
+
+def test_record_and_flag_reject_two_list_categories_for_one_address():
+    # Інваріант «адреса — не більше ніж в одній категорії списку»: два хіти `list:*` з різними `detail` проходять
+    # перевірку порядку й дублів, тож їх ловить лише окреме правило.
+    a, b = _ADDR[0], _ADDR[1]
+    assert (_LIST_DEX.criterion.value, _LIST_DEX.detail) < (_LIST.criterion.value, _LIST.detail)  # порядок гаразд
+    with pytest.raises(ValueError, match="at most one address list category"):
+        PruneRecord(a, (_LIST_DEX, _LIST), (_transfer(a, b),), _QUIET, 2, 1)
+    with pytest.raises(ValueError, match="at most one address list category"):
+        BuyerFlag(b, 1, (_LIST_DEX, _LIST), _QUIET)
+    # хіт за списком + `address_type:off_curve` — це два різні джерела `known_list`, не дві категорії: гаразд
+    assert PruneRecord(a, (_OFF, _LIST), (_transfer(a, b),), _QUIET, 2, 1).criteria == (_OFF, _LIST)
+
+
+def test_outcome_rejects_flag_list_hit_with_other_lists_version_even_when_lists_applied():
+    full, record, flag = _outcome_parts()
+    after = full.without({record.address})
+    stale = CriterionHit(HubCriterion.KNOWN_LIST, None, None, "list:launchpads", 2)  # версія 2, у результату — 1
+    with pytest.raises(ValueError, match="list hit lists_version != outcome"):
+        PruneOutcome(after, (record,), (BuyerFlag(flag.address, 1, (stale,), _QUIET),), True, 2, 1)
+    ok = PruneOutcome(after, (record,), (BuyerFlag(flag.address, 1, (_LIST,), _QUIET),), True, 2, 1)
+    assert ok.buyer_flags[0].criteria == (_LIST,)
+
+
+def test_list_hit_without_applied_lists_cannot_be_built_in_record_or_flag_at_all():
+    # Хіт за списком вимагає lists_version >= 1; результат без списків має lists_version=None, тож ні запис, ні
+    # позначка з таким хітом не проходять власних перевірок (окремої гілки в `PruneOutcome` для цього немає).
+    full, record, flag = _outcome_parts()
+    after = full.without({record.address})
+    with pytest.raises(ValueError):
+        dataclasses.replace(record, criteria=(_LIST,), lists_version=None)
+    with pytest.raises(ValueError):
+        PruneOutcome(after, (), (BuyerFlag(flag.address, 1, (_LIST,), _QUIET),), False, 2, None)
+    with pytest.raises(ValueError):
+        CriterionHit(HubCriterion.KNOWN_LIST, None, None, "list:launchpads", None)
+
+
 def test_outcome_rejects_unordered_records_and_flags():
     h1, h2, b1, b2 = sorted(_ADDR[:4])
     graph = FundingGraph(nodes=(_node(b1, roles=(NodeRole.BUYER,), rank=1),

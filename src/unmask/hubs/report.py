@@ -1,4 +1,4 @@
-# impl: FR-002-11, FR-002-12
+# impl: FR-002-09, FR-002-11, FR-002-12
 """Звіт ефекту відсікання хабів (FR-002-11; contracts/graph-service.md §6; data-model «EffectSnapshot»,
 «EffectReport»; research R-10, R-16, R-22).
 
@@ -16,7 +16,8 @@
   включно з ізольованими (`wallets_analyzed`), а не лише ті, що мають ребра; 0 покупців → `0.0`;
 - `isolated_buyers` — покупці без жодного ребра (будь-якого виду, у будь-якому напрямку).
 
-Попередження (порядок — за рядковим значенням, без дублів):
+Попередження (порядок — за рядковим значенням, без дублів: address_lists_not_applied < all_sources_pruned <
+delegated_incomplete < empty_graph < giant_component):
 - `giant_component` ⇔ `after.largest_component_buyer_share > config.thresholds.giant_component_warn_share`
   (СТРОГО більше, FR-002-14; поріг — з версіонованого конфігу, принцип III);
 - `delegated_incomplete` ⇔ `not delegated_complete` (аналіз делегованих купівель неповний — частка може бути
@@ -26,7 +27,13 @@
   категорії при завантаженому файлі — `lists_applied=True`, попередження немає. `lists_applied` — аргумент, а не
   поле `EffectReport`, тож інваріант «`metadata.lists_applied == False` ⇒ попередження» перевіряє `GraphResult`
   (T-039) і схема; тут його єдине джерело.
-`empty_graph`/`all_sources_pruned` додає T-038 (R-16).
+- `empty_graph` ⇔ `before.buyers_total == 0` (R-16, data-model): порожній результат збору (0 покупців) не «чистий»,
+  а явно порожній — принцип V; інваріант перевіряє `EffectReport` (немає попередження при 0 покупців — гучно);
+- `all_sources_pruned` ⇔ у `before` була хоч одна вершина без ролі покупця, а в `after` жодної (R-16,
+  contracts/graph-service.md §6): граф кластеризації складається лише з покупців (можливо, з ребрами між ними),
+  тож «немає зв'язків» не означає «чисто». Не спрацьовує, коли джерел від початку не було (нічого відсікати) і
+  коли хоч одне джерело вціліло; вершина з ролями «покупець + джерело» — покупець, а не джерело. Інваріант за
+  знімками (`nodes - buyers_total`) перевіряє `EffectReport`.
 
 `after` має бути відсіканням `before`: ті самі покупці, вершини й ребра — підмножини. Інакше «до/після» не
 порівнювані й різниці (`pruned_*`) брешуть — гучна `ValueError`, а не тихий звіт.
@@ -75,6 +82,16 @@ def _share_of(buyers_in_largest: int, buyers_total: int) -> float:
 
 def _warn_order(w: GraphWarning) -> str:
     return w.value
+
+
+def _non_buyers(snapshot: "EffectSnapshot") -> int:
+    """Вершини без ролі покупця (джерела): покупців у знімку `buyers_total`, решта вершин — не покупці."""
+    return snapshot.nodes - snapshot.buyers_total
+
+
+def _all_sources_pruned(before: "EffectSnapshot", after: "EffectSnapshot") -> bool:
+    """Єдина умова `all_sources_pruned` (R-16): джерела були, а в графі кластеризації їх не лишилось."""
+    return _non_buyers(before) >= 1 and _non_buyers(after) == 0
 
 
 # --- Типи ------------------------------------------------------------------------
@@ -166,6 +183,12 @@ class EffectReport:
         if giant != (GraphWarning.GIANT_COMPONENT in warnings):
             raise ValueError(f"report: giant_component must be present iff after share "
                              f"{self.after.largest_component_buyer_share} > warn_share {ws}")
+        if (self.before.buyers_total == 0) != (GraphWarning.EMPTY_GRAPH in warnings):
+            raise ValueError("report: empty_graph must be present iff before.buyers_total == 0 "
+                             "(an empty result is never silently clean, principle V)")
+        if _all_sources_pruned(self.before, self.after) != (GraphWarning.ALL_SOURCES_PRUNED in warnings):
+            raise ValueError("report: all_sources_pruned must be present iff before had non-buyer nodes "
+                             "and after has none")
 
 
 # --- Обчислення ------------------------------------------------------------------
@@ -227,6 +250,10 @@ def effect_report(before: FundingGraph, after: FundingGraph, config: HubConfig, 
         warnings.append(GraphWarning.GIANT_COMPONENT)
     if not delegated_complete:
         warnings.append(GraphWarning.DELEGATED_INCOMPLETE)
+    if snap_before.buyers_total == 0:  # R-16: порожній результат не «чистий»
+        warnings.append(GraphWarning.EMPTY_GRAPH)
+    if _all_sources_pruned(snap_before, snap_after):  # R-16: лишились самі покупці
+        warnings.append(GraphWarning.ALL_SOURCES_PRUNED)
 
     return EffectReport(
         before=snap_before,
