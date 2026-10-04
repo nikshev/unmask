@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **38** · задач: **57** (виконано 55) · вимог у роботі: **4** · порушень: **0**
+Вимог: **38** · задач: **57** (виконано 56) · вимог у роботі: **2** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -47,9 +47,9 @@
 | `FR-002-16` | Неоднозначні випадки (кілька платників чи отримувачів без однозначної відповідності) MUST фіксуватися як «канд | `T-043`, `T-045` | `src/unmask/ingest/delegated.py` | `tests/test_delegated_fixtures.py`, `tests/test_delegated_rule.py` |
 | `FR-002-17` | Розпізнавання swap-and-send MUST NOT змінювати склад, порядок і порядкові номери перших N покупців із фічі 001 | `T-046` | `src/unmask/ingest/buyers.py`, `src/unmask/ingest/cache.py` | `tests/test_delegated_wiring.py` |
 | `FR-002-18` | Зв'язки «делегована купівля» MUST потрапляти в граф як окремий вид ребра з первинним посиланням; ребра цього в | `T-025`, `T-028`, `T-047` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_build.py`, `tests/test_graph_model.py`, `tests/test_graph_delegated_edges.py` |
-| `FR-002-19` | Якщо транзакції не вдалося розібрати для цього аналізу, результат MUST це позначати як неповний щодо swap-and- | `T-039`, `T-044`, `T-045`, `T-046`, `T-048` | `src/unmask/graph/service.py`, `src/unmask/ingest/parse.py`, `src/unmask/ingest/collector.py`, `src/unmask/ingest/service.py`, `src/unmask/ingest/delegated.py`, `src/unmask/ingest/model.py` | `tests/test_delegated_wiring.py`, `tests/test_graph_service.py`, `tests/test_ingest_delegated_model.py` |
+| `FR-002-19` | Якщо транзакції не вдалося розібрати для цього аналізу, результат MUST це позначати як неповний щодо swap-and- | `T-039`, `T-044`, `T-045`, `T-046`, `T-048` | `src/unmask/graph/service.py`, `src/unmask/ingest/parse.py`, `src/unmask/ingest/collector.py`, `src/unmask/ingest/service.py`, `src/unmask/ingest/delegated.py`, `src/unmask/ingest/model.py` | `tests/test_delegated_wiring.py`, `tests/test_graph_service.py`, `tests/test_ingest_delegated_model.py`, `tests/test_graph_delegated_contract.py` |
 | `FR-002-20` | Усі зовнішні дані MUST надходити лише з результату збору (фіча 001); фіча не звертається до мережі напряму, те | `T-026`, `T-039`, `T-041`, `T-056` | `src/unmask/graph/service.py`, `src/unmask/ingest/serialize.py` | `tests/test_ingest_from_dict.py`, `tests/test_graph_integration_001.py`, `tests/test_graph_service.py` |
-| `FR-002-21` | Результат MUST серіалізуватися у JSON за контрактом, версіонованим окремо від контракту фічі 001; зміни контра | `T-039`, `T-040`, `T-044`, `T-048` | `src/unmask/graph/serialize.py`, `src/unmask/graph/service.py`, `src/unmask/ingest/serialize.py`, `src/unmask/ingest/model.py` | `tests/test_graph_serialize_contract.py`, `tests/test_ingest_delegated_model.py` |
+| `FR-002-21` | Результат MUST серіалізуватися у JSON за контрактом, версіонованим окремо від контракту фічі 001; зміни контра | `T-039`, `T-040`, `T-044`, `T-048` | `src/unmask/graph/serialize.py`, `src/unmask/graph/service.py`, `src/unmask/ingest/serialize.py`, `src/unmask/ingest/model.py` | `tests/test_graph_serialize_contract.py`, `tests/test_ingest_delegated_model.py`, `tests/test_graph_delegated_contract.py` |
 | `FR-002-22` | Система MUST позначати вершину хабом за п'ятим незалежним критерієм «пилове роздавання» (`dust_fanout`): верши | `T-032`, `T-033`, `T-035`, `T-040`, `T-054`, `T-055`, `T-056`, `T-057` | `src/unmask/graph/measures.py`, `src/unmask/graph/model.py`, `src/unmask/hubs/criteria.py`, `src/unmask/hubs/config.py` | `tests/test_hubs_dust_fanout.py`, `tests/test_graph_model.py`, `tests/test_graph_serialize_contract.py`, `tests/test_hubs_config.py`, `tests/test_hubs_measures.py` |
 
 ## Критичні задачі
