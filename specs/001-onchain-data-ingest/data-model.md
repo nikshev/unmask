@@ -157,7 +157,7 @@ IngestResult(
 
 ### `CollectionState` (змінний; `collector.py`)
 
-Поля: `mint`, `config_version`, `signature_cursor` (останній підпис перегортання історії mint або `None`), `mint_signatures` (список `(signature, slot, block_time, err)`), `mint_history_exhausted: bool`, `purchases_by_wallet`, `buyers` (після відбору), `frontier_by_depth: dict[int, dict[wallet, cutoff_signature]]`, `expanded: set[wallet]`, `transfers: dict[(signature, instruction_path), Transfer]`, `unexpanded`, `missing: dict[(wallet, reason), MissingHistory]`, `tx_cache: dict[signature, ParsedTx]`, `rpc_calls`, `transactions_scanned`.
+Поля: `mint`, `config_version`, `signature_cursor` (останній підпис перегортання історії mint або `None`), `mint_signatures` (список `(signature, slot, block_time, err)`), `mint_history_exhausted: bool`, `purchases_by_wallet`, `buyers` (після відбору), `frontier_by_depth: dict[int, dict[wallet, cutoff_signature]]`, `expanded: set[wallet]`, `transfers: dict[(signature, instruction_path), Transfer]`, `unexpanded`, `missing: dict[(wallet, reason), MissingHistory]`, `tx_cache: dict[signature, ParsedTx]`, `scan_memo: dict[key, ScanRecord]` (T-022: незмінні знімки ЗАВЕРШЕНИХ сканувань джерел — історія гаманця/токен-рахунку до межі — і списків токен-рахунків; ключ містить адресу, тип джерела, межу, `max_signatures_per_wallet`, `collect_spl_inbound`; зміна межі → інший ключ → перескан; порожнє на свіжому прогоні, не впливає на результат), `rpc_calls`, `transactions_scanned`.
 
 Переходи:
 
