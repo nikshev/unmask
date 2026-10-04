@@ -30,6 +30,24 @@ post, закритий — лише в pre; тому шукаються обид
 `tokenAmount.amount` / `amount`: рядок лише з ASCII-цифр або точне `int`; інше —
 пошкодження. WSOL лишається `spl:So111…112`, у SOL не перетворюється.
 
+Ефемерні токен-рахунки (T-050): рахунок, створений і закритий у тій самій транзакції (тимчасовий
+WSOL свопу), не потрапляє ні в pre-, ні в postTokenBalances. Для такого рахунку — і лише для
+нього — власник і mint беруться з `initializeAccount`/`2`/`3` (`info.account/owner/mint`) ТІЄЇ Ж
+транзакції (верхній рівень + inner; мапа будується заново для кожної транзакції), а `decimals` —
+з `transferChecked.info.tokenAmount.decimals`, що торкається цього рахунку (з тим самим mint), або
+9 для native mint `So111…112` (константа протоколу). Немає ні того, ні іншого — переказ лишається
+`unresolved` (`no_token_balance`): decimals не вигадуються, з контрагента не позичаються. Кілька
+різних власників/mint/decimals для рахунку → `owner_conflict`/`mint_mismatch`/`decimals_mismatch`.
+Якщо рахунок є в балансах, вирішують баланси; `initializeAccount*`, що їм суперечить, дає
+`owner_conflict`/`mint_mismatch` — не вгадується, хто правий. Дельти (`token_delta`) і правило купівлі
+рахуються лише за pre/post балансами, тож ефемерні рахунки на купівлі не впливають.
+
+Наслідок для доказів фінансування: проміжні перекази свопу через ефемерний рахунок тепер видимі як
+звичайні `ParsedTransfer` між власниками — напр. пул → користувач у `spl:So111…112` (WSOL), а також
+користувач → власний ефемерний рахунок (`sender == receiver`, відкидає `funding.py`). Перекази від
+пулу — шум, який відсікає фіча 002 (хаби/PDA), а не помилка парсера; відправник завжди розв'язаний
+до власника, названого в цій транзакції, переказів «з порожнечі» немає.
+
 Невстановлюваний власник не пропускається мовчки і не підміняється адресою
 токен-рахунку: такий переказ потрапляє в `ParsedTx.unresolved` з причиною
 (`UNRESOLVED_REASONS`), а сусідні перекази лишаються. Так само токен-інструкція, що
@@ -61,6 +79,10 @@ TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 TOKEN_PROGRAMS = frozenset({TOKEN_PROGRAM, TOKEN_2022_PROGRAM})
 
 _SPL_TRANSFER_TYPES = frozenset({"transfer", "transferChecked"})
+_INITIALIZE_ACCOUNT_TYPES = frozenset({"initializeAccount", "initializeAccount2", "initializeAccount3"})
+# Wrapped SOL: decimals native mint — константа протоколу SPL Token (9), не налаштування.
+NATIVE_MINT = "So11111111111111111111111111111111111111112"
+NATIVE_DECIMALS = 9
 # jsonParsed-типи токен-інструкцій, що переміщують токени між рахунками, але не розбираються.
 _UNSUPPORTED_TRANSFER_TYPES = frozenset({
     "transferCheckedWithFee",              # token-2022 transfer-fee extension
@@ -321,22 +343,91 @@ class _Unresolved(Exception):
         self.account, self.reason = account, reason
 
 
-class _TokenAccounts:
-    """Власник/mint/decimals токен-рахунку за адресою через accountKeys і pre/post токен-баланси."""
+def _is_decimals(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 255
 
-    def __init__(self, account_keys: tuple[str, ...], balances: tuple[TokenBalance, ...]) -> None:
+
+@dataclass(frozen=True)
+class _InitFacts:
+    """Факти однієї транзакції для ефемерних токен-рахунків (T-050). Не глобальні: нова на кожен `_parse`.
+
+    `initialized`: рахунок -> {(owner, mint)} з усіх `initializeAccount*` (верхній рівень + inner).
+    `checked_decimals`: рахунок -> {(mint, decimals)} з усіх `transferChecked`, що його торкаються.
+    Неповна інструкція (бракує рядкового поля, decimals не u8) — не факт: її просто немає в мапі;
+    сама інструкція переказу, якщо пошкоджена, позначається основним проходом, як і раніше.
+    """
+
+    initialized: Mapping[str, frozenset[tuple[str, str]]]
+    checked_decimals: Mapping[str, frozenset[tuple[str, int]]]
+
+    @classmethod
+    def collect(cls, message: Mapping[str, Any], meta: Mapping[str, Any]) -> "_InitFacts":
+        initialized: dict[str, set[tuple[str, str]]] = {}
+        checked: dict[str, set[tuple[str, int]]] = {}
+        try:
+            for _, ix in _instructions(message, meta):
+                cls._add(ix, initialized, checked)
+        except (_Corrupt, KeyError, IndexError, TypeError, ValueError, AttributeError):
+            # Пошкоджений перелік інструкцій: основний прохід упаде на тому ж місці й поверне
+            # CorruptRecord у звичному порядку; неповна мапа тоді ні на що не впливає.
+            pass
+        return cls(
+            initialized={k: frozenset(v) for k, v in initialized.items()},
+            checked_decimals={k: frozenset(v) for k, v in checked.items()},
+        )
+
+    @staticmethod
+    def _add(ix: Mapping[str, Any], initialized: dict[str, set[tuple[str, str]]],
+             checked: dict[str, set[tuple[str, int]]]) -> None:
+        if ix.get("programId") not in TOKEN_PROGRAMS:
+            return
+        parsed = ix.get("parsed")
+        info = parsed.get("info") if isinstance(parsed, Mapping) else None
+        if not isinstance(info, Mapping):
+            return
+        type_ = parsed.get("type")
+        if type_ in _INITIALIZE_ACCOUNT_TYPES:
+            account, owner, mint = info.get("account"), info.get("owner"), info.get("mint")
+            if all(isinstance(v, str) and v for v in (account, owner, mint)):
+                initialized.setdefault(account, set()).add((owner, mint))
+        elif type_ == "transferChecked":
+            mint, token_amount = info.get("mint"), info.get("tokenAmount")
+            decimals = token_amount.get("decimals") if isinstance(token_amount, Mapping) else None
+            if not (isinstance(mint, str) and mint and _is_decimals(decimals)):
+                return
+            for role in ("source", "destination"):
+                account = info.get(role)
+                if isinstance(account, str) and account:
+                    checked.setdefault(account, set()).add((mint, decimals))
+
+
+_NO_INIT_FACTS = _InitFacts(initialized={}, checked_decimals={})
+
+
+class _TokenAccounts:
+    """Власник/mint/decimals токен-рахунку за адресою через accountKeys і pre/post токен-баланси.
+
+    Рахунок, якого немає в токен-балансах (ефемерний: створений і закритий у тій самій
+    транзакції), розв'язується з `_InitFacts` тієї ж транзакції (T-050). Баланси мають пріоритет:
+    якщо рахунок є в балансах, мапа лише перевіряється на узгодженість, а не підміняє їх.
+    """
+
+    def __init__(self, account_keys: tuple[str, ...], balances: tuple[TokenBalance, ...],
+                 facts: _InitFacts = _NO_INIT_FACTS) -> None:
         self._index: dict[str, int] = {}
         for i, key in enumerate(account_keys):
             self._index.setdefault(key, i)
         self._balances = balances
+        self._facts = facts
 
     def resolve(self, account: str) -> tuple[str, str, int]:
         index = self._index.get(account)
         if index is None:
             raise _Unresolved(account, "account_not_in_keys")
         entries = [b for b in self._balances if b.account_index == index]
+        initialized = self._facts.initialized.get(account, frozenset())
         if not entries:
-            raise _Unresolved(account, "no_token_balance")
+            return self._resolve_ephemeral(account, initialized)
         owners = {b.owner for b in entries}
         if None in owners:
             raise _Unresolved(account, "owner_missing")
@@ -346,7 +437,32 @@ class _TokenAccounts:
             raise _Unresolved(account, "mint_mismatch")
         if len({b.decimals for b in entries}) > 1:
             raise _Unresolved(account, "decimals_mismatch")
-        return entries[0].owner, entries[0].mint, entries[0].decimals  # type: ignore[return-value]
+        owner, mint, decimals = entries[0].owner, entries[0].mint, entries[0].decimals
+        # initializeAccount* того ж рахунку мусить погоджуватись із балансами (не вгадувати, хто правий).
+        if any(o != owner for o, _ in initialized):
+            raise _Unresolved(account, "owner_conflict")
+        if any(m != mint for _, m in initialized):
+            raise _Unresolved(account, "mint_mismatch")
+        return owner, mint, decimals  # type: ignore[return-value]
+
+    def _resolve_ephemeral(self, account: str, initialized: frozenset[tuple[str, str]]) -> tuple[str, str, int]:
+        """Рахунок поза токен-балансами: власник і mint — з initializeAccount*, decimals — з
+        transferChecked цього рахунку (того ж mint) або 9 для native mint; інакше — не розв'язано."""
+        if not initialized:
+            raise _Unresolved(account, "no_token_balance")
+        if len({o for o, _ in initialized}) > 1:
+            raise _Unresolved(account, "owner_conflict")
+        if len({m for _, m in initialized}) > 1:
+            raise _Unresolved(account, "mint_mismatch")
+        ((owner, mint),) = initialized
+        decimals = {d for m, d in self._facts.checked_decimals.get(account, ()) if m == mint}
+        if mint == NATIVE_MINT:
+            decimals.add(NATIVE_DECIMALS)
+        if not decimals:
+            raise _Unresolved(account, "no_token_balance")
+        if len(decimals) > 1:
+            raise _Unresolved(account, "decimals_mismatch")
+        return owner, mint, decimals.pop()
 
 
 def _b58decode(text: str) -> bytes | None:
@@ -481,8 +597,6 @@ def _parse(raw: Mapping[str, Any], signature: str) -> ParsedTx:
     account_keys = tuple(_pubkey(k) for k in message["accountKeys"])
     pre_tokens = _token_balances("preTokenBalances", meta.get("preTokenBalances"))
     post_tokens = _token_balances("postTokenBalances", meta.get("postTokenBalances"))
-    accounts = _TokenAccounts(account_keys, pre_tokens + post_tokens)
-
     transfers: list[ParsedTransfer] = []
     unresolved: list[UnresolvedTransfer] = []
 
@@ -493,6 +607,8 @@ def _parse(raw: Mapping[str, Any], signature: str) -> ParsedTx:
         ))
 
     if not failed:
+        # Мапа ефемерних рахунків — лише з інструкцій цієї транзакції (T-050).
+        accounts = _TokenAccounts(account_keys, pre_tokens + post_tokens, _InitFacts.collect(message, meta))
         for path, ix in _instructions(message, meta):
             common = dict(signature=signature, slot=slot, block_time=block_time, instruction_path=path)
             sol = _system_transfer(ix)
