@@ -20,7 +20,8 @@
 КОНТЕЙНЕРИ стану (dict/list/set верхнього рівня й вкладені словники `frontier_by_depth`), а значення
 ділиться між копіями. Це коректно, бо значення незмінні — ІНВАРІАНТ, який перевіряє тест
 (`tests/test_resume.py::test_collection_state_values_are_immutable`): `ParsedTx`, `Transfer`,
-`Purchase`, `Buyer`, `MissingHistory`, `UnexpandedNode` — frozen-дата-класи, чиї поля — кортежі,
+`Purchase`, `Buyer`, `MissingHistory`, `UnexpandedNode`, а також ключі й знімки `scan_memo`
+(`funding.ScanKey`, `HistoryScan`, `TokenAccountsListing`, T-022) — frozen-дата-класи, чиї поля — кортежі,
 рядки, числа, enum'и або такі самі frozen-об'єкти. Єдиний виняток — `err` у записах
 `mint_signatures`: це сирий JSON від RPC (dict/list), тож він копіюється глибоко (лише коли не
 `None`). Таблиця `_FIELD_COPY` перелічує КОЖНЕ поле `CollectionState`: нове поле без запису в ній —
@@ -74,6 +75,7 @@ _FIELD_COPY: dict[str, Callable[[Any], Any]] = {
     "unexpanded": list,
     "missing": dict,
     "tx_cache": dict,
+    "scan_memo": dict,  # ключі й знімки — frozen-дата-класи з кортежами (T-022)
     "rpc_calls": _same,
     "transactions_scanned": _same,
 }

@@ -1,4 +1,4 @@
-# impl: FR-001-03, FR-001-04, FR-001-05, FR-001-07, FR-001-08, FR-001-09, FR-001-10, FR-001-16
+# impl: FR-001-03, FR-001-04, FR-001-05, FR-001-07, FR-001-08, FR-001-09, FR-001-10, FR-001-13, FR-001-16
 """BFS джерел фінансування по рівнях (research R-1, R-8, R-9).
 
 Що робить: `expand_level(source, state, depth, config, deadline)` збирає вхідні перекази
@@ -76,6 +76,45 @@
 Решта вершин рівня й усі вже відомі вершини наступних рівнів (колектор викликає `expand_level` далі)
 отримують `budget_exhausted` без жодного звернення. Повтор розгортає їх як після збою.
 
+Мемо сканувань джерел (T-022, FR-001-13, known-issues §1): `state.scan_memo: dict[ScanKey, ScanRecord]`.
+Джерела вершини — історія гаманця до межі, список токен-рахунків власника, історія кожного токен-рахунку
+до межі. `_node_signatures` спершу шукає знімок за ключем і лише за його відсутності звертається до
+джерела; ЗАВЕРШЕНЕ сканування (`_enough` або порожня сторінка; список — успішна відповідь) кладеться в
+мемо одразу, до наступного джерела, тож `BudgetExhausted` чи збій посеред вершини не губить уже завершених.
+Сканування, обірване збоєм чи бюджетом, не кладеться (атомарність: повний знімок або нічого), а його
+частково отримані записи, як і раніше, лише йдуть у вікно цього проходу. Гарантія прогресу: повтор із
+бюджетом, не меншим за (звернення, що повторюються завжди, — крок 4 сервісу, пошкоджені транзакції) +
+(найдорожче одне сканування джерела), завершує щонайменше одне сканування; бюджет, менший за одне
+сканування (наприклад, історія з двох сторінок при бюджеті на одне звернення), — чесний `incomplete` назавжди.
+- Ключ (`ScanKey`) — усе, від чого залежить знімок: тип джерела (`wallet`/`token_account`/
+  `token_accounts_listing`), адреса джерела, межа (`Cutoff`: підпис — `before=` гаманця й позиційна межа R-8;
+  слот — межа R-8 без підпису в історії рахунку), `max_signatures_per_wallet` (точка зупинки `_enough` і
+  нормалізація), `collect_spl_inbound`, `commitment` (дані джерела залежать від нього; як і решта, він під
+  версією конфігу — у ключі як захист від зміни без підняття версії). `owner` — вершина, для якої сканували
+  (для чистки; на знімок не впливає). Не в ключі: `page_size` — знімок нормалізовано (`_history_record`):
+  завершене сканування отримало всі придатні записи зі слотом ≥ слоту `max+1`-го, і лише вони потрібні
+  злиттю (аргумент T-013 вище: запис джерела зі слотом, меншим за слот його `max+1`-го придатного,
+  поступається `max+1` іншим підписам того ж джерела), тож знімок — функція лише даних, межі й ліміту, а
+  вікно з нормалізованих знімків == вікну з повних (перевіряє тест на page_size 1…1000 і оракул);
+  `counterparty_threshold` (застосовується до транзакцій після вікна), рівень/глибина вершини (вікно від
+  них не залежить: вершина, що змінила рівень, але не межу, бере знімок).
+- Зміна межі (пізніше ребро на resume) → інший ключ → перескан; truncated-ознака вікна виводиться зі
+  знімків (`truncated` джерела ⇒ у знімку ≥ `max+1` записів) ідентично свіжому прогону, як і
+  `signatures_seen`/`UnexpandedNode` (рахуються з вікна). Кількість переглянутих записів джерела у знімку
+  НЕ зберігається: вона залежить від `page_size` і на результат не впливає.
+- Список токен-рахунків — один раз за життя партиційного стану (ключ без межі й ліміту). Свідомо:
+  рахунок, створений після межі, не має історії до межі; закритий рахунок не видно й у свіжому прогоні
+  (R-8). Застарілість у межах життя стану (секунди–хвилини повторів) допустима.
+- Чистка (`_sweep_memo`, кінець кожного `expand_level`): історія лишається, лише поки її вершина з цією
+  межею є у frontier і не розгорнута; розгорнута, зникла (каскад `_invalidate`) чи зі зміненою межею —
+  прибирається (ключ однаково не влучив би; вершина, що повернулась, сканується заново). Списки не
+  чистяться. Пам'ять: історій — щонайбільше (недорозгорнуті вершини) × (1 + K токен-рахунків) × (`max+1`
+  + група слота) пар `(підпис, слот)`; на практиці — вершини, обірвані збоєм/бюджетом; списків — по одному
+  на кожного власника, що дійшов до кроку 3 (K адрес). Значення незмінні, тож `ResultCache` копіює лише
+  словник. Свіжий прогін стартує з порожнього мемо і в ньому не влучає (кожна вершина сканується раз, а
+  `owner` у ключі розводить навіть спільний для двох власників рахунок), тож журнал викликів свіжого
+  прогону той самий, що до T-022; stale `config_version` у `resume` скидає й мемо (усі поля стану).
+
 Залежить від: `rpc.protocol` (джерело, винятки, `Deadline`), `budget`, `parse`, `model`, `collector.CollectionState`.
 """
 
@@ -117,6 +156,76 @@ class Cutoff:
 
     signature: str
     slot: int
+
+
+# Типи джерел вершини, сканування яких запам'ятовується (T-022).
+SCAN_WALLET = "wallet"                                # getSignaturesForAddress(W, before=межа)
+SCAN_TOKEN_ACCOUNT = "token_account"                  # getSignaturesForAddress(рахунок) + межа R-8
+SCAN_TOKEN_ACCOUNTS_LISTING = "token_accounts_listing"  # getTokenAccountsByOwner(W)
+
+
+@dataclass(frozen=True)
+class ScanKey:
+    """Ключ мемо: УСІ параметри, від яких залежить знімок сканування (див. модуль, «Мемо»).
+
+    `address` — адреса джерела (гаманець, токен-рахунок, власник для списку); `owner` — вершина, для якої
+    сканували (== `address` для гаманця й списку): потрібна чистці; `cutoff` (підпис і слот межі) і
+    `max_signatures` — `None` лише для списку, який від них не залежить. `page_size` у ключі немає свідомо:
+    знімок від нього не залежить (нормалізація `_history_record`, правило `_enough`).
+    """
+
+    kind: str
+    address: str
+    owner: str
+    cutoff: Cutoff | None
+    max_signatures: int | None
+    collect_spl_inbound: bool
+    commitment: str
+
+
+@dataclass(frozen=True)
+class HistoryScan:
+    """Знімок ЗАВЕРШЕНОГО сканування історії (гаманця чи токен-рахунку) до межі.
+
+    `entries` — придатні записи `(signature, slot)` (без err, строго раніше за межу за R-1/R-8) у порядку
+    джерела (від найновішого), нормалізовані: якщо їх понад `max_signatures`, береться все зі слотом, не
+    меншим за слот `max+1`-го (група слота на межі повністю) — рівно стільки, скільки потрібно злиттю
+    вікна; `truncated` — джерело має понад `max_signatures` придатних записів.
+    """
+
+    entries: tuple[tuple[str, int], ...]
+    truncated: bool
+
+
+@dataclass(frozen=True)
+class TokenAccountsListing:
+    """Знімок завершеного `getTokenAccountsByOwner(owner)`: унікальні адреси рахунків за зростанням."""
+
+    accounts: tuple[str, ...]
+
+
+ScanRecord = HistoryScan | TokenAccountsListing
+
+
+def _scan_key(kind: str, address: str, owner: str, cutoff: Cutoff | None, config: IngestConfig) -> ScanKey:
+    return ScanKey(
+        kind=kind, address=address, owner=owner, cutoff=cutoff,
+        max_signatures=None if kind == SCAN_TOKEN_ACCOUNTS_LISTING else config.max_signatures_per_wallet,
+        collect_spl_inbound=config.collect_spl_inbound, commitment=config.commitment,
+    )
+
+
+def _history_record(valid: list[tuple[str, int]], cap: int) -> HistoryScan:
+    """Нормалізований знімок завершеного сканування (`valid` — усі отримані придатні, від найновішого).
+
+    Завершене сканування (`_enough` або кінець історії) отримало всі придатні записи зі слотом, не меншим
+    за слот `cap+1`-го придатного, — і лише їх потребує злиття (`_node_signatures`). Решта залежить від
+    `page_size` (скільки зайвого захопила остання сторінка) і відкидається, тож знімок — функція лише
+    даних джерела, межі й `cap`."""
+    if len(valid) > cap:
+        threshold = valid[cap][1]
+        return HistoryScan(entries=tuple(e for e in valid if e[1] >= threshold), truncated=True)
+    return HistoryScan(entries=tuple(valid), truncated=False)
 
 
 @dataclass
@@ -220,50 +329,72 @@ def _node_signatures(source: RpcSource, state: CollectionState, wallet: str, cut
     """
     page_size = config.rpc.page_size
     cap = config.max_signatures_per_wallet
+    memo = state.scan_memo
     found: dict[str, int] = {}
 
-    before = cutoff.signature
-    wallet_valid: list[tuple[str, int]] = []
-    try:
-        for page in _page(source, state, wallet, cutoff.signature, page_size, deadline):
-            for entry in page:
-                if entry.get("err") is None and entry["signature"] != cutoff.signature:
-                    if entry["signature"] not in found:
-                        wallet_valid.append((entry["signature"], entry["slot"]))
-                    found.setdefault(entry["signature"], entry["slot"])
-            before = page[-1]["signature"]
-            if _enough(wallet_valid, page[-1]["slot"], cap):
-                break
-    except _RPC_ERRORS as exc:
-        problems.append((_rpc_reason(exc), _rpc_detail(f"getSignaturesForAddress {wallet} before={before}", exc)))
+    wallet_key = _scan_key(SCAN_WALLET, wallet, wallet, cutoff, config)
+    wallet_record = memo.get(wallet_key)
+    if wallet_record is not None:
+        wallet_valid = list(wallet_record.entries)
+    else:
+        before = cutoff.signature
+        wallet_valid = []
+        seen: set[str] = set()
+        try:
+            for page in _page(source, state, wallet, cutoff.signature, page_size, deadline):
+                for entry in page:
+                    if entry.get("err") is None and entry["signature"] != cutoff.signature:
+                        if entry["signature"] not in seen:
+                            seen.add(entry["signature"])
+                            wallet_valid.append((entry["signature"], entry["slot"]))
+                before = page[-1]["signature"]
+                if _enough(wallet_valid, page[-1]["slot"], cap):
+                    break
+            memo[wallet_key] = _history_record(wallet_valid, cap)  # завершено: одразу в мемо
+        except _RPC_ERRORS as exc:
+            problems.append((_rpc_reason(exc), _rpc_detail(f"getSignaturesForAddress {wallet} before={before}", exc)))
+    for sig, slot in wallet_valid:
+        found.setdefault(sig, slot)
 
     if config.collect_spl_inbound:
-        try:
-            what = f"getTokenAccountsByOwner {wallet}"
-            ensure_time(deadline, what)
-            state.rpc_calls += 1
-            with deadline_timeouts(deadline, what):
-                accounts = source.get_token_accounts_by_owner(wallet, deadline=deadline)
-        except _RPC_ERRORS as exc:
-            problems.append((_rpc_reason(exc), _rpc_detail(what, exc)))
-            accounts = []
-        for pubkey in sorted({acc["pubkey"] for acc in accounts}):
-            entries: list[tuple[str, int]] = []
+        listing_key = _scan_key(SCAN_TOKEN_ACCOUNTS_LISTING, wallet, wallet, None, config)
+        listing = memo.get(listing_key)
+        if listing is None:
             try:
-                for page in _page(source, state, pubkey, None, page_size, deadline):
-                    entries.extend(
-                        (e["signature"], e["slot"]) for e in page
-                        if e.get("err") is None
-                    )
-                    # Історія — від найновішого за слотом. Понад `cap` придатних записів означає, що межу
-                    # вже пройдено: або її підпис знайдено, або є записи зі слотом, меншим за її слот
-                    # (а записи того ж слота, що й межа, правило R-8 без підпису межі відкидає).
-                    if _enough(_token_account_entries(entries, cutoff), page[-1]["slot"], cap):
-                        break
+                what = f"getTokenAccountsByOwner {wallet}"
+                ensure_time(deadline, what)
+                state.rpc_calls += 1
+                with deadline_timeouts(deadline, what):
+                    accounts = source.get_token_accounts_by_owner(wallet, deadline=deadline)
+                listing = TokenAccountsListing(accounts=tuple(sorted({acc["pubkey"] for acc in accounts})))
+                memo[listing_key] = listing
             except _RPC_ERRORS as exc:
-                problems.append((_rpc_reason(exc), _rpc_detail(
-                    f"getSignaturesForAddress {pubkey} (token account of {wallet})", exc)))
-            for sig, slot in _token_account_entries(entries, cutoff):
+                problems.append((_rpc_reason(exc), _rpc_detail(what, exc)))
+                listing = TokenAccountsListing(accounts=())
+        for pubkey in listing.accounts:
+            account_key = _scan_key(SCAN_TOKEN_ACCOUNT, pubkey, wallet, cutoff, config)
+            account_record = memo.get(account_key)
+            if account_record is not None:
+                kept = account_record.entries
+            else:
+                entries: list[tuple[str, int]] = []
+                try:
+                    for page in _page(source, state, pubkey, None, page_size, deadline):
+                        entries.extend(
+                            (e["signature"], e["slot"]) for e in page
+                            if e.get("err") is None
+                        )
+                        # Історія — від найновішого за слотом. Понад `cap` придатних записів означає, що межу
+                        # вже пройдено: або її підпис знайдено, або є записи зі слотом, меншим за її слот
+                        # (а записи того ж слота, що й межа, правило R-8 без підпису межі відкидає).
+                        if _enough(_token_account_entries(entries, cutoff), page[-1]["slot"], cap):
+                            break
+                    memo[account_key] = _history_record(_token_account_entries(entries, cutoff), cap)
+                except _RPC_ERRORS as exc:
+                    problems.append((_rpc_reason(exc), _rpc_detail(
+                        f"getSignaturesForAddress {pubkey} (token account of {wallet})", exc)))
+                kept = _token_account_entries(entries, cutoff)
+            for sig, slot in kept:
                 found.setdefault(sig, slot)
 
     found.pop(cutoff.signature, None)  # межа строга на рівні транзакції
@@ -417,6 +548,24 @@ def expand_level(source: RpcSource, state: CollectionState, depth: int, config: 
     if depth + 1 <= config.funding_depth:
         _reconcile_level(state, depth, into)
         into.flush()
+    _sweep_memo(state)
+
+
+def _sweep_memo(state: CollectionState) -> None:
+    """Прибрати з мемо історії, що вже не знадобляться (пам'ять; на результат не впливає).
+
+    Історія потрібна, лише поки вершина `owner` з межею `cutoff` є у frontier і ще не розгорнута:
+    розгорнута повторно не сканується; вершина, що зникла чи змінила межу, сканується з новим ключем.
+    Списки токен-рахунків лишаються на все життя стану (див. модуль). O(мемо + frontier) на рівень."""
+    memo = state.scan_memo
+    if not memo:
+        return
+    live = {(wallet, cutoff) for level in state.frontier_by_depth.values() for wallet, cutoff in level.items()
+            if wallet not in state.expanded}
+    dead = [key for key in memo
+            if key.kind != SCAN_TOKEN_ACCOUNTS_LISTING and (key.owner, key.cutoff.signature) not in live]
+    for key in dead:
+        del memo[key]
 
 
 class _StateIndex:

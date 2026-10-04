@@ -170,7 +170,7 @@ def test_partial_isolated_from_caller_mutations():
 
 
 CONTAINER_FIELDS = ("mint_signatures", "purchases_by_wallet", "frontier_by_depth", "expanded", "transfers",
-                    "unexpanded", "missing", "tx_cache")
+                    "unexpanded", "missing", "tx_cache", "scan_memo")
 
 
 @pytest.mark.parametrize("name", CONTAINER_FIELDS)
@@ -245,13 +245,13 @@ def test_collection_state_values_are_immutable(tmp_path):
     # інваріант структурної копії в ResultCache: значення в контейнерах стану незмінні, тож копіювати
     # треба лише контейнери; єдиний явний виняток — сирий JSON `err` у mint_signatures (копіюється глибоко)
     seen = {name: 0 for name in ("tx_cache", "transfers", "purchases_by_wallet", "missing", "unexpanded",
-                                 "buyers", "frontier_by_depth", "expanded", "mint_signatures")}
+                                 "buyers", "frontier_by_depth", "expanded", "mint_signatures", "scan_memo")}
     errors = 0
     for state in _states_for_invariant(tmp_path):
         for f in ("mint", "config_version", "signature_cursor", "mint_history_exhausted", "buyers",
                   "rpc_calls", "transactions_scanned"):
             _assert_immutable(getattr(state, f), f)
-        for name in ("tx_cache", "transfers", "purchases_by_wallet", "missing"):
+        for name in ("tx_cache", "transfers", "purchases_by_wallet", "missing", "scan_memo"):
             for key, value in getattr(state, name).items():
                 _assert_immutable(key, f"{name} key")
                 _assert_immutable(value, f"{name}[{key}]")
@@ -502,6 +502,7 @@ def test_stale_state_is_fully_reset_before_collection_starts(plant):
     _old, state, _first = _interrupted(old_cfg, failures=[FailAfter(20, RpcUnavailable("down"))])
     if plant:
         _plant_foreign_records(state)
+    assert state.scan_memo  # мемо сканувань (T-022) теж має бути скинуто — інакше перевірка порожня
     clock = _StateSpyClock(state)
     resume(state, FixtureRpcSource(BASIC), cfg, clock)
     assert clock.first_seen == CollectionState(mint=M, config_version=cfg.version)

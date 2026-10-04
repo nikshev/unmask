@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **16** · задач: **22** (виконано 21) · вимог у роботі: **1** · порушень: **0**
+Вимог: **16** · задач: **22** (виконано 22) · вимог у роботі: **0** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -20,7 +20,7 @@
 | `FR-001-10` | Система MUST NOT видавати неповний результат як повний; відсутність даних MUST бути видимою у відповіді, а не  | `T-003`, `T-014`, `T-016` | `src/unmask/ingest/collector.py`, `src/unmask/ingest/funding.py`, `src/unmask/ingest/buyers.py`, `src/unmask/ingest/model.py` | `tests/test_model_completeness.py`, `tests/test_collector.py`, `tests/test_collector_failures.py` |
 | `FR-001-11` | Коли токена не існує або адреса некоректна, система MUST повертати явну відповідь («токен не знайдено» або «не | `T-006`, `T-018`, `T-019` | `src/unmask/ingest/addresses.py`, `src/unmask/ingest/service.py` | `tests/test_service_rejections.py`, `tests/test_addresses.py` |
 | `FR-001-12` | Система MUST кешувати повний результат за адресою токена; повторний запит MUST віддаватися з кешу без звернень | `T-017`, `T-018` | `src/unmask/ingest/service.py`, `src/unmask/ingest/cache.py` | `tests/test_cache.py` |
-| `FR-001-13` | Неповний результат MUST NOT потрапляти в кеш як остаточний; повторний запит MUST домагатися лише відсутніх дан | `T-014`, `T-017`, `T-018`, `T-022` | `src/unmask/ingest/collector.py`, `src/unmask/ingest/service.py`, `src/unmask/ingest/cache.py` | `tests/test_resume.py` |
+| `FR-001-13` | Неповний результат MUST NOT потрапляти в кеш як остаточний; повторний запит MUST домагатися лише відсутніх дан | `T-014`, `T-017`, `T-018`, `T-022` | `src/unmask/ingest/collector.py`, `src/unmask/ingest/service.py`, `src/unmask/ingest/funding.py`, `src/unmask/ingest/cache.py` | `tests/test_resume.py`, `tests/test_scan_memo.py` |
 | `FR-001-14` | Результат MUST містити метадані: адресу токена, час аналізу, кількість покупців у вибірці, використані значенн | `T-002`, `T-003`, `T-014`, `T-020` | `src/unmask/ingest/serialize.py`, `src/unmask/ingest/collector.py`, `src/unmask/ingest/model.py`, `src/unmask/ingest/config.py` | `tests/test_config.py`, `tests/test_collector.py`, `tests/test_serialize_contract.py` |
 | `FR-001-15` | Доступ до зовнішнього джерела даних MUST бути прихований за інтерфейсом, що дозволяє підставити записані фікст | `T-001`, `T-004`, `T-005`, `T-021` | `src/unmask/ingest/rpc/fixture.py`, `src/unmask/ingest/rpc/protocol.py`, `src/unmask/ingest/rpc/http.py` | `tests/test_rpc_http.py`, `tests/test_fixture_builder.py`, `tests/test_rpc_fixture.py`, `tests/test_no_network.py` |
 | `FR-001-16` | Збір MUST вкладатися в налаштований бюджет часу (за замовчуванням 40 с із 60 с на весь холодний запит); при ви | `T-002`, `T-004`, `T-014`, `T-015` | `src/unmask/ingest/collector.py`, `src/unmask/ingest/funding.py`, `src/unmask/ingest/buyers.py`, `src/unmask/ingest/budget.py`, `src/unmask/ingest/config.py` | `tests/test_config.py`, `tests/test_budget.py` |
@@ -40,4 +40,4 @@
 - `T-016` (001-onchain-data-ingest) — виконано
 - `T-017` (001-onchain-data-ingest) — виконано
 - `T-018` (001-onchain-data-ingest) — виконано
-- `T-022` (001-onchain-data-ingest) — у роботі
+- `T-022` (001-onchain-data-ingest) — виконано

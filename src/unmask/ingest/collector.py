@@ -43,6 +43,9 @@ len(buyers)`; `source = source.name`; `analyzed_at = clock.wall()` на поча
 останнього розгортання (причини лише актуальні; перекази попередніх спроб лишаються доказами).
 Розгорнуті вершини й закешовані транзакції повторно не запитуються, транзакції mint за слотом N-го
 покупця на повторі не дозапитуються (ліниві пакети в `buyers.py`): на повному стані — нуль звернень.
+Усередині ще не розгорнутої вершини повтор не повторює ЗАВЕРШЕНИХ сканувань її джерел (історія
+гаманця, список і історії токен-рахунків): їхні знімки — у `state.scan_memo` (T-022, `funding`), тож
+кожен повтор із бюджетом, не меншим за одне сканування джерела, просувається (known-issues §1).
 
 `resume(state, source, config, clock)` (T-017) — вхід для продовження партиційного стану з
 `cache.ResultCache`: той самий `collect`, плюс `resumed=true`. Стан іншої версії конфігу (принцип III)
@@ -96,6 +99,7 @@ from unmask.ingest.purchases import Purchase
 if TYPE_CHECKING:
     from unmask.ingest.budget import Clock
     from unmask.ingest.config import IngestConfig
+    from unmask.ingest.funding import ScanKey, ScanRecord
     from unmask.ingest.rpc.protocol import RpcSource
 
 # Запис історії mint: (signature, slot, block_time, err) — рівно те, що зберігає перегортання (R-7).
@@ -119,6 +123,10 @@ class CollectionState:
     unexpanded: list[UnexpandedNode] = field(default_factory=list)
     missing: dict[tuple[str, MissingReason], MissingHistory] = field(default_factory=dict)
     tx_cache: dict[str, ParsedTx] = field(default_factory=dict)
+    # T-022: незмінні знімки ЗАВЕРШЕНИХ сканувань джерел вершин (`funding.ScanKey` ->
+    # `funding.HistoryScan | funding.TokenAccountsListing`); порожнє на свіжому прогоні, на результат
+    # не впливає — лише прогрес resume (див. `funding`, «Мемо сканувань джерел»)
+    scan_memo: dict[ScanKey, ScanRecord] = field(default_factory=dict)
     rpc_calls: int = 0
     transactions_scanned: int = 0
 
@@ -186,6 +194,7 @@ def resume(state: CollectionState, source: RpcSource, config: IngestConfig, cloc
     Стан іншої `config_version` (принцип III) відкидається ТУТ: його скидають на місці до порожнього
     стану поточної версії (той самий об'єкт — викликач кладе його в `partial`, якщо результат знову
     неповний) і збір іде заново, як свіжий; тоді `resumed=false`, бо продовжувати не було з чого.
+    Скидаються ВСІ поля (перелік — `fields(CollectionState)`), зокрема `scan_memo` (T-022).
     Прямий `collect` зі станом іншої версії лишається гучною відмовою (`ValueError`) — дефект викликача.
     """
     if state.config_version != config.version:
