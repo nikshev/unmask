@@ -1,0 +1,32 @@
+{
+  "metadata": {
+    "mint": "3AwPn93sojV8Hgv2r7MRshxM9qBkaaWsqPLt2UNMTv1w",
+    "analyzed_at": 1759500000,
+    "wallets_analyzed": 0,
+    "config_version": 2,
+    "first_buyers_n": 5,
+    "funding_depth": 3,
+    "counterparty_threshold": 200,
+    "max_signatures_per_wallet": 300,
+    "collect_spl_inbound": true,
+    "time_budget_seconds": 40.0,
+    "elapsed_seconds": 1.5,
+    "rpc_calls": 10,
+    "transactions_scanned": 0,
+    "source": "fixture:g_empty",
+    "resumed": false,
+    "served_from_cache": false
+  },
+  "completeness": {
+    "status": "complete",
+    "missing": [],
+    "buyers": {
+      "complete": true,
+      "reason": null,
+      "detail": ""
+    }
+  },
+  "buyers": [],
+  "transfers": [],
+  "unexpanded": []
+}

@@ -1,0 +1,118 @@
+{
+  "scenario": "g_incomplete",
+  "description": "Збір неповний: історія гаманця B не отримана (timeout), хоча перелік покупців повний (buyers.complete=true) — єдиний запис missing робить результат incomplete.",
+  "mint": "FstqcYCpU8s1pSRcxKygHgyUt2RahHvod9b7dCBqLcbE",
+  "wallets": {
+    "A": "Gdr6X3bV6Xsnbcj9NyPoDBoN2NX798FmdwEMf2HT76iw",
+    "B": "HzyvDcLWCNFtGSkh7f2DGzN2uGM4XQ8keaohMhPocYs1",
+    "DEX": "D8dWWiyUvn5zD8tHzc8Ev41yNVgjEkq9LL1AKQBZVDp5",
+    "M": "FstqcYCpU8s1pSRcxKygHgyUt2RahHvod9b7dCBqLcbE",
+    "P1": "6RiqNVb7bBEFgPB5XsgSenF33B9Ru1RDSptjJX3tWiRV",
+    "P2": "HsHH5VmtWkUrY2FoRXXwADMYoFKkso28ESLywgSWtAdM",
+    "P3": "DUDf9PmDR7QPunsF2ypxXf5XcYEaE1eQaPVHBdSerj54"
+  },
+  "config": {
+    "version": 2,
+    "thresholds": {
+      "degree_threshold": 100,
+      "one_off_senders_share": 0.8,
+      "one_off_min_senders": 10,
+      "giant_component_warn_share": 0.5,
+      "prune_off_curve": true,
+      "prune_ingest_high_degree": true,
+      "dust_amount_lamports": 1000000,
+      "dust_min_fanout": 5
+    },
+    "lists": {
+      "version": 1,
+      "categories": {
+        "system_programs": ["11111111111111111111111111111111","ComputeBudget111111111111111111111111111111","MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"],
+        "token_programs": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA","TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb","ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"],
+        "dex_routers": ["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"],
+        "amm_programs": ["675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8","whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"],
+        "launchpads": ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"],
+        "exchanges": [],
+        "market_makers": []
+      }
+    }
+  },
+  "ingest_counterparty_threshold": 200,
+  "completeness": {
+    "status": "incomplete",
+    "ingest_status": "incomplete",
+    "missing": [
+      {"wallet":"HzyvDcLWCNFtGSkh7f2DGzN2uGM4XQ8keaohMhPocYs1","depth":1,"reason":"timeout","detail":"getSignaturesForAddress: timeout after 2 retries"}
+    ],
+    "buyers_complete": true,
+    "buyers_reason": null
+  },
+  "graph": {
+    "nodes": [
+      {"address":"6RiqNVb7bBEFgPB5XsgSenF33B9Ru1RDSptjJX3tWiRV","roles":["buyer"],"depth":0,"buyer_rank":1,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":1,"one_off_senders":1,"one_off_share":1.0,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"DUDf9PmDR7QPunsF2ypxXf5XcYEaE1eQaPVHBdSerj54","roles":["buyer"],"depth":0,"buyer_rank":3,"address_type":"wallet","unexpanded":null,"measures":{"degree":0,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"Gdr6X3bV6Xsnbcj9NyPoDBoN2NX798FmdwEMf2HT76iw","roles":["funder"],"depth":1,"buyer_rank":null,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":1,"median_to_buyers":1000000000}},
+      {"address":"HsHH5VmtWkUrY2FoRXXwADMYoFKkso28ESLywgSWtAdM","roles":["buyer"],"depth":0,"buyer_rank":2,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":1,"one_off_senders":1,"one_off_share":1.0,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"HzyvDcLWCNFtGSkh7f2DGzN2uGM4XQ8keaohMhPocYs1","roles":["funder"],"depth":1,"buyer_rank":null,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":1,"median_to_buyers":1000000000}}
+    ],
+    "edges": [
+      {"kind":"transfer","sender":"Gdr6X3bV6Xsnbcj9NyPoDBoN2NX798FmdwEMf2HT76iw","receiver":"6RiqNVb7bBEFgPB5XsgSenF33B9Ru1RDSptjJX3tWiRV","asset":"sol","amount":1000000000,"decimals":null,"count":1,"first_slot":100,"last_slot":100,"first_time":1759400100,"last_time":1759400100,"refs":[{"signature":"3HeQvjprffvpnaHbLav5fDijgzRRednqDWeB3WL5u7WPHk1qPpxAaGMscE12Xh4QsTZNZ53TmY3b5hzw3i8RLTAz","slot":100,"instruction_path":"0"}]},
+      {"kind":"transfer","sender":"HzyvDcLWCNFtGSkh7f2DGzN2uGM4XQ8keaohMhPocYs1","receiver":"HsHH5VmtWkUrY2FoRXXwADMYoFKkso28ESLywgSWtAdM","asset":"sol","amount":1000000000,"decimals":null,"count":1,"first_slot":101,"last_slot":101,"first_time":1759400101,"last_time":1759400101,"refs":[{"signature":"5cw18wdEw1NYWqxEc1jCjciE93tWfkadvvSziuQRypamCc6vzRL3gurC55zutEryxnJMUV9B35bn7kWMVtqeTiqb","slot":101,"instruction_path":"0"}]}
+    ]
+  },
+  "prune": {
+    "lists_applied": true,
+    "config_version": 2,
+    "lists_version": 1,
+    "records": [],
+    "buyer_flags": [],
+    "after": {
+      "node_addresses": ["6RiqNVb7bBEFgPB5XsgSenF33B9Ru1RDSptjJX3tWiRV","DUDf9PmDR7QPunsF2ypxXf5XcYEaE1eQaPVHBdSerj54","Gdr6X3bV6Xsnbcj9NyPoDBoN2NX798FmdwEMf2HT76iw","HsHH5VmtWkUrY2FoRXXwADMYoFKkso28ESLywgSWtAdM","HzyvDcLWCNFtGSkh7f2DGzN2uGM4XQ8keaohMhPocYs1"],
+      "edge_keys": [
+        ["transfer","Gdr6X3bV6Xsnbcj9NyPoDBoN2NX798FmdwEMf2HT76iw","6RiqNVb7bBEFgPB5XsgSenF33B9Ru1RDSptjJX3tWiRV","sol"],
+        ["transfer","HzyvDcLWCNFtGSkh7f2DGzN2uGM4XQ8keaohMhPocYs1","HsHH5VmtWkUrY2FoRXXwADMYoFKkso28ESLywgSWtAdM","sol"]
+      ]
+    }
+  },
+  "components": {
+    "before": [
+      {"id":"6RiqNVb7bBEFgPB5XsgSenF33B9Ru1RDSptjJX3tWiRV","members":["6RiqNVb7bBEFgPB5XsgSenF33B9Ru1RDSptjJX3tWiRV","Gdr6X3bV6Xsnbcj9NyPoDBoN2NX798FmdwEMf2HT76iw"],"buyers":1},
+      {"id":"DUDf9PmDR7QPunsF2ypxXf5XcYEaE1eQaPVHBdSerj54","members":["DUDf9PmDR7QPunsF2ypxXf5XcYEaE1eQaPVHBdSerj54"],"buyers":1},
+      {"id":"HsHH5VmtWkUrY2FoRXXwADMYoFKkso28ESLywgSWtAdM","members":["HsHH5VmtWkUrY2FoRXXwADMYoFKkso28ESLywgSWtAdM","HzyvDcLWCNFtGSkh7f2DGzN2uGM4XQ8keaohMhPocYs1"],"buyers":1}
+    ],
+    "after": [
+      {"id":"6RiqNVb7bBEFgPB5XsgSenF33B9Ru1RDSptjJX3tWiRV","members":["6RiqNVb7bBEFgPB5XsgSenF33B9Ru1RDSptjJX3tWiRV","Gdr6X3bV6Xsnbcj9NyPoDBoN2NX798FmdwEMf2HT76iw"],"buyers":1},
+      {"id":"DUDf9PmDR7QPunsF2ypxXf5XcYEaE1eQaPVHBdSerj54","members":["DUDf9PmDR7QPunsF2ypxXf5XcYEaE1eQaPVHBdSerj54"],"buyers":1},
+      {"id":"HsHH5VmtWkUrY2FoRXXwADMYoFKkso28ESLywgSWtAdM","members":["HsHH5VmtWkUrY2FoRXXwADMYoFKkso28ESLywgSWtAdM","HzyvDcLWCNFtGSkh7f2DGzN2uGM4XQ8keaohMhPocYs1"],"buyers":1}
+    ]
+  },
+  "report": {
+    "before": {
+      "nodes": 5,
+      "edges": 2,
+      "components": 3,
+      "buyers_total": 3,
+      "buyers_in_largest_component": 1,
+      "largest_component_buyer_share": 0.3333333333333333,
+      "isolated_buyers": 1
+    },
+    "after": {
+      "nodes": 5,
+      "edges": 2,
+      "components": 3,
+      "buyers_total": 3,
+      "buyers_in_largest_component": 1,
+      "largest_component_buyer_share": 0.3333333333333333,
+      "isolated_buyers": 1
+    },
+    "pruned_nodes": 0,
+    "pruned_edges": 0,
+    "warn_share": 0.5,
+    "warnings": []
+  },
+  "notes": {
+    "criteria_order": "хити впорядковано за (criterion, detail) як рядками: degree < dust_fanout < ingest_high_degree < known_list < one_off_senders",
+    "edge_asset_key": "ключ ребра в edge_keys: [kind, sender, receiver, asset або \"\"]",
+    "warnings": "без delegated_incomplete: поле delegated у результаті 001 з'явиться з T-044 (g_delegated — T-047)",
+    "graph_completeness": "лише частина з результату збору (ingest_status, missing, buyers_*); delegated_* — T-044"
+  }
+}

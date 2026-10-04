@@ -1,0 +1,48 @@
+{
+  "metadata": {
+    "mint": "3DiXEa8krdn3Kz9vhryT2jpkBdDXib36FSTjLewWJvT6",
+    "analyzed_at": 1759500000,
+    "wallets_analyzed": 3,
+    "config_version": 2,
+    "first_buyers_n": 3,
+    "funding_depth": 3,
+    "counterparty_threshold": 3,
+    "max_signatures_per_wallet": 300,
+    "collect_spl_inbound": true,
+    "time_budget_seconds": 40.0,
+    "elapsed_seconds": 1.5,
+    "rpc_calls": 18,
+    "transactions_scanned": 8,
+    "source": "fixture:g_unexpanded",
+    "resumed": false,
+    "served_from_cache": false
+  },
+  "completeness": {
+    "status": "complete",
+    "missing": [],
+    "buyers": {
+      "complete": true,
+      "reason": null,
+      "detail": ""
+    }
+  },
+  "buyers": [
+    {"wallet":"KVdNfzaT3ArKwaCrLei3CzU4YHsZGRtTiM3FDEyAcoE","rank":1,"first_buy_signature":"3fE4qgm8BFcRVu6MfsNjDppQsjxVuywDSpFTcZ9PoQ8RNVVaJhxEXRT4qTbMdbXb5PXLgHqMdoJ4kxzRDedrJgnt","first_buy_slot":200,"first_buy_time":1759400200,"received_amount":1000000000,"spent":[{"asset":"sol","amount":400000000}],"programs":["ECc2t8E3SqDXoTVQKRRVPzBfqpQiVQdE3gfuP98aHiYf"],"address_type":"wallet"},
+    {"wallet":"CTTGFAqzNRCRcVSHF8ExpCxAJogPx628w5qo1j2G2dd5","rank":2,"first_buy_signature":"5BofibJ69pSjvwHxukt2U1junGT7Wa2WVevg4ehcgsiQtgVpK8ia7bp2vdxTfbhu6Wg8iXPd2E8wU6n2GW6FSuSg","first_buy_slot":210,"first_buy_time":1759400210,"received_amount":1000000000,"spent":[{"asset":"sol","amount":400000000}],"programs":["ECc2t8E3SqDXoTVQKRRVPzBfqpQiVQdE3gfuP98aHiYf"],"address_type":"wallet"},
+    {"wallet":"QmosDPb1BsLPwobu1xJGjioTbA3gcsZF1FkjJ5EJyr2","rank":3,"first_buy_signature":"4WZBnmZuxyGaxhPK2HwBr4vAaaYFHAQJ5gjGyV7Rd8qorszedNbs2JwmrBzmz7pvig7YaxzrKCAnbQPoQVfxpEGy","first_buy_slot":220,"first_buy_time":1759400220,"received_amount":1000000000,"spent":[{"asset":"sol","amount":400000000}],"programs":["ECc2t8E3SqDXoTVQKRRVPzBfqpQiVQdE3gfuP98aHiYf"],"address_type":"wallet"}
+  ],
+  "transfers": [
+    {"signature":"eRtYD7pd6SJHca912Jdk3joHZDLr7f7ivyWJjRtRnHfzeBDm8XE5ujogS8qttM4QLa9jNEWn5s7vqeX3XMFn2TX","slot":21,"block_time":1759400021,"instruction_path":"0","sender":"6EhvArkLPoH9tQSBC9ywgrUNv7Rwi5BKEXXTBzPvxDrd","receiver":"ZdPxpjy8uGgK8eLAZntxy7norSZBqDK1ZvDVT5UkZAU","asset":"sol","amount":500000000,"decimals":null,"depth":2},
+    {"signature":"5dFNh8RYRH621NZchBB9sFsuhCT8wjGvLUjFQgsUTh3D4B3BqHSBsQcm5sMPUtkj5PEJ9kbFSjcKdUv6L9mhoK4R","slot":22,"block_time":1759400022,"instruction_path":"0","sender":"CFoEVTRupaF5d3F1q1FhqxjN7KrS3bdthQeNy1RerzbM","receiver":"ZdPxpjy8uGgK8eLAZntxy7norSZBqDK1ZvDVT5UkZAU","asset":"sol","amount":500000000,"decimals":null,"depth":2},
+    {"signature":"2pmBnTaEq2pfYcQ7p33pejLM1wKQRxhMcmfLD6QzQ1m1F5xj6uQLiygGLMJj7tiAjs6UEgUQuEie15945Untf1fS","slot":23,"block_time":1759400023,"instruction_path":"0","sender":"A6mZfNnxhAw6WAwvR5hBQ3hMQ2tsANeDtCLZkXKVy6HT","receiver":"ZdPxpjy8uGgK8eLAZntxy7norSZBqDK1ZvDVT5UkZAU","asset":"sol","amount":500000000,"decimals":null,"depth":2},
+    {"signature":"5KLHQybHusGXukyn5aJQsAuDkeUmQSzfCwmDFjGranJ8zd5mReVwXijes5JQJHSiS9eeJSLZCDDfGhQ9qGE1UFUC","slot":31,"block_time":1759400031,"instruction_path":"0","sender":"8dDvrdfMnypvF6ri31qBHiuPmTLUk8psqHVfm2sCjgaU","receiver":"9NSCNHRYDw8Dn2MyP7hq5Ztw8dEGKKComecgVsD54euA","asset":"sol","amount":500000000,"decimals":null,"depth":2},
+    {"signature":"2ADAf85iGKpXKEnamMKpgxs38BnosPFgFoYAZtVLzDicE7fkXdJGLA9F9UVK7n3szSX2cnpxj2fChPBSyx8M5ofw","slot":32,"block_time":1759400032,"instruction_path":"0","sender":"2eChYCYCQDxn4FwJPgBtcQ9wrSA1iT2t8bm8GJkXVuGv","receiver":"9NSCNHRYDw8Dn2MyP7hq5Ztw8dEGKKComecgVsD54euA","asset":"sol","amount":500000000,"decimals":null,"depth":2},
+    {"signature":"3nYbHSBNkdehmYbQQW7ayeTcpZWP7CQyr585ivkkSqivxpN3aGQ4KmXPwni6iFXap73sTYN1djUCbYrZGkXzRK7G","slot":100,"block_time":1759400100,"instruction_path":"0","sender":"ZdPxpjy8uGgK8eLAZntxy7norSZBqDK1ZvDVT5UkZAU","receiver":"KVdNfzaT3ArKwaCrLei3CzU4YHsZGRtTiM3FDEyAcoE","asset":"sol","amount":1000000000,"decimals":null,"depth":1},
+    {"signature":"2BhmXi26VTRBXdTM2r6u9jjyf4X9Pxq8kijzYSKZD7De1szTWnfGf2dVZ9sWm47wuJDoLnGbHmKBFbeTYtfQqGDN","slot":101,"block_time":1759400101,"instruction_path":"0","sender":"ZdPxpjy8uGgK8eLAZntxy7norSZBqDK1ZvDVT5UkZAU","receiver":"CTTGFAqzNRCRcVSHF8ExpCxAJogPx628w5qo1j2G2dd5","asset":"sol","amount":1000000000,"decimals":null,"depth":1},
+    {"signature":"5k6mUSzFQRpqrpaZ9WHM4TmjYfdWku5yZCLSQRitMNiMeLD5cwWX6fLp62ziJbScPHZpLJDbTrTaxKwMutw8yCo9","slot":102,"block_time":1759400102,"instruction_path":"0","sender":"9NSCNHRYDw8Dn2MyP7hq5Ztw8dEGKKComecgVsD54euA","receiver":"QmosDPb1BsLPwobu1xJGjioTbA3gcsZF1FkjJ5EJyr2","asset":"sol","amount":1000000000,"decimals":null,"depth":1}
+  ],
+  "unexpanded": [
+    {"wallet":"9NSCNHRYDw8Dn2MyP7hq5Ztw8dEGKKComecgVsD54euA","depth":1,"reason":"signature_cap","counterparties_seen":2,"signatures_seen":300,"signatures_truncated":true},
+    {"wallet":"ZdPxpjy8uGgK8eLAZntxy7norSZBqDK1ZvDVT5UkZAU","depth":1,"reason":"high_degree","counterparties_seen":4,"signatures_seen":4,"signatures_truncated":false}
+  ]
+}

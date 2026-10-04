@@ -38,7 +38,8 @@ TRANSFER = EdgeKind.TRANSFER
 DELEGATED = EdgeKind.DELEGATED_BUY
 SPL = "spl:So11111111111111111111111111111111111111112"
 
-_MEASURES = NodeMeasures(degree=0, unique_senders=0, one_off_senders=0, one_off_share=None)
+_MEASURES = NodeMeasures(degree=0, unique_senders=0, one_off_senders=0, one_off_share=None,
+                         buyer_fanout=0, median_to_buyers=None)
 
 
 # --- Будівельники ------------------------------------------------------------------

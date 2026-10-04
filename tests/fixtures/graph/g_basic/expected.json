@@ -1,0 +1,137 @@
+{
+  "scenario": "g_basic",
+  "description": "5 покупців; A->P1, A->P2; B->A; C->B; цикл A<->D; покупець P3 фінансує покупця P4 (вершина з двома ролями); три перекази A->P2 в SOL (два в одній транзакції) -> одне ребро; SOL і spl:USDC між A і P2 -> два ребра; P5 без фінансування.",
+  "mint": "GAUEeZ4qQc4Dtvu72NjQiUeqvhaAteCmZrG5gNRdH3qx",
+  "wallets": {
+    "A": "9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D",
+    "B": "3irbpJhqVN1N6h55hbNA3hisu4vC8KsmhBKSRiUqP48t",
+    "C": "4X55Lm9BTvC9mYh8Sjv7uihAgU6dxWBYERcriE29FNCw",
+    "D": "G3Cbkrfb7ZURLVVXo8MYmLmKCZuYuWxXrP4To6UyYrPc",
+    "DEX": "7dAFfwrZSuJwmwMRqjBmKaNZZoE2yLDaTF5zKnybkM5k",
+    "M": "GAUEeZ4qQc4Dtvu72NjQiUeqvhaAteCmZrG5gNRdH3qx",
+    "P1": "CTDPAqXGzYpWLrrG9HmZTcXQ19KubeZXrzMeTaGXHsb4",
+    "P2": "9w4DXa8jLKgRNQpRtHXU6xDw2AGCdn4j1HCw9ECZAFST",
+    "P3": "BUiabziZdvSErmRwGQyKbm3FwkAiPANUVFSCeYTzTJ1U",
+    "P4": "B8PsQHw6YnorkuoEMbtiBFHvFofptZNQtsm1MRiEAfcf",
+    "P5": "GBNdsg6NJW15srbjBXotJF8CeoTXhRioJ5AK2WxSvvRn",
+    "USDC": "ANYnt3zRzzYtqPF9cWMu7G4mSAqUHGTo1L2T5PGpbaiA"
+  },
+  "config": {
+    "version": 2,
+    "thresholds": {
+      "degree_threshold": 100,
+      "one_off_senders_share": 0.8,
+      "one_off_min_senders": 10,
+      "giant_component_warn_share": 0.5,
+      "prune_off_curve": true,
+      "prune_ingest_high_degree": true,
+      "dust_amount_lamports": 1000000,
+      "dust_min_fanout": 5
+    },
+    "lists": {
+      "version": 1,
+      "categories": {
+        "system_programs": ["11111111111111111111111111111111","ComputeBudget111111111111111111111111111111","MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"],
+        "token_programs": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA","TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb","ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"],
+        "dex_routers": ["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"],
+        "amm_programs": ["675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8","whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"],
+        "launchpads": ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"],
+        "exchanges": [],
+        "market_makers": []
+      }
+    }
+  },
+  "ingest_counterparty_threshold": 200,
+  "completeness": {
+    "status": "complete",
+    "ingest_status": "complete",
+    "missing": [],
+    "buyers_complete": true,
+    "buyers_reason": null
+  },
+  "graph": {
+    "nodes": [
+      {"address":"3irbpJhqVN1N6h55hbNA3hisu4vC8KsmhBKSRiUqP48t","roles":["funder"],"depth":2,"buyer_rank":null,"address_type":"wallet","unexpanded":null,"measures":{"degree":2,"unique_senders":1,"one_off_senders":1,"one_off_share":1.0,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"4X55Lm9BTvC9mYh8Sjv7uihAgU6dxWBYERcriE29FNCw","roles":["funder"],"depth":3,"buyer_rank":null,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","roles":["funder"],"depth":1,"buyer_rank":null,"address_type":"wallet","unexpanded":null,"measures":{"degree":4,"unique_senders":2,"one_off_senders":2,"one_off_share":1.0,"buyer_fanout":2,"median_to_buyers":4000000000}},
+      {"address":"9w4DXa8jLKgRNQpRtHXU6xDw2AGCdn4j1HCw9ECZAFST","roles":["buyer"],"depth":0,"buyer_rank":2,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":1,"one_off_senders":0,"one_off_share":0.0,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"B8PsQHw6YnorkuoEMbtiBFHvFofptZNQtsm1MRiEAfcf","roles":["buyer"],"depth":0,"buyer_rank":4,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":1,"one_off_senders":1,"one_off_share":1.0,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"BUiabziZdvSErmRwGQyKbm3FwkAiPANUVFSCeYTzTJ1U","roles":["buyer","funder"],"depth":0,"buyer_rank":3,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":1,"median_to_buyers":2000000000}},
+      {"address":"CTDPAqXGzYpWLrrG9HmZTcXQ19KubeZXrzMeTaGXHsb4","roles":["buyer"],"depth":0,"buyer_rank":1,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":1,"one_off_senders":1,"one_off_share":1.0,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"G3Cbkrfb7ZURLVVXo8MYmLmKCZuYuWxXrP4To6UyYrPc","roles":["funder"],"depth":2,"buyer_rank":null,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":1,"one_off_senders":1,"one_off_share":1.0,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"GBNdsg6NJW15srbjBXotJF8CeoTXhRioJ5AK2WxSvvRn","roles":["buyer"],"depth":0,"buyer_rank":5,"address_type":"wallet","unexpanded":null,"measures":{"degree":0,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":0,"median_to_buyers":null}}
+    ],
+    "edges": [
+      {"kind":"transfer","sender":"3irbpJhqVN1N6h55hbNA3hisu4vC8KsmhBKSRiUqP48t","receiver":"9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","asset":"sol","amount":4000000000,"decimals":null,"count":1,"first_slot":110,"last_slot":110,"first_time":1759400110,"last_time":1759400110,"refs":[{"signature":"34McNSJGdd5UGCTuYVzBpv3FhCN736j8tGSCx5g7ZthdnbfwawxzqD3tnbWEAyThN7cinrAuZfavMxrZBhoHzHsm","slot":110,"instruction_path":"0"}]},
+      {"kind":"transfer","sender":"4X55Lm9BTvC9mYh8Sjv7uihAgU6dxWBYERcriE29FNCw","receiver":"3irbpJhqVN1N6h55hbNA3hisu4vC8KsmhBKSRiUqP48t","asset":"sol","amount":5000000000,"decimals":null,"count":1,"first_slot":100,"last_slot":100,"first_time":1759400100,"last_time":1759400100,"refs":[{"signature":"336swv1J6KanTgCdWueWL3csU9U2DdghLPxx31G3zZ9Vv8Vkyurhwr1VW53VCMbBrd8RKNaGCY9P1KZsDkE5j3Bk","slot":100,"instruction_path":"0"}]},
+      {"kind":"transfer","sender":"9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","receiver":"9w4DXa8jLKgRNQpRtHXU6xDw2AGCdn4j1HCw9ECZAFST","asset":"sol","amount":4000000000,"decimals":null,"count":3,"first_slot":125,"last_slot":130,"first_time":1759400125,"last_time":1759400130,"refs":[{"signature":"2qGHgUrE4YTwfMzYHVoHePbcuw6ZULFg35tKBa8Psb4jgegspKxnfTr5WpyETSZP4JfaGHjv1Z8oBnRrUVA5fLoq","slot":125,"instruction_path":"0"},{"signature":"2qGHgUrE4YTwfMzYHVoHePbcuw6ZULFg35tKBa8Psb4jgegspKxnfTr5WpyETSZP4JfaGHjv1Z8oBnRrUVA5fLoq","slot":125,"instruction_path":"1"},{"signature":"3sffWpcbQybfaYjZ2aq3vTWZqcaTM8aKpmtttEsmJMdFQ43vaqLukdY6mjCoRKVMmG6GmABrC1tNmSbFs9nU6dMF","slot":130,"instruction_path":"0"}]},
+      {"kind":"transfer","sender":"9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","receiver":"9w4DXa8jLKgRNQpRtHXU6xDw2AGCdn4j1HCw9ECZAFST","asset":"spl:ANYnt3zRzzYtqPF9cWMu7G4mSAqUHGTo1L2T5PGpbaiA","amount":25000000,"decimals":6,"count":1,"first_slot":126,"last_slot":126,"first_time":1759400126,"last_time":1759400126,"refs":[{"signature":"3W1Wj3iEVvCPgubsr4ZyQ4g8HEwWvTfJUUjMKqzQTjrGsrmKAPynyBbyB758oRej6znrkQJGoozy1oz5M8onZ8AU","slot":126,"instruction_path":"0"}]},
+      {"kind":"transfer","sender":"9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","receiver":"CTDPAqXGzYpWLrrG9HmZTcXQ19KubeZXrzMeTaGXHsb4","asset":"sol","amount":3000000000,"decimals":null,"count":1,"first_slot":120,"last_slot":120,"first_time":1759400120,"last_time":1759400120,"refs":[{"signature":"5zEXhXaxw9MQnGutvZDJvUVi9LewaYXnbGEFAT1B3w8rzBoDT8aekNwtYBFrVX7gBg6wjdhvv9GRXVUDVH4oBPXw","slot":120,"instruction_path":"0.0"}]},
+      {"kind":"transfer","sender":"9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","receiver":"G3Cbkrfb7ZURLVVXo8MYmLmKCZuYuWxXrP4To6UyYrPc","asset":"sol","amount":1000000000,"decimals":null,"count":1,"first_slot":104,"last_slot":104,"first_time":1759400104,"last_time":1759400104,"refs":[{"signature":"2ngvHv9Ht8WQ1x182gHh1PvYBHCviYaRowtXJkA8NBrm9m38VxRSxcoPRhA6Dngn767wFNaD2iPTcM1PUBx5Edv1","slot":104,"instruction_path":"0"}]},
+      {"kind":"transfer","sender":"BUiabziZdvSErmRwGQyKbm3FwkAiPANUVFSCeYTzTJ1U","receiver":"B8PsQHw6YnorkuoEMbtiBFHvFofptZNQtsm1MRiEAfcf","asset":"sol","amount":2000000000,"decimals":null,"count":1,"first_slot":128,"last_slot":128,"first_time":1759400128,"last_time":1759400128,"refs":[{"signature":"5ja9KY2AzrCNLREH3Ki12Kwinwh3mv7AWwHAE8F3ixJGsJNkpQGDe366sTvwGsaRD4hfcq7B7f4WrV3GazYbiti5","slot":128,"instruction_path":"0"}]},
+      {"kind":"transfer","sender":"G3Cbkrfb7ZURLVVXo8MYmLmKCZuYuWxXrP4To6UyYrPc","receiver":"9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","asset":"sol","amount":1500000000,"decimals":null,"count":1,"first_slot":108,"last_slot":108,"first_time":1759400108,"last_time":1759400108,"refs":[{"signature":"418LDAfLTgcD7Pgk1FFT43xik6YnMAE5AzYXZeVeppsgRrdJMqQVMDXu7Ef3DmPSMCTxYoe9VW2SgWE5YqD5Mb7x","slot":108,"instruction_path":"0"}]}
+    ]
+  },
+  "prune": {
+    "lists_applied": true,
+    "config_version": 2,
+    "lists_version": 1,
+    "records": [],
+    "buyer_flags": [],
+    "after": {
+      "node_addresses": ["3irbpJhqVN1N6h55hbNA3hisu4vC8KsmhBKSRiUqP48t","4X55Lm9BTvC9mYh8Sjv7uihAgU6dxWBYERcriE29FNCw","9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","9w4DXa8jLKgRNQpRtHXU6xDw2AGCdn4j1HCw9ECZAFST","B8PsQHw6YnorkuoEMbtiBFHvFofptZNQtsm1MRiEAfcf","BUiabziZdvSErmRwGQyKbm3FwkAiPANUVFSCeYTzTJ1U","CTDPAqXGzYpWLrrG9HmZTcXQ19KubeZXrzMeTaGXHsb4","G3Cbkrfb7ZURLVVXo8MYmLmKCZuYuWxXrP4To6UyYrPc","GBNdsg6NJW15srbjBXotJF8CeoTXhRioJ5AK2WxSvvRn"],
+      "edge_keys": [
+        ["transfer","3irbpJhqVN1N6h55hbNA3hisu4vC8KsmhBKSRiUqP48t","9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","sol"],
+        ["transfer","4X55Lm9BTvC9mYh8Sjv7uihAgU6dxWBYERcriE29FNCw","3irbpJhqVN1N6h55hbNA3hisu4vC8KsmhBKSRiUqP48t","sol"],
+        ["transfer","9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","9w4DXa8jLKgRNQpRtHXU6xDw2AGCdn4j1HCw9ECZAFST","sol"],
+        ["transfer","9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","9w4DXa8jLKgRNQpRtHXU6xDw2AGCdn4j1HCw9ECZAFST","spl:ANYnt3zRzzYtqPF9cWMu7G4mSAqUHGTo1L2T5PGpbaiA"],
+        ["transfer","9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","CTDPAqXGzYpWLrrG9HmZTcXQ19KubeZXrzMeTaGXHsb4","sol"],
+        ["transfer","9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","G3Cbkrfb7ZURLVVXo8MYmLmKCZuYuWxXrP4To6UyYrPc","sol"],
+        ["transfer","BUiabziZdvSErmRwGQyKbm3FwkAiPANUVFSCeYTzTJ1U","B8PsQHw6YnorkuoEMbtiBFHvFofptZNQtsm1MRiEAfcf","sol"],
+        ["transfer","G3Cbkrfb7ZURLVVXo8MYmLmKCZuYuWxXrP4To6UyYrPc","9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","sol"]
+      ]
+    }
+  },
+  "components": {
+    "before": [
+      {"id":"3irbpJhqVN1N6h55hbNA3hisu4vC8KsmhBKSRiUqP48t","members":["3irbpJhqVN1N6h55hbNA3hisu4vC8KsmhBKSRiUqP48t","4X55Lm9BTvC9mYh8Sjv7uihAgU6dxWBYERcriE29FNCw","9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","9w4DXa8jLKgRNQpRtHXU6xDw2AGCdn4j1HCw9ECZAFST","CTDPAqXGzYpWLrrG9HmZTcXQ19KubeZXrzMeTaGXHsb4","G3Cbkrfb7ZURLVVXo8MYmLmKCZuYuWxXrP4To6UyYrPc"],"buyers":2},
+      {"id":"B8PsQHw6YnorkuoEMbtiBFHvFofptZNQtsm1MRiEAfcf","members":["B8PsQHw6YnorkuoEMbtiBFHvFofptZNQtsm1MRiEAfcf","BUiabziZdvSErmRwGQyKbm3FwkAiPANUVFSCeYTzTJ1U"],"buyers":2},
+      {"id":"GBNdsg6NJW15srbjBXotJF8CeoTXhRioJ5AK2WxSvvRn","members":["GBNdsg6NJW15srbjBXotJF8CeoTXhRioJ5AK2WxSvvRn"],"buyers":1}
+    ],
+    "after": [
+      {"id":"3irbpJhqVN1N6h55hbNA3hisu4vC8KsmhBKSRiUqP48t","members":["3irbpJhqVN1N6h55hbNA3hisu4vC8KsmhBKSRiUqP48t","4X55Lm9BTvC9mYh8Sjv7uihAgU6dxWBYERcriE29FNCw","9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","9w4DXa8jLKgRNQpRtHXU6xDw2AGCdn4j1HCw9ECZAFST","CTDPAqXGzYpWLrrG9HmZTcXQ19KubeZXrzMeTaGXHsb4","G3Cbkrfb7ZURLVVXo8MYmLmKCZuYuWxXrP4To6UyYrPc"],"buyers":2},
+      {"id":"B8PsQHw6YnorkuoEMbtiBFHvFofptZNQtsm1MRiEAfcf","members":["B8PsQHw6YnorkuoEMbtiBFHvFofptZNQtsm1MRiEAfcf","BUiabziZdvSErmRwGQyKbm3FwkAiPANUVFSCeYTzTJ1U"],"buyers":2},
+      {"id":"GBNdsg6NJW15srbjBXotJF8CeoTXhRioJ5AK2WxSvvRn","members":["GBNdsg6NJW15srbjBXotJF8CeoTXhRioJ5AK2WxSvvRn"],"buyers":1}
+    ]
+  },
+  "report": {
+    "before": {
+      "nodes": 9,
+      "edges": 8,
+      "components": 3,
+      "buyers_total": 5,
+      "buyers_in_largest_component": 2,
+      "largest_component_buyer_share": 0.4,
+      "isolated_buyers": 1
+    },
+    "after": {
+      "nodes": 9,
+      "edges": 8,
+      "components": 3,
+      "buyers_total": 5,
+      "buyers_in_largest_component": 2,
+      "largest_component_buyer_share": 0.4,
+      "isolated_buyers": 1
+    },
+    "pruned_nodes": 0,
+    "pruned_edges": 0,
+    "warn_share": 0.5,
+    "warnings": []
+  },
+  "notes": {
+    "criteria_order": "хити впорядковано за (criterion, detail) як рядками: degree < dust_fanout < ingest_high_degree < known_list < one_off_senders",
+    "edge_asset_key": "ключ ребра в edge_keys: [kind, sender, receiver, asset або \"\"]",
+    "warnings": "без delegated_incomplete: поле delegated у результаті 001 з'явиться з T-044 (g_delegated — T-047)",
+    "graph_completeness": "лише частина з результату збору (ingest_status, missing, buyers_*); delegated_* — T-044"
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "scenario": "g_known",
+  "description": "Джерело зі списку launchpads (Pump.fun), джерело-PDA (off-curve) і звичайний фінансувальник F1; списки застосовано, exchanges і market_makers порожні.",
+  "mint": "9s867fo8Ecshsko83XJjeeVuq3ixEVTsejcFuAnjYMyq",
+  "wallets": {
+    "DEX": "8wU3YJ9RgGmiZaFbHbq76aamGEcj88jXC264GCNvQyYg",
+    "F1": "GyY3V5HqawyR6AvpxysvzSAewNnTt6HSGuuW89dk3BXS",
+    "M": "9s867fo8Ecshsko83XJjeeVuq3ixEVTsejcFuAnjYMyq",
+    "P1": "E3grKfLeT4eSQjwidcn2B9x5z4fMnKKBSHB9awS7i3PX",
+    "P2": "6ZgAvEy7vLETUDxKBadHPqgqkits1LRd2HHxfLkgRLkJ",
+    "P3": "51jW6KtrDMbY2En3oxAKKquWBVU7hC99gSWxgLnnfTau",
+    "P4": "HTi3BLEQDaZ4cBzQzoyfZjbm5mTqeJDk5F3HhiZXDXbL",
+    "PDA_SRC": "4jew38MmVxCp6udNC9tywCjVrhM5yo6gUak31Re9zjbz",
+    "PUMP": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+  },
+  "config": {
+    "version": 2,
+    "thresholds": {
+      "degree_threshold": 100,
+      "one_off_senders_share": 0.8,
+      "one_off_min_senders": 10,
+      "giant_component_warn_share": 0.5,
+      "prune_off_curve": true,
+      "prune_ingest_high_degree": true,
+      "dust_amount_lamports": 1000000,
+      "dust_min_fanout": 5
+    },
+    "lists": {
+      "version": 1,
+      "categories": {
+        "system_programs": ["11111111111111111111111111111111","ComputeBudget111111111111111111111111111111","MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"],
+        "token_programs": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA","TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb","ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"],
+        "dex_routers": ["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"],
+        "amm_programs": ["675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8","whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"],
+        "launchpads": ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"],
+        "exchanges": [],
+        "market_makers": []
+      }
+    }
+  },
+  "ingest_counterparty_threshold": 200,
+  "completeness": {
+    "status": "complete",
+    "ingest_status": "complete",
+    "missing": [],
+    "buyers_complete": true,
+    "buyers_reason": null
+  },
+  "graph": {
+    "nodes": [
+      {"address":"4jew38MmVxCp6udNC9tywCjVrhM5yo6gUak31Re9zjbz","roles":["funder"],"depth":1,"buyer_rank":null,"address_type":"off_curve","unexpanded":null,"measures":{"degree":1,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":1,"median_to_buyers":1000000000}},
+      {"address":"51jW6KtrDMbY2En3oxAKKquWBVU7hC99gSWxgLnnfTau","roles":["buyer"],"depth":0,"buyer_rank":3,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":1,"one_off_senders":1,"one_off_share":1.0,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P","roles":["funder"],"depth":1,"buyer_rank":null,"address_type":"wallet","unexpanded":null,"measures":{"degree":2,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":2,"median_to_buyers":1000000000}},
+      {"address":"6ZgAvEy7vLETUDxKBadHPqgqkits1LRd2HHxfLkgRLkJ","roles":["buyer"],"depth":0,"buyer_rank":2,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":1,"one_off_senders":1,"one_off_share":1.0,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"E3grKfLeT4eSQjwidcn2B9x5z4fMnKKBSHB9awS7i3PX","roles":["buyer"],"depth":0,"buyer_rank":1,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":1,"one_off_senders":1,"one_off_share":1.0,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"GyY3V5HqawyR6AvpxysvzSAewNnTt6HSGuuW89dk3BXS","roles":["funder"],"depth":1,"buyer_rank":null,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":1,"median_to_buyers":1000000000}},
+      {"address":"HTi3BLEQDaZ4cBzQzoyfZjbm5mTqeJDk5F3HhiZXDXbL","roles":["buyer"],"depth":0,"buyer_rank":4,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":1,"one_off_senders":1,"one_off_share":1.0,"buyer_fanout":0,"median_to_buyers":null}}
+    ],
+    "edges": [
+      {"kind":"transfer","sender":"4jew38MmVxCp6udNC9tywCjVrhM5yo6gUak31Re9zjbz","receiver":"51jW6KtrDMbY2En3oxAKKquWBVU7hC99gSWxgLnnfTau","asset":"sol","amount":1000000000,"decimals":null,"count":1,"first_slot":102,"last_slot":102,"first_time":1759400102,"last_time":1759400102,"refs":[{"signature":"2dwKhSDkvAm9qW5nKHwjHzoKxam6a6p9uRrjFHBsfYS5unrnUQpE8BSGB1uwpvBtZyZtJWmEfKAKkhjPq2esWoqe","slot":102,"instruction_path":"0"}]},
+      {"kind":"transfer","sender":"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P","receiver":"6ZgAvEy7vLETUDxKBadHPqgqkits1LRd2HHxfLkgRLkJ","asset":"sol","amount":1000000000,"decimals":null,"count":1,"first_slot":101,"last_slot":101,"first_time":1759400101,"last_time":1759400101,"refs":[{"signature":"3yZeShkwArGC6PbSj7Hho5YuAEkk5HLUudgWjiiMMH4YV8xpDqxN7fcEVR2uM1fCPitknPWoNnFi2TngHNcY2rJA","slot":101,"instruction_path":"0"}]},
+      {"kind":"transfer","sender":"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P","receiver":"E3grKfLeT4eSQjwidcn2B9x5z4fMnKKBSHB9awS7i3PX","asset":"sol","amount":1000000000,"decimals":null,"count":1,"first_slot":100,"last_slot":100,"first_time":1759400100,"last_time":1759400100,"refs":[{"signature":"fvM9j4wEmSTgaP1XuW4TgfPqnSwmE9EBVEKHtLb2ddjBpssM8L6b5jXepvt1gTGZKCbvwVCDPgxsrk2cPGMC9N8","slot":100,"instruction_path":"0"}]},
+      {"kind":"transfer","sender":"GyY3V5HqawyR6AvpxysvzSAewNnTt6HSGuuW89dk3BXS","receiver":"HTi3BLEQDaZ4cBzQzoyfZjbm5mTqeJDk5F3HhiZXDXbL","asset":"sol","amount":1000000000,"decimals":null,"count":1,"first_slot":103,"last_slot":103,"first_time":1759400103,"last_time":1759400103,"refs":[{"signature":"3t3fMPVCuPpR9oFV3s7wTb6YB7svgz1CFCsLyQryVypPUXo1JksHBU9iucTuf3oLMzRfb1FakZSHBNgvYEzqsg16","slot":103,"instruction_path":"0"}]}
+    ]
+  },
+  "prune": {
+    "lists_applied": true,
+    "config_version": 2,
+    "lists_version": 1,
+    "records": [
+      {"address":"4jew38MmVxCp6udNC9tywCjVrhM5yo6gUak31Re9zjbz","criteria":[{"criterion":"known_list","measured":null,"threshold":null,"detail":"address_type:off_curve","lists_version":null}],"incident_edges":[{"kind":"transfer","sender":"4jew38MmVxCp6udNC9tywCjVrhM5yo6gUak31Re9zjbz","receiver":"51jW6KtrDMbY2En3oxAKKquWBVU7hC99gSWxgLnnfTau","asset":"sol","amount":1000000000,"decimals":null,"count":1,"first_slot":102,"last_slot":102,"first_time":1759400102,"last_time":1759400102,"refs":[{"signature":"2dwKhSDkvAm9qW5nKHwjHzoKxam6a6p9uRrjFHBsfYS5unrnUQpE8BSGB1uwpvBtZyZtJWmEfKAKkhjPq2esWoqe","slot":102,"instruction_path":"0"}]}],"measures":{"degree":1,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":1,"median_to_buyers":1000000000},"config_version":2,"lists_version":1},
+      {"address":"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P","criteria":[{"criterion":"known_list","measured":null,"threshold":null,"detail":"list:launchpads","lists_version":1}],"incident_edges":[{"kind":"transfer","sender":"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P","receiver":"6ZgAvEy7vLETUDxKBadHPqgqkits1LRd2HHxfLkgRLkJ","asset":"sol","amount":1000000000,"decimals":null,"count":1,"first_slot":101,"last_slot":101,"first_time":1759400101,"last_time":1759400101,"refs":[{"signature":"3yZeShkwArGC6PbSj7Hho5YuAEkk5HLUudgWjiiMMH4YV8xpDqxN7fcEVR2uM1fCPitknPWoNnFi2TngHNcY2rJA","slot":101,"instruction_path":"0"}]},{"kind":"transfer","sender":"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P","receiver":"E3grKfLeT4eSQjwidcn2B9x5z4fMnKKBSHB9awS7i3PX","asset":"sol","amount":1000000000,"decimals":null,"count":1,"first_slot":100,"last_slot":100,"first_time":1759400100,"last_time":1759400100,"refs":[{"signature":"fvM9j4wEmSTgaP1XuW4TgfPqnSwmE9EBVEKHtLb2ddjBpssM8L6b5jXepvt1gTGZKCbvwVCDPgxsrk2cPGMC9N8","slot":100,"instruction_path":"0"}]}],"measures":{"degree":2,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":2,"median_to_buyers":1000000000},"config_version":2,"lists_version":1}
+    ],
+    "buyer_flags": [],
+    "after": {
+      "node_addresses": ["51jW6KtrDMbY2En3oxAKKquWBVU7hC99gSWxgLnnfTau","6ZgAvEy7vLETUDxKBadHPqgqkits1LRd2HHxfLkgRLkJ","E3grKfLeT4eSQjwidcn2B9x5z4fMnKKBSHB9awS7i3PX","GyY3V5HqawyR6AvpxysvzSAewNnTt6HSGuuW89dk3BXS","HTi3BLEQDaZ4cBzQzoyfZjbm5mTqeJDk5F3HhiZXDXbL"],
+      "edge_keys": [
+        ["transfer","GyY3V5HqawyR6AvpxysvzSAewNnTt6HSGuuW89dk3BXS","HTi3BLEQDaZ4cBzQzoyfZjbm5mTqeJDk5F3HhiZXDXbL","sol"]
+      ]
+    }
+  },
+  "components": {
+    "before": [
+      {"id":"4jew38MmVxCp6udNC9tywCjVrhM5yo6gUak31Re9zjbz","members":["4jew38MmVxCp6udNC9tywCjVrhM5yo6gUak31Re9zjbz","51jW6KtrDMbY2En3oxAKKquWBVU7hC99gSWxgLnnfTau"],"buyers":1},
+      {"id":"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P","members":["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P","6ZgAvEy7vLETUDxKBadHPqgqkits1LRd2HHxfLkgRLkJ","E3grKfLeT4eSQjwidcn2B9x5z4fMnKKBSHB9awS7i3PX"],"buyers":2},
+      {"id":"GyY3V5HqawyR6AvpxysvzSAewNnTt6HSGuuW89dk3BXS","members":["GyY3V5HqawyR6AvpxysvzSAewNnTt6HSGuuW89dk3BXS","HTi3BLEQDaZ4cBzQzoyfZjbm5mTqeJDk5F3HhiZXDXbL"],"buyers":1}
+    ],
+    "after": [
+      {"id":"51jW6KtrDMbY2En3oxAKKquWBVU7hC99gSWxgLnnfTau","members":["51jW6KtrDMbY2En3oxAKKquWBVU7hC99gSWxgLnnfTau"],"buyers":1},
+      {"id":"6ZgAvEy7vLETUDxKBadHPqgqkits1LRd2HHxfLkgRLkJ","members":["6ZgAvEy7vLETUDxKBadHPqgqkits1LRd2HHxfLkgRLkJ"],"buyers":1},
+      {"id":"E3grKfLeT4eSQjwidcn2B9x5z4fMnKKBSHB9awS7i3PX","members":["E3grKfLeT4eSQjwidcn2B9x5z4fMnKKBSHB9awS7i3PX"],"buyers":1},
+      {"id":"GyY3V5HqawyR6AvpxysvzSAewNnTt6HSGuuW89dk3BXS","members":["GyY3V5HqawyR6AvpxysvzSAewNnTt6HSGuuW89dk3BXS","HTi3BLEQDaZ4cBzQzoyfZjbm5mTqeJDk5F3HhiZXDXbL"],"buyers":1}
+    ]
+  },
+  "report": {
+    "before": {
+      "nodes": 7,
+      "edges": 4,
+      "components": 3,
+      "buyers_total": 4,
+      "buyers_in_largest_component": 2,
+      "largest_component_buyer_share": 0.5,
+      "isolated_buyers": 0
+    },
+    "after": {
+      "nodes": 5,
+      "edges": 1,
+      "components": 4,
+      "buyers_total": 4,
+      "buyers_in_largest_component": 1,
+      "largest_component_buyer_share": 0.25,
+      "isolated_buyers": 3
+    },
+    "pruned_nodes": 2,
+    "pruned_edges": 3,
+    "warn_share": 0.5,
+    "warnings": []
+  },
+  "notes": {
+    "criteria_order": "хити впорядковано за (criterion, detail) як рядками: degree < dust_fanout < ingest_high_degree < known_list < one_off_senders",
+    "edge_asset_key": "ключ ребра в edge_keys: [kind, sender, receiver, asset або \"\"]",
+    "warnings": "без delegated_incomplete: поле delegated у результаті 001 з'явиться з T-044 (g_delegated — T-047)",
+    "graph_completeness": "лише частина з результату збору (ingest_status, missing, buyers_*); delegated_* — T-044"
+  }
+}

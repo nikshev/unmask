@@ -1,4 +1,4 @@
-# verifies: FR-002-02, FR-002-03, FR-002-05, FR-002-06, FR-002-18
+# verifies: FR-002-02, FR-002-03, FR-002-05, FR-002-06, FR-002-18, FR-002-22
 """Модель графа фінансування (T-025): інваріанти, похідна повнота, ключі порядку.
 
 Критична задача: помилка тут не ламає збірку, а тихо спотворює граф, звіт і
@@ -6,16 +6,23 @@
 об'єкт неможливо сконструювати жодним прямим шляхом (конструктор,
 `dataclasses.replace`), а похідні значення слідують за даними навіть після
 примусового `object.__setattr__`.
+
+T-055 (FR-002-22, research R-22) розширює модель критерієм `dust_fanout`,
+вимірами `buyer_fanout`/`median_to_buyers` і пиловими порогами знімка; поля
+без умовчань, тож усі конструктори нижче передають їх явно.
 """
 
 import dataclasses
 import inspect
 import itertools
+import json
 import random
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from unmask.graph.model import (
     GRAPH_SCHEMA_VERSION,
@@ -74,13 +81,26 @@ TRANSFER = EdgeKind.TRANSFER
 DELEGATED = EdgeKind.DELEGATED_BUY
 
 
+GRAPH_SCHEMA = json.loads(
+    (Path(__file__).resolve().parents[1]
+     / "specs/002-funding-graph-hub-pruning/contracts/graph-result.schema.json").read_text(encoding="utf-8")
+)
+
+
+def _schema_validator(definition):
+    return Draft202012Validator({"$ref": f"#/$defs/{definition}", "$defs": GRAPH_SCHEMA["$defs"]})
+
+
 # --- Будівельники ------------------------------------------------------------------
 
 
-def _measures(degree=0, unique=0, one_off=0, share="auto"):
+def _measures(degree=0, unique=0, one_off=0, share="auto", fanout=0, median="auto"):
     if share == "auto":
         share = None if unique == 0 else one_off / unique
-    return NodeMeasures(degree=degree, unique_senders=unique, one_off_senders=one_off, one_off_share=share)
+    if median == "auto":
+        median = None if fanout == 0 else 500_000
+    return NodeMeasures(degree=degree, unique_senders=unique, one_off_senders=one_off, one_off_share=share,
+                        buyer_fanout=fanout, median_to_buyers=median)
 
 
 def _node(address, roles=(FUNDER,), depth=None, rank=None, **changes):
@@ -229,6 +249,8 @@ def _thresholds(**changes):
         giant_component_warn_share=0.5,
         prune_off_curve=True,
         prune_ingest_high_degree=True,
+        dust_amount_lamports=1_000_000,
+        dust_min_fanout=5,
     )
     kw.update(changes)
     return ThresholdsSnapshot(**kw)
@@ -285,7 +307,9 @@ def _result(graph=None, pruned=(), metadata=None, report=None, completeness=None
 def test_enum_values_exactly_as_data_model():
     assert {r.value for r in NodeRole} == {"buyer", "funder", "delegated_payer", "delegated_receiver"}
     assert {k.value for k in EdgeKind} == {"transfer", "delegated_buy"}
-    assert {c.value for c in HubCriterion} == {"known_list", "degree", "one_off_senders", "ingest_high_degree"}
+    assert {c.value for c in HubCriterion} == {
+        "known_list", "degree", "one_off_senders", "ingest_high_degree", "dust_fanout",
+    }
     assert {w.value for w in GraphWarning} == {
         "address_lists_not_applied", "giant_component", "empty_graph", "all_sources_pruned",
         "delegated_incomplete",
@@ -293,6 +317,26 @@ def test_enum_values_exactly_as_data_model():
     assert {s.value for s in GraphCompletenessStatus} == {"complete", "incomplete"}
     assert GRAPH_SCHEMA_VERSION == "002.1"
     assert issubclass(GraphInputError, Exception)
+
+
+def test_hub_criterion_enum_has_five_values_including_dust_fanout():
+    # FR-002-22: п'ятий критерій; порядок оголошення і значення — як у data-model та схемі.
+    assert HubCriterion.DUST_FANOUT == "dust_fanout"
+    assert HubCriterion("dust_fanout") is HubCriterion.DUST_FANOUT
+    assert [c.value for c in HubCriterion] == [
+        "known_list", "degree", "one_off_senders", "ingest_high_degree", "dust_fanout",
+    ]
+    assert len(HubCriterion) == 5
+    hit = GRAPH_SCHEMA["$defs"]["criterionHit"]["properties"]["criterion"]["enum"]
+    assert [c.value for c in HubCriterion] == hit
+
+
+def test_criteria_sorted_as_strings_put_dust_fanout_second():
+    # Порядок хітів — за рядковим значенням (data-model, graph-service): dust_fanout другий.
+    expected = ["degree", "dust_fanout", "ingest_high_degree", "known_list", "one_off_senders"]
+    assert [c.value for c in sorted(HubCriterion)] == expected
+    assert [c.value for c in sorted(HubCriterion, key=lambda c: c.value)] == expected
+    assert sorted(reversed(list(HubCriterion)))[1] is HubCriterion.DUST_FANOUT
 
 
 # --- NodeMeasures -----------------------------------------------------------------
@@ -309,7 +353,7 @@ def test_measures_invariants_exhaustive():
                 and (value is None or value == one_off / unique)
             )
             build = lambda: NodeMeasures(degree=5, unique_senders=unique, one_off_senders=one_off,
-                                         one_off_share=value)
+                                         one_off_share=value, buyer_fanout=0, median_to_buyers=None)
             if ok:
                 m = build()
                 assert m.one_off_share == (None if unique == 0 else one_off / unique)
@@ -329,13 +373,138 @@ def test_measures_boundary_one_off_equals_unique_is_valid():
     "field,bad",
     [("degree", -1), ("degree", 1.0), ("degree", True), ("unique_senders", -1), ("unique_senders", None),
      ("one_off_senders", -1), ("one_off_senders", "1"), ("one_off_share", "0.5"), ("one_off_share", True),
-     ("one_off_share", 1)],
+     ("one_off_share", 1), ("buyer_fanout", -1), ("buyer_fanout", True), ("buyer_fanout", 1.0),
+     ("buyer_fanout", None), ("buyer_fanout", "1"), ("median_to_buyers", 0), ("median_to_buyers", -1),
+     ("median_to_buyers", 1.0), ("median_to_buyers", True), ("median_to_buyers", "500000"),
+     ("median_to_buyers", None)],
 )
 def test_measures_reject_wrong_types(field, bad):
-    kw = dict(degree=2, unique_senders=1, one_off_senders=1, one_off_share=1.0)
+    kw = dict(degree=2, unique_senders=1, one_off_senders=1, one_off_share=1.0, buyer_fanout=1,
+              median_to_buyers=500_000)
     kw[field] = bad
     with pytest.raises((TypeError, ValueError)):
         NodeMeasures(**kw)
+
+
+def _dust(fanout, median):
+    return NodeMeasures(degree=7, unique_senders=0, one_off_senders=0, one_off_share=None,
+                        buyer_fanout=fanout, median_to_buyers=median)
+
+
+@pytest.mark.parametrize(
+    "fanout,median,error",
+    [(0, None, None), (0, 5, ValueError), (3, None, ValueError), (3, 0, ValueError), (3, 1, None),
+     (3, True, TypeError),
+     # межові й суміжні (FR-002-22, R-22)
+     (1, 1, None), (1, 0, ValueError), (0, 0, ValueError), (0, 1, ValueError), (0, -1, ValueError),
+     (3, -1, ValueError), (3, 10**18, None), (0, False, TypeError), (3, False, TypeError),
+     (3, 1.0, TypeError), (3, "1", TypeError), (0, True, TypeError)],
+)
+def test_measures_median_none_iff_zero_fanout_and_at_least_one_otherwise(fanout, median, error):
+    if error is None:
+        m = _dust(fanout, median)
+        assert (m.buyer_fanout, m.median_to_buyers) == (fanout, median)
+        assert type(m.median_to_buyers) in (int, type(None))
+    else:
+        with pytest.raises(error):
+            _dust(fanout, median)
+
+
+_FANOUTS = (-1, 0, 1, 2, 5, 23)
+_MEDIANS = (None, -1, 0, 1, 2, 999_999, 1_000_000, 10**18, True, False, 1.0, 0.5, "1")
+
+
+def _dust_expected(fanout, median):
+    """Еталон інваріанта, записаний незалежно від реалізації: None, TypeError або ValueError."""
+    if fanout < 0:
+        return ValueError
+    if median is not None and (isinstance(median, bool) or not isinstance(median, int)):
+        return TypeError
+    if (median is None) != (fanout == 0):
+        return ValueError
+    if median is not None and median < 1:
+        return ValueError
+    return None
+
+
+@pytest.mark.parametrize("unique,one_off", [(0, 0), (3, 1), (4, 4)])
+def test_measures_dust_invariant_exhaustive(unique, one_off):
+    # Перебір усіх комбінацій fanout × median, незалежно від гілки one_off_share
+    # (unique == 0 і unique > 0): перевірка пилу не може бути пропущена ранім виходом.
+    share = None if unique == 0 else one_off / unique
+    for fanout, median in itertools.product(_FANOUTS, _MEDIANS):
+        build = lambda: NodeMeasures(degree=9, unique_senders=unique, one_off_senders=one_off,
+                                     one_off_share=share, buyer_fanout=fanout, median_to_buyers=median)
+        expected = _dust_expected(fanout, median)
+        if expected is None:
+            m = build()
+            assert (m.buyer_fanout, m.median_to_buyers) == (fanout, median)
+        else:
+            with pytest.raises(expected):
+                build()
+
+
+def test_measures_fields_have_no_defaults_and_order_as_data_model():
+    fields = dataclasses.fields(NodeMeasures)
+    assert [f.name for f in fields] == [
+        "degree", "unique_senders", "one_off_senders", "one_off_share", "buyer_fanout", "median_to_buyers",
+    ]
+    assert all(f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING for f in fields)
+    with pytest.raises(TypeError):
+        NodeMeasures(degree=0, unique_senders=0, one_off_senders=0, one_off_share=None)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        NodeMeasures(degree=0, unique_senders=0, one_off_senders=0, one_off_share=None,  # type: ignore[call-arg]
+                     buyer_fanout=0)
+
+
+def test_measures_replace_cannot_produce_dust_contradiction():
+    m = _measures(degree=6, fanout=6, median=1_500)
+    with pytest.raises(ValueError):
+        dataclasses.replace(m, buyer_fanout=0)
+    with pytest.raises(ValueError):
+        dataclasses.replace(m, median_to_buyers=None)
+    with pytest.raises(ValueError):
+        dataclasses.replace(m, median_to_buyers=0)
+    with pytest.raises(TypeError):
+        dataclasses.replace(m, median_to_buyers=True)
+    zero = _measures()
+    with pytest.raises(ValueError):
+        dataclasses.replace(zero, median_to_buyers=1)
+    with pytest.raises(ValueError):
+        dataclasses.replace(zero, buyer_fanout=2)
+    # Узгоджена заміна обох полів — дозволена в обидва боки.
+    assert dataclasses.replace(m, buyer_fanout=0, median_to_buyers=None).median_to_buyers is None
+    assert dataclasses.replace(zero, buyer_fanout=2, median_to_buyers=7).median_to_buyers == 7
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        m.median_to_buyers = None  # type: ignore[misc]
+
+
+def test_measures_forced_contradiction_does_not_survive_rebuild():
+    # Примусовий object.__setattr__ обходить конструктор, але будь-яке перебудування
+    # (replace, як у T-025) знову перевіряє інваріант — суперечність не поширюється.
+    for field, value, error in [("buyer_fanout", 0, ValueError), ("median_to_buyers", None, ValueError),
+                                ("median_to_buyers", 0, ValueError), ("median_to_buyers", True, TypeError),
+                                ("buyer_fanout", -1, ValueError)]:
+        m = _measures(fanout=4, median=10)
+        object.__setattr__(m, field, value)
+        with pytest.raises(error):
+            dataclasses.replace(m)
+    zero = _measures()
+    object.__setattr__(zero, "median_to_buyers", 5)
+    with pytest.raises(ValueError):
+        dataclasses.replace(zero)
+
+
+def test_measures_dust_fields_follow_schema_on_lattice():
+    # Модель і контракт (`$defs/measures`) погоджуються на кожній цілочисловій комбінації.
+    validator = _schema_validator("measures")
+    for fanout, median in itertools.product((0, 1, 2, 5), (None, 0, 1, 2, 1_000_000)):
+        doc = dict(degree=3, unique_senders=0, one_off_senders=0, one_off_share=None,
+                   buyer_fanout=fanout, median_to_buyers=median)
+        model_ok = _dust_expected(fanout, median) is None
+        assert validator.is_valid(doc) is model_ok, (fanout, median)
+        if model_ok:
+            assert dataclasses.asdict(NodeMeasures(**doc)) == doc
 
 
 # --- UnexpandedMark ---------------------------------------------------------------
@@ -902,7 +1071,10 @@ def test_metadata_lists_applied_iff_lists_version():
     [("schema_version", "002.2"), ("schema_version", "1.0"), ("mint", ""), ("ingest_analyzed_at", -1),
      ("ingest_config_version", 0), ("ingest_source", ""), ("wallets_analyzed", -1),
      ("hub_config_version", 0), ("address_lists_version", 0), ("nodes_total", -1), ("edges_total", 1.0),
-     ("thresholds", {"degree_threshold": 100})],
+     ("thresholds", {"degree_threshold": 100, "one_off_senders_share": 0.8, "one_off_min_senders": 10,
+                     "giant_component_warn_share": 0.5, "prune_off_curve": True,
+                     "prune_ingest_high_degree": True, "dust_amount_lamports": 1_000_000,
+                     "dust_min_fanout": 5})],
 )
 def test_metadata_rejects_invalid_fields(field, bad):
     with pytest.raises((TypeError, ValueError)):
@@ -913,7 +1085,10 @@ def test_metadata_rejects_invalid_fields(field, bad):
     "field,bad",
     [("degree_threshold", 0), ("degree_threshold", 1.5), ("one_off_senders_share", -0.1),
      ("one_off_senders_share", 1.1), ("one_off_min_senders", 1), ("giant_component_warn_share", 0),
-     ("giant_component_warn_share", 1.01), ("prune_off_curve", "true"), ("prune_ingest_high_degree", 1)],
+     ("giant_component_warn_share", 1.01), ("prune_off_curve", "true"), ("prune_ingest_high_degree", 1),
+     ("dust_amount_lamports", 0), ("dust_amount_lamports", -1), ("dust_amount_lamports", 1_000_000.0),
+     ("dust_amount_lamports", None), ("dust_min_fanout", 1), ("dust_min_fanout", 0),
+     ("dust_min_fanout", 5.0), ("dust_min_fanout", "5")],
 )
 def test_thresholds_snapshot_bounds(field, bad):
     with pytest.raises((TypeError, ValueError)):
@@ -923,6 +1098,51 @@ def test_thresholds_snapshot_bounds(field, bad):
 def test_thresholds_snapshot_boundaries_valid():
     assert _thresholds(one_off_senders_share=0, giant_component_warn_share=1).giant_component_warn_share == 1
     assert _thresholds(one_off_senders_share=1.0, one_off_min_senders=2, degree_threshold=1).degree_threshold == 1
+    low = _thresholds(dust_amount_lamports=1, dust_min_fanout=2)
+    assert (low.dust_amount_lamports, low.dust_min_fanout) == (1, 2)
+
+
+@pytest.mark.parametrize(
+    "field,value,error",
+    [("dust_amount_lamports", 0, ValueError), ("dust_amount_lamports", 1, None),
+     ("dust_min_fanout", 1, ValueError), ("dust_min_fanout", 2, None),
+     ("dust_amount_lamports", True, TypeError), ("dust_min_fanout", True, TypeError),
+     ("dust_amount_lamports", False, TypeError), ("dust_min_fanout", False, TypeError),
+     # межові й суміжні
+     ("dust_amount_lamports", -1, ValueError), ("dust_amount_lamports", 2, None),
+     ("dust_amount_lamports", 10**18, None), ("dust_amount_lamports", 1.0, TypeError),
+     ("dust_amount_lamports", None, TypeError), ("dust_amount_lamports", "1000000", TypeError),
+     ("dust_min_fanout", 0, ValueError), ("dust_min_fanout", 3, None), ("dust_min_fanout", 2.0, TypeError),
+     ("dust_min_fanout", None, TypeError)],
+)
+def test_thresholds_snapshot_dust_bounds(field, value, error):
+    if error is None:
+        assert getattr(_thresholds(**{field: value}), field) == value
+    else:
+        with pytest.raises(error):
+            _thresholds(**{field: value})
+
+
+def test_thresholds_snapshot_has_eight_required_fields_matching_schema():
+    fields = dataclasses.fields(ThresholdsSnapshot)
+    names = [f.name for f in fields]
+    assert names == [
+        "degree_threshold", "one_off_senders_share", "one_off_min_senders", "giant_component_warn_share",
+        "prune_off_curve", "prune_ingest_high_degree", "dust_amount_lamports", "dust_min_fanout",
+    ]
+    assert all(f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING for f in fields)
+    assert names == GRAPH_SCHEMA["$defs"]["thresholds"]["required"]
+    with pytest.raises(TypeError):
+        ThresholdsSnapshot(degree_threshold=100, one_off_senders_share=0.8, one_off_min_senders=10,  # type: ignore[call-arg]
+                           giant_component_warn_share=0.5, prune_off_curve=True, prune_ingest_high_degree=True)
+    t = _thresholds()
+    with pytest.raises(ValueError):
+        dataclasses.replace(t, dust_min_fanout=1)
+    with pytest.raises(ValueError):
+        dataclasses.replace(t, dust_amount_lamports=0)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        t.dust_min_fanout = 1  # type: ignore[misc]
+    assert _schema_validator("thresholds").is_valid(dataclasses.asdict(t))
 
 
 # --- GraphResult ------------------------------------------------------------------

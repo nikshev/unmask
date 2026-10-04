@@ -1,0 +1,91 @@
+{
+  "scenario": "g_empty",
+  "description": "Токен без покупців: порожній результат збору (повний) — порожній граф, не помилка.",
+  "mint": "3AwPn93sojV8Hgv2r7MRshxM9qBkaaWsqPLt2UNMTv1w",
+  "wallets": {
+    "DEX": "GZUYgQnARzYitrk6ciZ5TvmhfuHNvEALZLHEsnzZVxR3",
+    "M": "3AwPn93sojV8Hgv2r7MRshxM9qBkaaWsqPLt2UNMTv1w"
+  },
+  "config": {
+    "version": 2,
+    "thresholds": {
+      "degree_threshold": 100,
+      "one_off_senders_share": 0.8,
+      "one_off_min_senders": 10,
+      "giant_component_warn_share": 0.5,
+      "prune_off_curve": true,
+      "prune_ingest_high_degree": true,
+      "dust_amount_lamports": 1000000,
+      "dust_min_fanout": 5
+    },
+    "lists": {
+      "version": 1,
+      "categories": {
+        "system_programs": ["11111111111111111111111111111111","ComputeBudget111111111111111111111111111111","MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"],
+        "token_programs": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA","TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb","ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"],
+        "dex_routers": ["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"],
+        "amm_programs": ["675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8","whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"],
+        "launchpads": ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"],
+        "exchanges": [],
+        "market_makers": []
+      }
+    }
+  },
+  "ingest_counterparty_threshold": 200,
+  "completeness": {
+    "status": "complete",
+    "ingest_status": "complete",
+    "missing": [],
+    "buyers_complete": true,
+    "buyers_reason": null
+  },
+  "graph": {
+    "nodes": [],
+    "edges": []
+  },
+  "prune": {
+    "lists_applied": true,
+    "config_version": 2,
+    "lists_version": 1,
+    "records": [],
+    "buyer_flags": [],
+    "after": {
+      "node_addresses": [],
+      "edge_keys": []
+    }
+  },
+  "components": {
+    "before": [],
+    "after": []
+  },
+  "report": {
+    "before": {
+      "nodes": 0,
+      "edges": 0,
+      "components": 0,
+      "buyers_total": 0,
+      "buyers_in_largest_component": 0,
+      "largest_component_buyer_share": 0.0,
+      "isolated_buyers": 0
+    },
+    "after": {
+      "nodes": 0,
+      "edges": 0,
+      "components": 0,
+      "buyers_total": 0,
+      "buyers_in_largest_component": 0,
+      "largest_component_buyer_share": 0.0,
+      "isolated_buyers": 0
+    },
+    "pruned_nodes": 0,
+    "pruned_edges": 0,
+    "warn_share": 0.5,
+    "warnings": ["empty_graph"]
+  },
+  "notes": {
+    "criteria_order": "хити впорядковано за (criterion, detail) як рядками: degree < dust_fanout < ingest_high_degree < known_list < one_off_senders",
+    "edge_asset_key": "ключ ребра в edge_keys: [kind, sender, receiver, asset або \"\"]",
+    "warnings": "без delegated_incomplete: поле delegated у результаті 001 з'явиться з T-044 (g_delegated — T-047)",
+    "graph_completeness": "лише частина з результату збору (ingest_status, missing, buyers_*); delegated_* — T-044"
+  }
+}

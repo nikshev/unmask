@@ -1,0 +1,42 @@
+{
+  "metadata": {
+    "mint": "9s867fo8Ecshsko83XJjeeVuq3ixEVTsejcFuAnjYMyq",
+    "analyzed_at": 1759500000,
+    "wallets_analyzed": 4,
+    "config_version": 2,
+    "first_buyers_n": 4,
+    "funding_depth": 3,
+    "counterparty_threshold": 200,
+    "max_signatures_per_wallet": 300,
+    "collect_spl_inbound": true,
+    "time_budget_seconds": 40.0,
+    "elapsed_seconds": 1.5,
+    "rpc_calls": 14,
+    "transactions_scanned": 4,
+    "source": "fixture:g_known",
+    "resumed": false,
+    "served_from_cache": false
+  },
+  "completeness": {
+    "status": "complete",
+    "missing": [],
+    "buyers": {
+      "complete": true,
+      "reason": null,
+      "detail": ""
+    }
+  },
+  "buyers": [
+    {"wallet":"E3grKfLeT4eSQjwidcn2B9x5z4fMnKKBSHB9awS7i3PX","rank":1,"first_buy_signature":"3bL2B5uCG4Gf3WGxnyqpqDdWfFiNcm87DmbhKz9QNf3v9vdGywDRdkGAkiUsvKd6Vh9MQzEyXAGJAue8nf9KXWtY","first_buy_slot":200,"first_buy_time":1759400200,"received_amount":1000000000,"spent":[{"asset":"sol","amount":400000000}],"programs":["8wU3YJ9RgGmiZaFbHbq76aamGEcj88jXC264GCNvQyYg"],"address_type":"wallet"},
+    {"wallet":"6ZgAvEy7vLETUDxKBadHPqgqkits1LRd2HHxfLkgRLkJ","rank":2,"first_buy_signature":"xrPnceSufz6qGE5reDc1hE7xDAL17Hni2B7E3MTSZmnyBRTZUJDrwfL6PH4tBPoac5UaCrSZHzu35zmRV3UmqUx","first_buy_slot":210,"first_buy_time":1759400210,"received_amount":1000000000,"spent":[{"asset":"sol","amount":400000000}],"programs":["8wU3YJ9RgGmiZaFbHbq76aamGEcj88jXC264GCNvQyYg"],"address_type":"wallet"},
+    {"wallet":"51jW6KtrDMbY2En3oxAKKquWBVU7hC99gSWxgLnnfTau","rank":3,"first_buy_signature":"rvkJQMTQAZKad7YWP5pRQYQkXoSrPKaiH1EqK6orW3HnQrKHszoifNxWVgB7iiMx7cdQm2KbAMNjVH5AQp6YSd7","first_buy_slot":220,"first_buy_time":1759400220,"received_amount":1000000000,"spent":[{"asset":"sol","amount":400000000}],"programs":["8wU3YJ9RgGmiZaFbHbq76aamGEcj88jXC264GCNvQyYg"],"address_type":"wallet"},
+    {"wallet":"HTi3BLEQDaZ4cBzQzoyfZjbm5mTqeJDk5F3HhiZXDXbL","rank":4,"first_buy_signature":"8ZgAUqVL8YZjf4GhmyGaLRqmpvaRcjV6CgHnwwzQheMFmKSc3rqxRc7mFbDqFdoLMykt63hwaRfCuEKe7wyA4k8","first_buy_slot":230,"first_buy_time":1759400230,"received_amount":1000000000,"spent":[{"asset":"sol","amount":400000000}],"programs":["8wU3YJ9RgGmiZaFbHbq76aamGEcj88jXC264GCNvQyYg"],"address_type":"wallet"}
+  ],
+  "transfers": [
+    {"signature":"fvM9j4wEmSTgaP1XuW4TgfPqnSwmE9EBVEKHtLb2ddjBpssM8L6b5jXepvt1gTGZKCbvwVCDPgxsrk2cPGMC9N8","slot":100,"block_time":1759400100,"instruction_path":"0","sender":"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P","receiver":"E3grKfLeT4eSQjwidcn2B9x5z4fMnKKBSHB9awS7i3PX","asset":"sol","amount":1000000000,"decimals":null,"depth":1},
+    {"signature":"3yZeShkwArGC6PbSj7Hho5YuAEkk5HLUudgWjiiMMH4YV8xpDqxN7fcEVR2uM1fCPitknPWoNnFi2TngHNcY2rJA","slot":101,"block_time":1759400101,"instruction_path":"0","sender":"6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P","receiver":"6ZgAvEy7vLETUDxKBadHPqgqkits1LRd2HHxfLkgRLkJ","asset":"sol","amount":1000000000,"decimals":null,"depth":1},
+    {"signature":"2dwKhSDkvAm9qW5nKHwjHzoKxam6a6p9uRrjFHBsfYS5unrnUQpE8BSGB1uwpvBtZyZtJWmEfKAKkhjPq2esWoqe","slot":102,"block_time":1759400102,"instruction_path":"0","sender":"4jew38MmVxCp6udNC9tywCjVrhM5yo6gUak31Re9zjbz","receiver":"51jW6KtrDMbY2En3oxAKKquWBVU7hC99gSWxgLnnfTau","asset":"sol","amount":1000000000,"decimals":null,"depth":1},
+    {"signature":"3t3fMPVCuPpR9oFV3s7wTb6YB7svgz1CFCsLyQryVypPUXo1JksHBU9iucTuf3oLMzRfb1FakZSHBNgvYEzqsg16","slot":103,"block_time":1759400103,"instruction_path":"0","sender":"GyY3V5HqawyR6AvpxysvzSAewNnTt6HSGuuW89dk3BXS","receiver":"HTi3BLEQDaZ4cBzQzoyfZjbm5mTqeJDk5F3HhiZXDXbL","asset":"sol","amount":1000000000,"decimals":null,"depth":1}
+  ],
+  "unexpanded": []
+}

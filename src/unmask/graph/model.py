@@ -1,4 +1,4 @@
-# impl: FR-002-02, FR-002-03, FR-002-05, FR-002-06, FR-002-18
+# impl: FR-002-02, FR-002-03, FR-002-05, FR-002-06, FR-002-18, FR-002-22
 """Типи графа фінансування й результату (data-model.md фічі 002) з інваріантами.
 
 Усі сутності незмінні (`frozen=True`) і перевіряють себе при побудові: некоректний
@@ -13,7 +13,9 @@
 - статус повноти графа не зберігається, а обчислюється (FR-002-05): `complete`
   тоді й лише тоді, коли повний збір 001 **і** повний аналіз делегованих купівель.
   `GraphCompleteness` будується лише через `derive` — прийом із токеном, як у 001;
-- порядок кожного кортежу визначає ключ лише з даних (`*_sort_key`).
+- порядок кожного кортежу визначає ключ лише з даних (`*_sort_key`);
+- пилові виміри (FR-002-22, research R-22): `median_to_buyers is None` тоді й лише
+  тоді, коли `buyer_fanout == 0`, інакше ціле `>= 1` у лампортах.
 
 Модуль не імпортує `unmask.hubs` (принцип VI, plan «Правило залежностей»):
 записи відсікання й звіт у `GraphResult` перевіряються лише за полями, які
@@ -59,6 +61,7 @@ class HubCriterion(StrEnum):
     DEGREE = "degree"
     ONE_OFF_SENDERS = "one_off_senders"
     INGEST_HIGH_DEGREE = "ingest_high_degree"
+    DUST_FANOUT = "dust_fanout"  # FR-002-22, research R-22
 
 
 class GraphWarning(StrEnum):
@@ -161,14 +164,31 @@ def _path_key(path: str | None) -> tuple[int, ...]:
 
 @dataclass(frozen=True)
 class NodeMeasures:
-    """Виміри для критеріїв хаба (research R-7, R-8); частка — відношення двох цілих поруч."""
+    """Виміри для критеріїв хаба (research R-7, R-8, R-22); частка — відношення двох цілих поруч.
+
+    `buyer_fanout`/`median_to_buyers` (FR-002-22) — кількість різних покупців, яким
+    вершина надіслала SOL, і верхня медіана сум цих ребер у лампортах. Медіану без
+    списку сум не відтворити, тож перевіряється лише `None`-інваріант і `>= 1`.
+    """
 
     degree: int
     unique_senders: int
     one_off_senders: int
     one_off_share: float | None
+    buyer_fanout: int
+    median_to_buyers: int | None
 
     def __post_init__(self) -> None:
+        _int("measures.buyer_fanout", self.buyer_fanout, lo=0)
+        if self.median_to_buyers is not None:
+            _int("measures.median_to_buyers", self.median_to_buyers)
+        if (self.median_to_buyers is None) != (self.buyer_fanout == 0):
+            raise ValueError(
+                f"measures: median_to_buyers={self.median_to_buyers!r} must be None iff "
+                f"buyer_fanout == 0 (buyer_fanout={self.buyer_fanout})"
+            )
+        _opt_int("measures.median_to_buyers", self.median_to_buyers, lo=1)
+
         _int("measures.degree", self.degree, lo=0)
         _int("measures.unique_senders", self.unique_senders, lo=0)
         _int("measures.one_off_senders", self.one_off_senders, lo=0)
@@ -500,6 +520,8 @@ class ThresholdsSnapshot:
     giant_component_warn_share: float
     prune_off_curve: bool
     prune_ingest_high_degree: bool
+    dust_amount_lamports: int
+    dust_min_fanout: int
 
     def __post_init__(self) -> None:
         _int("thresholds.degree_threshold", self.degree_threshold, lo=1)
@@ -508,6 +530,8 @@ class ThresholdsSnapshot:
         _share("thresholds.giant_component_warn_share", self.giant_component_warn_share, lo_open=True)
         _bool("thresholds.prune_off_curve", self.prune_off_curve)
         _bool("thresholds.prune_ingest_high_degree", self.prune_ingest_high_degree)
+        _int("thresholds.dust_amount_lamports", self.dust_amount_lamports, lo=1)
+        _int("thresholds.dust_min_fanout", self.dust_min_fanout, lo=2)
 
 
 @dataclass(frozen=True)
