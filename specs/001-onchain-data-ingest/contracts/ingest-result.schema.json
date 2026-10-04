@@ -171,7 +171,7 @@
         "receiver": { "$ref": "#/$defs/address" },
         "asset": { "$ref": "#/$defs/asset" },
         "amount": { "$ref": "#/$defs/posInt" },
-        "decimals": { "oneOf": [ { "type": "null" }, { "type": "integer", "minimum": 0, "maximum": 18 } ] },
+        "decimals": { "oneOf": [ { "type": "null" }, { "type": "integer", "minimum": 0, "maximum": 255 } ] },
         "depth": { "type": "integer", "minimum": 1, "maximum": 3 }
       }
     },

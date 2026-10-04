@@ -343,3 +343,28 @@ def test_raw_instruction_of_non_token_program_is_not_flagged():
 def test_corrupt_record_validates_reason():
     with pytest.raises(ValueError):
         CorruptRecord(signature=SIG, reason="whatever", detail="")
+
+
+# --- decimals токен-балансу: u8 (0..255), інакше пошкодження (T-020, узгодження з контрактом) ---------
+
+
+def _tx_with_decimals(decimals):
+    ix = _checked()
+    ix["parsed"]["info"]["tokenAmount"]["decimals"] = decimals
+    pre = tuple(_bal(b["accountIndex"], b["owner"], b["uiTokenAmount"]["amount"], decimals=decimals) for b in PRE)
+    post = tuple(_bal(b["accountIndex"], b["owner"], b["uiTokenAmount"]["amount"], decimals=decimals) for b in POST)
+    return _tx([ix], pre_tok=pre, post_tok=post)
+
+
+@pytest.mark.parametrize("decimals", [0, 6, 19, 255])
+def test_spl_decimals_within_u8_are_parsed(decimals):
+    tx = parse_transaction(_tx_with_decimals(decimals))
+    assert isinstance(tx, ParsedTx)
+    (t,) = tx.transfers
+    assert t.decimals == decimals and type(t.decimals) is int
+
+
+@pytest.mark.parametrize("decimals", [256, 1000, -1])
+def test_spl_decimals_outside_u8_are_corrupt_record_not_exception(decimals):
+    rec = _corrupt(_tx_with_decimals(decimals))
+    assert rec.reason == "non_integer" and "decimals" in rec.detail and rec.signature == SIG

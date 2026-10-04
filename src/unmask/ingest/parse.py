@@ -168,6 +168,14 @@ class ParsedTransfer:
         return Transfer(**values, depth=depth)
 
 
+def _token_decimals(name: str, value: Any) -> int:
+    """`uiTokenAmount.decimals` — u8 у SPL: 0..255; інше — пошкодження (`non_integer`), не виняток."""
+    _raw_int(name, value)
+    if not 0 <= value <= 255:
+        raise _Corrupt("non_integer", f"{name}: {value} is outside 0..255 (SPL decimals are u8)")
+    return value
+
+
 def _token_amount(name: str, value: Any) -> int:
     """Сума SPL у базових одиницях: рядок ASCII-цифр (jsonParsed) або точне невідʼємне `int`."""
     if isinstance(value, str):
@@ -302,7 +310,7 @@ def _token_balances(name: str, entries: Any) -> tuple[TokenBalance, ...]:
             mint=e["mint"],
             owner=e.get("owner") or None,
             amount=_token_amount(f"{name}.uiTokenAmount.amount", e["uiTokenAmount"]["amount"]),
-            decimals=_raw_int(f"{name}.uiTokenAmount.decimals", e["uiTokenAmount"]["decimals"]),
+            decimals=_token_decimals(f"{name}.uiTokenAmount.decimals", e["uiTokenAmount"]["decimals"]),
         )
         for e in entries or ()
     )

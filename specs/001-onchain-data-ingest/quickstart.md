@@ -52,7 +52,7 @@ from unmask.ingest.serialize import to_json
 cfg = load_config(Path('config/ingest.yaml'))
 src = FixtureRpcSource(Path('tests/fixtures/scenarios/basic'))
 svc = IngestService(cfg, src)
-mint = __import__('json').load(open('tests/fixtures/scenarios/basic/expected.json'))['metadata']['mint']
+mint = __import__('json').load(open('tests/fixtures/scenarios/basic/expected.json'))['mint']
 print(to_json(svc.collect(mint))[:400])
 "
 ```

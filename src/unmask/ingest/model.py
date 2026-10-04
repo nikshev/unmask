@@ -93,9 +93,11 @@ def _int(name: str, value: Any, lo: int | None = None) -> None:
         raise ValueError(f"{name}: {value} < {lo}")
 
 
-def _opt_int(name: str, value: Any, lo: int | None = None) -> None:
+def _opt_int(name: str, value: Any, lo: int | None = None, hi: int | None = None) -> None:
     if value is not None:
         _int(name, value, lo)
+        if hi is not None and value > hi:
+            raise ValueError(f"{name}: {value} > {hi}")
 
 
 def _num(name: str, value: Any, lo: float) -> None:
@@ -203,7 +205,7 @@ class Transfer:
         _str("transfer.receiver", self.receiver, nonempty=True)
         _set(self, "asset", Asset(self.asset))
         _int("transfer.amount", self.amount, lo=1)
-        _opt_int("transfer.decimals", self.decimals, lo=0)
+        _opt_int("transfer.decimals", self.decimals, lo=0, hi=255)  # SPL decimals — u8
         if self.asset == Asset.SOL and self.decimals is not None:
             raise ValueError("transfer.decimals: must be None for sol")
         _int("transfer.depth", self.depth, lo=1)
