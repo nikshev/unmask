@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **38** · задач: **57** (виконано 46) · вимог у роботі: **14** · порушень: **0**
+Вимог: **38** · задач: **57** (виконано 47) · вимог у роботі: **12** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -84,7 +84,7 @@
 - `T-033` (002-funding-graph-hub-pruning) — виконано
 - `T-057` (002-funding-graph-hub-pruning) — виконано
 - `T-034` (002-funding-graph-hub-pruning) — виконано
-- `T-035` (002-funding-graph-hub-pruning) — у роботі
+- `T-035` (002-funding-graph-hub-pruning) — виконано
 - `T-036` (002-funding-graph-hub-pruning) — у роботі
 - `T-039` (002-funding-graph-hub-pruning) — у роботі
 - `T-044` (002-funding-graph-hub-pruning) — виконано

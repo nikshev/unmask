@@ -259,7 +259,7 @@ GraphResult(
   metadata: GraphMetadata,
   completeness: GraphCompleteness,
   graph: FundingGraph,                 # для кластеризації: без хабів, з усіма покупцями
-  pruned: tuple[PruneRecord, …],       # хаби з інцидентними ребрами — повний граф відтворюється як graph ∪ pruned
+  pruned: tuple[PruneRecord, …],       # хаби з інцидентними ребрами — `graph ∪ pruned` відтворює повну множину адрес, ребер і вимірів (ролі, depth, address_type і unexpanded видаленої вершини в запису не зберігаються)
   buyer_flags: tuple[BuyerFlag, …],
   report: EffectReport,
 )
