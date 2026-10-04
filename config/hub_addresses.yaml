@@ -1,0 +1,32 @@
+# Відомі адреси хабів за категоріями (FR-002-07а). Окрема версія від hubs.yaml (FR-002-13).
+# Схема: specs/002-funding-graph-hub-pruning/contracts/config-hubs.md
+# Будь-яка зміна: підняти version і додати запис із sha256 у config/CHANGELOG.md
+# (розділ "# config/hub_addresses.yaml"). Кожна адреса — з коментарем: що це і джерело.
+# Адреса може бути лише в одній категорії. Порожня категорія — валідна і означає "ще не зібрано",
+# а НЕ "таких хабів немає": результат графа показує lists_applied і версію списку.
+version: 1
+
+categories:
+  system_programs:
+    - "11111111111111111111111111111111"              # System Program
+    - "ComputeBudget111111111111111111111111111111"   # Compute Budget Program
+    - "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"   # Memo Program v2
+  token_programs:
+    - "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"   # SPL Token
+    - "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"   # SPL Token-2022
+    - "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"   # Associated Token Account Program
+  dex_routers:
+    - "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"   # Jupiter Aggregator v6
+  amm_programs:
+    - "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"  # Raydium Liquidity Pool v4 (AMM)
+    - "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"   # Orca Whirlpool
+    # TODO (перевірити адресу перед додаванням, інакше не додавати): Raydium CLMM, Raydium CPMM,
+    # Meteora DLMM, Meteora DAMM, PumpSwap AMM, Phoenix, OpenBook v2.
+  launchpads:
+    - "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"   # Pump.fun
+  exchanges: []
+    # Гарячі гаманці бірж. НЕ вигадувати. Джерело для заповнення: публічні мітки експлорерів
+    # (Solscan / SolanaFM "labels") або власне спостереження на реальних токенах під час калібрування
+    # (research R-12); кожна адреса — з назвою біржі, джерелом і датою в коментарі; запис у CHANGELOG.
+  market_makers: []
+    # Маркет-мейкери. Те саме правило, що й для exchanges.

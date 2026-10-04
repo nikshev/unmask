@@ -1,4 +1,20 @@
-# config/ingest.yaml — changelog
+# config/hubs.yaml
+
+## 1 — 2026-10-04
+Початкова версія, не калібровано на реальних токенах: degree_threshold=100, one_off_senders_share=0.8,
+one_off_min_senders=10, giant_component_warn_share=0.5, prune_off_curve=true, prune_ingest_high_degree=true.
+Правило порогу — строго «більше» (рівно поріг — не хаб), одне для всіх критеріїв; one_off_min_senders — передумова «>=».
+Обґрунтування — specs/002-funding-graph-hub-pruning/research.md R-12.
+sha256: c410d677279d02687928b12fcf490e4685007c0bb499e12c2fbfb1ca6d25c63c
+
+# config/hub_addresses.yaml
+
+## 1 — 2026-10-04
+Початкова версія: system_programs(3), token_programs(3), dex_routers(1), amm_programs(2), launchpads(1),
+exchanges(0), market_makers(0). Джерела — коментарі у файлі. Біржі й ММ — порожньо до калібрування.
+sha256: 89c0a8be31ec2ffca32117ed38191e4caad0c840d9f4576048d0f312af80f2d5
+
+# config/ingest.yaml
 
 ## 1 — 2026-10-03
 Початкова версія: N=300, depth=2, counterparty_threshold=200, max_signatures_per_wallet=300,

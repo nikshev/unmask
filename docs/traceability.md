@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **38** · задач: **57** (виконано 34) · вимог у роботі: **22** · порушень: **0**
+Вимог: **38** · задач: **57** (виконано 36) · вимог у роботі: **22** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -31,7 +31,7 @@
 |---|---|---|---|---|
 | `FR-002-01` | Система MUST будувати орієнтований граф з результату збору: вершини — гаманці (покупці й джерела фінансування) | `T-028` | `src/unmask/graph/build.py` | `tests/test_graph_build.py` |
 | `FR-002-02` | Кожне ребро MUST нести суму, кількість переказів, час першого й останнього переказу та перелік первинних посил | `T-025`, `T-028` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_build.py`, `tests/test_graph_model.py` |
-| `FR-002-03` | Кожна вершина MUST нести ролі (покупець, джерело) і мінімальну глибину від покупців; для покупців — порядковий | `T-025`, `T-028`, `T-029` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_model.py` |
+| `FR-002-03` | Кожна вершина MUST нести ролі (покупець, джерело) і мінімальну глибину від покупців; для покупців — порядковий | `T-025`, `T-028`, `T-029` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_model.py`, `tests/test_graph_build_nodes.py` |
 | `FR-002-04` | Побудова графа MUST бути детермінованою: той самий вхід дає побітово той самий граф і порядок. | `T-028`, `T-031`, `T-039`, `T-040` | `src/unmask/graph/build.py` | — |
 | `FR-002-05` | Граф MUST успадковувати статус повноти результату збору й перелік причин неповноти; граф над неповним збором M | `T-025`, `T-028`, `T-030` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_model.py` |
 | `FR-002-06` | Граф MUST зберігати нерозгорнуті вершини з результату збору з причиною (висока зв'язність, ліміт підписів) як  | `T-025`, `T-028`, `T-030` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_model.py` |
@@ -73,7 +73,7 @@
 - `T-051` (001-onchain-data-ingest) — виконано
 - `T-052` (001-onchain-data-ingest) — виконано
 - `T-053` (001-onchain-data-ingest) — у роботі
-- `T-024` (002-funding-graph-hub-pruning) — у роботі
+- `T-024` (002-funding-graph-hub-pruning) — виконано
 - `T-025` (002-funding-graph-hub-pruning) — виконано
 - `T-054` (002-funding-graph-hub-pruning) — у роботі
 - `T-055` (002-funding-graph-hub-pruning) — виконано
