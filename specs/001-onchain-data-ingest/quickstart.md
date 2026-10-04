@@ -43,7 +43,7 @@ uv run pytest -q tests/test_cache.py tests/test_service_rejections.py tests/test
 Ручна перевірка на фікстурі (без мережі):
 
 ```bash
-uv run python -c "
+PYTHONPATH=src uv run python -c "
 from pathlib import Path
 from unmask.ingest.config import load_config
 from unmask.ingest.rpc.fixture import FixtureRpcSource
@@ -61,7 +61,7 @@ print(to_json(svc.collect(mint))[:400])
 
 ```bash
 export UNMASK_RPC_URL='https://<rpc-fast-endpoint>/<key>'
-uv run python -c "
+PYTHONPATH=src uv run python -c "
 from pathlib import Path
 import os
 from unmask.ingest.config import load_config
