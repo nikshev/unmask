@@ -3,15 +3,46 @@
 
 Єдиний модуль, що імпортує `httpx` (принцип IV). Адаптер лише транспортує й мапить помилки: типи
 результатів дослівно повторюють поле `result` методів Solana RPC. Запити — `encoding=jsonParsed`,
-`maxSupportedTransactionVersion=0`, `commitment` — з конфігу збору.
+`maxSupportedTransactionVersion=max_tx_version` (за замовчуванням 1), `commitment` — з конфігу збору.
 
 Рішення (поза буквою контракту, з причинами)
-- `get_transactions` — **batch**, а не пул потоків: один HTTP-запит з масивом JSON-RPC на кожні
-  `rpc.page_size` підписів. Це просто (жодних потоків, детермінізм, один дедлайн-цикл), і порядок
-  відповіді тримається за JSON-RPC `id` (= позиція підпису в пакеті), а не за порядком, у якому його
-  повернув сервер. `rpc.max_concurrency` цим адаптером не використовується. Ризик: провайдер із
-  меншим лімітом розміру batch відповість помилкою -> `RpcUnavailable`; тоді зменшують `rpc.page_size`
-  (версіонований конфіг, принцип III).
+- `get_transactions` — **batch**, а не пул потоків: послідовні HTTP-запити з масивом JSON-RPC, кожен
+  не більше `max_batch` підписів (T-049; живий провайдер: 40 проходить, 50 -> HTTP 429 / -32005). Це
+  просто (жодних потоків, детермінізм, один дедлайн-цикл), і порядок відповіді тримається за JSON-RPC
+  `id` = позиція підпису у ВСЬОМУ виклику (не в під-batch), а не за порядком, у якому його повернув
+  сервер; результат не залежить від `max_batch`. `rpc.page_size` — лише розмір сторінки підписів
+  (`get_signatures_for_address`) і розмір пачки ядра; batch транзакцій він НЕ визначає.
+  `rpc.max_concurrency` цим адаптером не використовується.
+- `max_tx_version` (за замовчуванням 1) і `max_batch` (за замовчуванням 25 — нижче підтвердженого 40) —
+  параметри адаптера (keyword-only), а не YAML: це константи протоколу/провайдера, вони не змінюють висновок
+  (за невдалого значення збір чесно стає `incomplete`, а не іншим). Перевірка — лише справжній `int`
+  (`bool` ні), `max_tx_version >= 0`, `max_batch >= 1`; помилка — `ValueError` з назвою параметра, без
+  значення і без URL. Мережа вже містить транзакції `version: 1`; запит із меншою версією дає -32015.
+- Під-batch — «все або нічого»: збій будь-якого під-batch (після повторів) або елемента піднімає виняток на
+  весь виклик, наступні під-batch не відправляються, часткові результати не повертаються. Повтори — на рівні
+  під-batch (повторюється лише той, що впав) і, як і раніше, лише для збоїв рівня HTTP/транспорту (`_send`);
+  JSON-RPC `error` у тілі HTTP 200 (також -32005, -32015) не повторюється.
+- Пейсер getTransaction (кошик токенів, рішення власника процесу за ревʼю T-049). Ліміт живого провайдера —
+  ШВИДКІСТЬ, а не розмір batch: кошик на кількість getTransaction-елементів; виміряно (ревʼю T-049, 16 живих
+  прогонів): ємність ≈ 40, поповнення ≈ 15–16/с; за нестачі — HTTP 429 з тілом -32005 без Retry-After. Без
+  пейсера під-batch, що йдуть поспіль, майже гарантовано ловлять 429. Клієнтський кошик: `tx_burst`
+  (за замовчуванням 30) токенів на старті, поповнення `tx_rate_per_second` (за замовчуванням 12/с) за
+  інʼєктованим `clock.monotonic()`, не більше `tx_burst`; дефолти навмисно з запасом ≈ 20–25% і за ємністю,
+  і за швидкістю (20/40 на живому вузлі давали 429 у кожному прогоні). Перед КОЖНОЮ спробою під-batch на k елементів (також повтором): поповнити; бракує —
+  чекати `(k − tokens) / rate` інʼєктованим `sleep`, але лише якщо очікування МЕНШЕ за `deadline.remaining()`;
+  інакше `RpcTimeout("budget")` без запиту, без сну і без зміни стану кошика (чесно: бюджет вичерпано; ядро
+  мапить у `budget_exhausted`, resume продовжить). Після паузи — списати k і далі звичайний `_send_once`
+  (перевірка `expired()`/`request_timeout()` — після паузи). HTTP 429 на під-batch -> локальні токени = 0
+  (кошик провайдера порожній), далі звичайний шлях повтору; повтор знову йде через пейсер. 5xx і мережеві
+  збої кошик не обнуляють (це не ліміт швидкості). Якщо після 429 бюджет не дозволяє дочекатись токенів,
+  назовні виходить `RpcTimeout("budget")`, а не `RpcRateLimited` (контракт це дозволяє: винен бюджет).
+  `tx_rate_per_second = math.inf` вимикає пейсер; скінченна швидкість — не менше 0.1/с, тож одна пауза
+  пейсера не перевищує `tx_burst / 0.1` с (10·`tx_burst`, навіть за безкінечного дедлайну) і завжди менша
+  за `deadline.remaining()`. `max_batch <= tx_burst` (інакше під-batch ніколи не
+  вміститься). Інші методи пейсер не обмежує: їхні ліміти не вимірювались. Адаптер однопотоковий, як і ядро:
+  стан кошика не захищено блокуванням (потокобезпечність не потрібна).
+- `-32015` (непідтримана версія транзакції, напр. майбутня v2) -> `RpcUnavailable` з фіксованою міткою
+  `jsonrpc error code=-32015 (unsupported transaction version)` — ніколи `None` і не ліміт.
 - Помилка одного елемента batch -> `RpcUnavailable` (або `RpcRateLimited`, якщо код ліміту) на ВЕСЬ
   виклик, а не `None` для елемента: `None` означає «транзакцію не знайдено» (`result: null`, обрізана
   історія), а JSON-RPC `error` — «не вдалось дізнатись». Підміна одного іншим видала б збій за відсутність
@@ -22,7 +53,7 @@
   бюджет запиту вже витрачено. Пауза робиться лише якщо вона **менша за `deadline.remaining()`**; інакше
   повтор однаково не вмістився б, і піднімається остання справжня помилка (а не «бюджет»), без сну.
   Сон — через інʼєктований `sleep`, час — через інʼєктований `clock`.
-- Перед КОЖНИМ запитом (також повтором і кожною порцією batch): `deadline.expired()` -> `RpcTimeout("budget")`;
+- Перед КОЖНИМ запитом (також повтором і кожним під-batch): `deadline.expired()` -> `RpcTimeout("budget")`;
   `request_timeout() <= 0` (або NaN) — теж `RpcTimeout("budget")`, нуль запитів (на 0 httpx/urllib3 можуть
   кидати ValueError).
 - Загальний таймаут запиту: `httpx.Timeout` з усіма чотирма полями = `deadline.request_timeout(cap)`, і
@@ -49,7 +80,7 @@
   int32, інакше `jsonrpc error (malformed code)`), за класом помилки транспорту (`network error: ConnectError`
   — мітка з таблиці через `isinstance`, а не `type(exc).__name__`), а також `invalid JSON in response` і
   `unexpected response shape: ...`. Причина: очищувати довільний текст провайдера від ключа принципово
-  ненадійно (JSON-екранування `\/`, подвійне percent-кодування, HTML-сутності, власна маска провайдера —
+  ненадійно (JSON-екранування `\\/`, подвійне percent-кодування, HTML-сутності, власна маска провайдера —
   кожне ревʼю знаходило нове кодування). Діагностика «хибний ключ» лишається категорією 401/403.
 - Ланцюг винятків: винятки адаптера піднімаються ПОЗА блоками `except` (помилку повертає `_exchange`, а
   `_send_once` піднімає), тож `__cause__` і `__context__` порожні: httpx-виняток тримає `request.url` із ключем,
@@ -75,6 +106,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -109,6 +141,11 @@ _RETRY_AFTER_RE = re.compile(r"[0-9]+(?:\.[0-9]+)?")
 _SINGLE_ID = 1
 _INVALID_URL = "invalid RPC URL"
 _INT32 = range(-(2**31), 2**31)
+_DEFAULT_MAX_TX_VERSION = 1  # мережа вже містить транзакції `version: 1` (known-issues §6)
+_DEFAULT_MAX_BATCH = 25  # живий провайдер: 40 getTransaction у batch проходить, 50 -> 429 (known-issues §6)
+_DEFAULT_TX_RATE = 12.0  # елементів getTransaction/с; виміряне поповнення провайдера ≈ 15–16/с, запас ≈ 20–25%
+_DEFAULT_TX_BURST = 30  # виміряна ємність кошика провайдера ≈ 40 (±3), запас ≈ 25%
+_MIN_TX_RATE = 0.1  # нижня межа скінченної швидкості: пауза пейсера ≤ tx_burst / 0.1 с
 
 # Allow-list категорій `detail`. Кожен рядок — константа адаптера; ззовні береться лише int (статус, код).
 _JSONRPC_LABELS: Mapping[int, str] = {
@@ -215,6 +252,10 @@ def _valid_url(url: object) -> bool:
         return False
 
 
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _parse_retry_after(raw: str | None) -> float | None:
     if raw is None:
         return None
@@ -234,18 +275,44 @@ class HttpRpcSource:
         commitment: str,
         clock: Clock | None = None,
         sleep: Callable[[float], None] | None = None,
+        max_tx_version: int = _DEFAULT_MAX_TX_VERSION,
+        max_batch: int = _DEFAULT_MAX_BATCH,
+        tx_rate_per_second: float = _DEFAULT_TX_RATE,
+        tx_burst: int = _DEFAULT_TX_BURST,
     ) -> None:
         # Одне загальне повідомлення без url і його частин; піднімається поза `except` (див. `_valid_url`).
         if not _valid_url(url):
             raise ValueError(_INVALID_URL)
         if commitment not in _COMMITMENTS:
             raise ValueError(f"commitment: {commitment!r} not in {list(_COMMITMENTS)}")
+        # Без значення в тексті: лише назва параметра й правило (значення — не наша справа логувати).
+        if not _is_int(max_tx_version) or max_tx_version < 0:
+            raise ValueError("max_tx_version: must be an int >= 0")
+        if not _is_int(max_batch) or max_batch < 1:
+            raise ValueError("max_batch: must be an int >= 1")
+        if (
+            not isinstance(tx_rate_per_second, (int, float))
+            or isinstance(tx_rate_per_second, bool)
+            or not tx_rate_per_second >= _MIN_TX_RATE  # також NaN
+        ):
+            raise ValueError("tx_rate_per_second: must be a number >= 0.1 (finite, or math.inf to disable)")
+        if not _is_int(tx_burst) or tx_burst < 1:
+            raise ValueError("tx_burst: must be an int >= 1")
+        if max_batch > tx_burst:
+            raise ValueError("max_batch: must not exceed tx_burst")
+        self._tx_rate = float(tx_rate_per_second)
+        self._tx_burst = tx_burst
+        self._max_tx_version = max_tx_version
+        self._max_batch = max_batch
         self._url = url
         self._cfg = rpc_cfg
         self._commitment = commitment
         self._clock: Clock = clock if clock is not None else SystemClock()
         self._sleep: Callable[[float], None] = sleep if sleep is not None else time.sleep
         self._client = httpx.Client(transport=transport, follow_redirects=False)
+        # Стан пейсера getTransaction (однопотоково, як і ядро): кошик повний на старті.
+        self._tokens = float(tx_burst)
+        self._refilled_at = self._clock.monotonic()
 
     @classmethod
     def from_env(
@@ -257,6 +324,10 @@ class HttpRpcSource:
         environ: Mapping[str, str] | None = None,
         clock: Clock | None = None,
         sleep: Callable[[float], None] | None = None,
+        max_tx_version: int = _DEFAULT_MAX_TX_VERSION,
+        max_batch: int = _DEFAULT_MAX_BATCH,
+        tx_rate_per_second: float = _DEFAULT_TX_RATE,
+        tx_burst: int = _DEFAULT_TX_BURST,
     ) -> HttpRpcSource:
         """Зручність: URL із `UNMASK_RPC_URL`. Сервіс і ядро середовище не читають."""
         env = os.environ if environ is None else environ
@@ -265,7 +336,9 @@ class HttpRpcSource:
             raise ConfigError(f"{ENV_URL}: not set")
         if not _valid_url(url):
             raise ConfigError(f"{ENV_URL}: {_INVALID_URL}")
-        return cls(url, rpc_cfg, transport, commitment=commitment, clock=clock, sleep=sleep)
+        return cls(url, rpc_cfg, transport, commitment=commitment, clock=clock, sleep=sleep,
+                   max_tx_version=max_tx_version, max_batch=max_batch,
+                   tx_rate_per_second=tx_rate_per_second, tx_burst=tx_burst)
 
     def __repr__(self) -> str:
         return f"HttpRpcSource(name={self.name!r})"
@@ -338,27 +411,27 @@ class HttpRpcSource:
     def get_transactions(
         self, signatures: Sequence[str], *, deadline: Deadline
     ) -> list[RawTransaction | None]:
+        """Послідовні під-batch ≤ `max_batch`; id = позиція підпису у всьому виклику; «все або нічого»."""
         out: list[RawTransaction | None] = []
-        size = self._cfg.page_size
-        for start in range(0, len(signatures), size):
-            chunk = signatures[start : start + size]
+        for start in range(0, len(signatures), self._max_batch):
             payload = [
                 {
                     "jsonrpc": "2.0",
-                    "id": i,
+                    "id": position,
                     "method": "getTransaction",
                     "params": [
                         sig,
                         {
                             "encoding": "jsonParsed",
-                            "maxSupportedTransactionVersion": 0,
+                            "maxSupportedTransactionVersion": self._max_tx_version,
                             "commitment": self._commitment,
                         },
                     ],
                 }
-                for i, sig in enumerate(chunk)
+                for position, sig in enumerate(signatures[start : start + self._max_batch], start)
             ]
-            out.extend(self._batch(payload, deadline))
+            # Збій під-batch піднімається звідси ж: `out` (частковий) ніколи не повертається.
+            out.extend(self._batch(payload, deadline, paced=len(payload)))
         return out
 
     def get_token_accounts_by_owner(
@@ -395,8 +468,10 @@ class HttpRpcSource:
             raise RpcUnavailable("unexpected response shape: id/result")
         return body["result"]
 
-    def _batch(self, payload: list[dict[str, Any]], deadline: Deadline) -> list[RawTransaction | None]:
-        body = self._send(payload, deadline)
+    def _batch(
+        self, payload: list[dict[str, Any]], deadline: Deadline, *, paced: int
+    ) -> list[RawTransaction | None]:
+        body = self._send(payload, deadline, paced=paced)
         if isinstance(body, dict):
             # Сервер відмовив на весь batch одним об'єктом помилки (або відповів не за контрактом).
             self._raise_if_error(body)
@@ -442,12 +517,36 @@ class HttpRpcSource:
 
     # ------------------------------------------------------------------ транспорт, повтори, дедлайн
 
-    def _send(self, payload: Any, deadline: Deadline) -> Any:
+    def _pace(self, k: int, deadline: Deadline) -> None:
+        """Кошик токенів getTransaction: дочекатись k токенів (у межах дедлайну) і списати їх до запиту."""
+        if math.isinf(self._tx_rate):
+            return
+        now = self._clock.monotonic()
+        tokens = min(float(self._tx_burst), self._tokens + max(now - self._refilled_at, 0.0) * self._tx_rate)
+        if tokens < k:
+            wait = (k - tokens) / self._tx_rate
+            if wait >= deadline.remaining():
+                raise RpcTimeout("budget")  # дочекатись не дозволяє бюджет: ні сну, ні запиту, стан не змінено
+            self._sleep(wait)
+            after = self._clock.monotonic()
+            tokens = min(float(self._tx_burst), tokens + max(after - now, 0.0) * self._tx_rate)
+            now = after
+        self._tokens = tokens - k
+        self._refilled_at = now
+
+    def _send(self, payload: Any, deadline: Deadline, *, paced: int = 0) -> Any:
+        """`paced` — кількість getTransaction-елементів запиту (0 — без пейсера: інші методи)."""
         attempt = 0
         while True:
             try:
+                if paced:
+                    self._pace(paced, deadline)
                 return self._send_once(payload, deadline)
             except (RpcRateLimited, RpcUnavailable) as exc:
+                if paced and isinstance(exc, RpcRateLimited):
+                    # провайдер відмовив за швидкістю: його кошик порожній — наш теж
+                    self._tokens = 0.0
+                    self._refilled_at = self._clock.monotonic()
                 if attempt >= self._cfg.max_retries:
                     raise
                 pause = self._cfg.retry_backoff_seconds * (2**attempt)

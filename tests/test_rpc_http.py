@@ -10,6 +10,7 @@ import copy
 import dataclasses
 import json
 import logging
+import math
 import re
 import traceback
 import warnings
@@ -55,7 +56,7 @@ def cfg(**kw) -> RpcConfig:
 class Harness:
     """Підставна «мережа»: журнал запитів, годинник, пауза, що просуває годинник."""
 
-    def __init__(self, handler, *, rpc_cfg=CFG, commitment="finalized", budget=40.0, url=URL):
+    def __init__(self, handler, *, rpc_cfg=CFG, commitment="finalized", budget=40.0, url=URL, **source_kw):
         self.clock = FakeClock()
         self.requests: list[httpx.Request] = []
         self.sleeps: list[float] = []
@@ -68,6 +69,7 @@ class Harness:
             commitment=commitment,
             clock=self.clock,
             sleep=self._sleep,
+            **source_kw,
         )
 
     def _dispatch(self, request: httpx.Request) -> httpx.Response:
@@ -147,9 +149,9 @@ def test_request_envelope_and_params_for_each_method():
     ]
     assert b[2] == [{
         "jsonrpc": "2.0", "id": 0, "method": "getTransaction",
-        "params": ["s1", {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0,
+        "params": ["s1", {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 1,
                           "commitment": "finalized"}],
-    }]
+    }]  # T-049: за замовчуванням 1 (було 0 — вузол відмовляв -32015 на транзакціях version 1)
     assert b[3]["params"] == ["OWNER1", {"programId": TOKEN_PROGRAM},
                               {"encoding": "jsonParsed", "commitment": "finalized"}]
     assert b[4]["params"] == ["OWNER1", {"programId": TOKEN_2022_PROGRAM},
@@ -334,13 +336,14 @@ def test_batch_get_transactions_preserves_order_and_none_for_missing():
     assert [i["params"][0] for i in h.bodies()[0]] == ["s3", "s2", "s1", "s4"]
 
 
-def test_batch_is_chunked_by_page_size_and_order_is_kept_across_chunks():
+def test_batch_is_chunked_by_max_batch_and_order_is_kept_across_chunks():
+    # T-049: порції — за `max_batch` адаптера, а не за `rpc.page_size` (було page_size=2).
     sigs = [f"s{i}" for i in range(5)]
     results = {s: (None if i == 3 else txr(i)) for i, s in enumerate(sigs)}
-    h = Harness(batch_handler(results, shuffle=True), rpc_cfg=cfg(page_size=2))
+    h = Harness(batch_handler(results, shuffle=True), max_batch=2)
     got = h.source.get_transactions(sigs, deadline=h.deadline)
     assert got == [txr(0), txr(1), txr(2), None, txr(4)]
-    assert [len(b) for b in h.bodies()] == [2, 2, 1]  # кожен запит ≤ rpc.page_size
+    assert [len(b) for b in h.bodies()] == [2, 2, 1]  # кожен запит ≤ max_batch
 
 
 def test_batch_with_duplicate_signatures_answers_per_position():
@@ -393,6 +396,614 @@ def test_batch_element_result_of_wrong_type_is_unavailable(bad):
     h = Harness(batch_handler({"s1": bad}), rpc_cfg=cfg(max_retries=0))
     with pytest.raises(RpcUnavailable):
         h.source.get_transactions(["s1"], deadline=h.deadline)
+
+
+# --------------------------------------------------------------------------- T-049: версія транзакцій і під-batch
+
+
+def sigs_and_results(n, *, none_at=()):
+    sigs = [f"s{i}" for i in range(n)]
+    return sigs, {s: (None if i in none_at else txr(i)) for i, s in enumerate(sigs)}
+
+
+def tx_items(h):
+    return [item for body in h.bodies() if isinstance(body, list) for item in body]
+
+
+def test_max_supported_transaction_version_is_sent_and_defaults_to_1():
+    sigs, results = sigs_and_results(30)
+    h = Harness(batch_handler(results))  # max_tx_version за замовчуванням
+    h.source.get_transactions(sigs, deadline=h.deadline)
+    items = tx_items(h)
+    assert len(items) == 30 and len(h.requests) == 2  # обидва під-batch
+    assert {i["params"][1]["maxSupportedTransactionVersion"] for i in items} == {1}
+    assert all(type(i["params"][1]["maxSupportedTransactionVersion"]) is int for i in items)
+    for explicit in (0, 2, 7):
+        h = Harness(batch_handler(results), max_tx_version=explicit)
+        h.source.get_transactions(sigs[:3], deadline=h.deadline)
+        assert [i["params"][1] for i in tx_items(h)] == [
+            {"encoding": "jsonParsed", "maxSupportedTransactionVersion": explicit, "commitment": "finalized"}
+        ] * 3
+
+
+def test_v1_transaction_response_is_returned_unchanged():
+    real_sig, real_tx = _real_v1_transaction()
+    assert real_tx["version"] == 1
+    pristine = copy.deepcopy(real_tx)
+    rpc = {"getTransaction": {real_sig: real_tx, "legacy_sig": {**txr(5), "version": "legacy"}, "gone": None}}
+    holder = {}
+    h = Harness(lambda request, h: _emulator(rpc, "finalized", holder["bucket"])(request))
+    holder["bucket"] = ProviderBucket(h.clock)
+    got = h.source.get_transactions(["gone", real_sig, "legacy_sig"], deadline=h.deadline)
+    assert got == [None, pristine, {**txr(5), "version": "legacy"}]  # дослівно, без перекладу структури
+    assert got[1]["version"] == 1
+    assert json.dumps(got[1], sort_keys=True) == json.dumps(pristine, sort_keys=True)
+
+
+@pytest.mark.parametrize("max_batch", [1, 2, 3, 7, 8, 25, 1000, 10**6])
+def test_get_transactions_splits_into_sub_batches_of_max_batch_preserving_order(max_batch):
+    n = 23
+    sigs, results = sigs_and_results(n, none_at=(4, 22))
+    h = Harness(batch_handler(results, shuffle=True), max_batch=max_batch, tx_burst=max(max_batch, 40))
+    got = h.source.get_transactions(sigs, deadline=h.deadline)
+    # ідентичність результату не залежить від max_batch
+    assert got == [None if i in (4, 22) else txr(i) for i in range(n)]
+    bodies = h.bodies()
+    assert len(h.requests) == -(-n // max_batch)  # ceil(n / max_batch)
+    assert all(isinstance(b, list) and 1 <= len(b) <= max_batch for b in bodies)
+    assert [len(b) for b in bodies[:-1]] == [max_batch] * (len(bodies) - 1)  # послідовні повні під-batch
+    # JSON-RPC id = позиція підпису у ВСЬОМУ виклику, а не в під-batch; підписи йдуть по порядку
+    assert [i["id"] for i in tx_items(h)] == list(range(n))
+    assert [i["params"][0] for i in tx_items(h)] == sigs
+
+
+def test_sub_batch_with_duplicate_signatures_across_sub_batches_answers_per_position():
+    h = Harness(batch_handler({"a": txr(1), "b": None}), max_batch=2)
+    got = h.source.get_transactions(["a", "b", "a", "a", "b"], deadline=h.deadline)
+    assert got == [txr(1), None, txr(1), txr(1), None]
+
+
+@pytest.mark.parametrize("page_size", [1, 2, 40, 1000])
+def test_page_size_does_not_control_transaction_batch_size(page_size):
+    sigs, results = sigs_and_results(60)
+    h = Harness(batch_handler(results), rpc_cfg=cfg(page_size=page_size))  # max_batch за замовчуванням: 25
+    assert h.source.get_transactions(sigs, deadline=h.deadline) == [txr(i) for i in range(60)]
+    assert [len(b) for b in h.bodies()] == [25, 25, 10]
+    h = Harness(batch_handler(results), rpc_cfg=cfg(page_size=page_size), max_batch=40, tx_burst=40)
+    h.source.get_transactions(sigs, deadline=h.deadline)
+    assert [len(b) for b in h.bodies()] == [40, 20]
+
+
+UNSUPPORTED = "jsonrpc error code=-32015 (unsupported transaction version)"
+CANARY_T049 = "PROVIDERCANARY_T049"
+V1_ERROR = {"error": {"code": -32015, "message": f"Transaction version (1) is not supported {CANARY_T049}",
+                      "data": CANARY_T049}}
+
+
+def test_unsupported_transaction_version_error_is_unavailable_never_none():
+    # одиночний елемент
+    h = Harness(batch_handler({"s1": V1_ERROR}), rpc_cfg=cfg(max_retries=0))
+    with pytest.raises(RpcUnavailable) as ei:
+        h.source.get_transactions(["s1"], deadline=h.deadline)
+    assert type(ei.value) is RpcUnavailable
+    assert ei.value.detail == f"batch item 0: {UNSUPPORTED}"
+    assert CANARY_T049 not in "".join(traceback.format_exception(ei.value))
+    # у другому під-batch, перший під-batch успішний: увесь виклик — Unavailable з глобальною позицією
+    sigs, results = sigs_and_results(5)
+    results["s3"] = V1_ERROR
+    h = Harness(batch_handler(results), rpc_cfg=cfg(max_retries=0), max_batch=2)
+    with pytest.raises(RpcUnavailable) as ei:
+        h.source.get_transactions(sigs, deadline=h.deadline)
+    assert type(ei.value) is RpcUnavailable and not isinstance(ei.value, RpcRateLimited)
+    assert ei.value.detail == f"batch item 3: {UNSUPPORTED}"
+    # разом із `result: null` у тому ж під-batch: -32015 не стає «не знайдено»
+    h = Harness(batch_handler({"a": None, "b": V1_ERROR}), rpc_cfg=cfg(max_retries=0))
+    with pytest.raises(RpcUnavailable):
+        h.source.get_transactions(["a", "b"], deadline=h.deadline)
+    # відмова всьому batch одним об'єктом і одиночний виклик — та сама фіксована мітка
+    h = Harness(batch_handler({"s1": txr(1)}, as_dict={"jsonrpc": "2.0", "id": None, **V1_ERROR}),
+                rpc_cfg=cfg(max_retries=0))
+    with pytest.raises(RpcUnavailable) as ei:
+        h.source.get_transactions(["s1"], deadline=h.deadline)
+    assert ei.value.detail == UNSUPPORTED and ei.value.args == (UNSUPPORTED,)
+    h = Harness(one_shot(_err_body(V1_ERROR["error"])), rpc_cfg=cfg(max_retries=0))
+    with pytest.raises(RpcUnavailable) as ei:
+        call(h)
+    assert ei.value.detail == UNSUPPORTED
+    assert CANARY_T049 not in "".join(traceback.format_exception(ei.value))
+
+
+BAD_VERSIONS = [-1, -100, True, False, 1.0, "1", None, [1]]
+BAD_BATCHES = [0, -1, True, False, 25.0, "25", None, [25]]
+
+
+@pytest.mark.parametrize("kw", [{"max_tx_version": v} for v in BAD_VERSIONS]
+                         + [{"max_batch": v} for v in BAD_BATCHES])
+def test_max_batch_and_max_tx_version_validation(kw):
+    requests = []
+    transport = httpx.MockTransport(lambda r: requests.append(r) or httpx.Response(200))
+    with pytest.raises(ValueError) as ei:
+        HttpRpcSource(URL, CFG, transport=transport, commitment="finalized", **kw)
+    exc = ei.value
+    assert type(exc) is ValueError
+    name = next(iter(kw))
+    assert name in str(exc)
+    rendered = "".join(traceback.format_exception(exc))
+    assert SECRET not in rendered and "rpc.example" not in rendered
+    assert exc.__cause__ is None and exc.__context__ is None
+    assert requests == []
+
+
+def test_max_batch_and_max_tx_version_valid_boundaries_and_keyword_only():
+    for kw in ({"max_tx_version": 0}, {"max_tx_version": 1}, {"max_tx_version": 2**31},
+               {"max_batch": 1}, {"max_batch": 10**9, "tx_burst": 10**9}):
+        HttpRpcSource(URL, CFG, commitment="finalized", **kw)
+    with pytest.raises(TypeError):
+        HttpRpcSource(URL, CFG, None, "finalized")  # commitment, max_* — лише keyword
+    src = HttpRpcSource.from_env(CFG, commitment="finalized", environ={"UNMASK_RPC_URL": URL},
+                                 transport=httpx.MockTransport(lambda r: httpx.Response(200, json=[
+                                     {"jsonrpc": "2.0", "id": i["id"], "result": None}
+                                     for i in json.loads(r.content)])),
+                                 max_tx_version=3, max_batch=2, tx_rate_per_second=math.inf)
+    assert src.get_transactions(["a", "b", "c"], deadline=Deadline(FakeClock(), 10)) == [None] * 3
+    # прокидання перевіряє `test_from_env_passes_every_adapter_parameter_through_observably` за вмістом запитів
+    with pytest.raises(ValueError):
+        HttpRpcSource.from_env(CFG, commitment="finalized", environ={"UNMASK_RPC_URL": URL}, max_batch=0)
+
+
+@pytest.mark.parametrize("failure", ["item_error", "http_503", "foreign_id", "rate_limit_item", "timeout"])
+def test_sub_batch_failure_fails_whole_call_all_or_nothing(failure):
+    sigs, results = sigs_and_results(6)
+
+    def handler(request, h):
+        body = json.loads(request.content)
+        ids = [i["id"] for i in body]
+        if ids == [2, 3]:  # другий під-batch
+            if failure == "item_error":
+                return httpx.Response(200, json=[{"jsonrpc": "2.0", "id": 2, "result": txr(2)},
+                                                 {"jsonrpc": "2.0", "id": 3, "error": {"code": -32000}}])
+            if failure == "http_503":
+                return httpx.Response(503)
+            if failure == "foreign_id":
+                return httpx.Response(200, json=[{"jsonrpc": "2.0", "id": 0, "result": txr(0)},
+                                                 {"jsonrpc": "2.0", "id": 1, "result": txr(1)}])
+            if failure == "rate_limit_item":
+                return httpx.Response(200, json=[{"jsonrpc": "2.0", "id": 2, "result": txr(2)},
+                                                 {"jsonrpc": "2.0", "id": 3, "error": {"code": -32005}}])
+            raise httpx.ReadTimeout("t")
+        return batch_handler(results)(request, h)
+
+    h = Harness(handler, rpc_cfg=cfg(max_retries=0), max_batch=2)
+    expected = {"rate_limit_item": RpcRateLimited, "timeout": RpcTimeout}.get(failure, RpcUnavailable)
+    got = None
+    with pytest.raises(expected):
+        got = h.source.get_transactions(sigs, deadline=h.deadline)
+    assert got is None  # жодного часткового результату
+    assert len(h.requests) == 2  # третій під-batch не відправлено
+
+
+def test_deadline_expiring_between_sub_batches_raises_budget_and_sends_nothing_more():
+    sigs, results = sigs_and_results(6)
+    holder = {}
+
+    class D:  # бюджет спливає рівно після першого під-batch
+        def expired(self):
+            return len(holder["h"].requests) >= 1
+
+        def remaining(self):
+            return 30.0
+
+        def request_timeout(self, cap):
+            return 5.0
+
+    h = Harness(batch_handler(results), max_batch=2)
+    holder["h"] = h
+    with pytest.raises(RpcTimeout) as ei:
+        h.source.get_transactions(sigs, deadline=D())
+    assert str(ei.value) == "budget"
+    assert len(h.requests) == 1 and h.sleeps == []
+
+
+@pytest.mark.parametrize("value", [0.0, -1.0, float("nan")])
+def test_request_timeout_running_out_between_sub_batches_raises_budget_and_sends_nothing_more(value):
+    sigs, results = sigs_and_results(6)
+    holder = {}
+
+    class D:
+        def expired(self):
+            return False
+
+        def remaining(self):
+            return 30.0
+
+        def request_timeout(self, cap):
+            return 5.0 if not holder["h"].requests else value
+
+    h = Harness(batch_handler(results), max_batch=2)
+    holder["h"] = h
+    with pytest.raises(RpcTimeout) as ei:
+        h.source.get_transactions(sigs, deadline=D())
+    assert str(ei.value) == "budget"
+    assert len(h.requests) == 1
+
+
+def test_sub_batch_deadline_with_real_clock_burn_between_sub_batches():
+    # FakeClock: перший під-batch «з'їдає» весь бюджет рівно до межі (не перевищуючи таймаут запиту)
+    sigs, results = sigs_and_results(4)
+    inner = batch_handler(results)
+
+    def burn(request, h):
+        h.clock.advance(50.0)
+        return inner(request, h)
+
+    h = Harness(burn, budget=50.0, rpc_cfg=cfg(request_timeout_seconds=1000), max_batch=2)
+    with pytest.raises(RpcTimeout) as ei:
+        h.source.get_transactions(sigs, deadline=h.deadline)
+    assert str(ei.value) == "budget"
+    assert len(h.requests) == 1
+
+
+@pytest.mark.parametrize("failure", ["http_429", "http_429_retry_after", "http_503"])
+def test_429_on_a_sub_batch_retries_only_that_sub_batch(failure):
+    sigs, results = sigs_and_results(6)
+    inner = batch_handler(results)
+    state = {"failed": False}
+
+    def handler(request, h):
+        body = json.loads(request.content)
+        if [i["id"] for i in body] == [2, 3] and not state["failed"]:
+            state["failed"] = True
+            return {"http_429": httpx.Response(429),
+                    "http_429_retry_after": httpx.Response(429, headers={"Retry-After": "2"}),
+                    "http_503": httpx.Response(503)}[failure]
+        return inner(request, h)
+
+    h = Harness(handler, max_batch=2)
+    assert h.source.get_transactions(sigs, deadline=h.deadline) == [txr(i) for i in range(6)]
+    assert [[i["id"] for i in b] for b in h.bodies()] == [[0, 1], [2, 3], [2, 3], [4, 5]]
+    assert h.sleeps == ([2.0] if failure == "http_429_retry_after" else [0.5])
+
+
+@pytest.mark.parametrize("shape", ["item", "object"])
+def test_jsonrpc_rate_limit_in_a_sub_batch_body_is_not_retried_as_before(shape):
+    # Повтори «як зараз» (T-049 їх не змінює): повторюються лише збої рівня HTTP/транспорту; JSON-RPC
+    # помилка в тілі HTTP 200 (також -32005) одразу піднімається на весь виклик, решта не відправляється.
+    sigs, results = sigs_and_results(6)
+    inner = batch_handler(results)
+
+    def handler(request, h):
+        body = json.loads(request.content)
+        if [i["id"] for i in body] == [2, 3]:
+            if shape == "object":
+                return httpx.Response(200, json={"jsonrpc": "2.0", "id": None, "error": {"code": -32005}})
+            return httpx.Response(200, json=[{"jsonrpc": "2.0", "id": 2, "error": {"code": -32005}},
+                                             {"jsonrpc": "2.0", "id": 3, "result": txr(3)}])
+        return inner(request, h)
+
+    h = Harness(handler, max_batch=2)
+    with pytest.raises(RpcRateLimited):
+        h.source.get_transactions(sigs, deadline=h.deadline)
+    assert [[i["id"] for i in b] for b in h.bodies()] == [[0, 1], [2, 3]]
+    assert h.sleeps == []
+
+
+@pytest.mark.parametrize("max_batch", [1, 3, 10**6])
+def test_empty_signature_list_sends_no_request_for_any_max_batch(max_batch):
+    h = Harness(batch_handler({}), max_batch=max_batch, tx_burst=max(max_batch, 40))
+    assert h.source.get_transactions([], deadline=h.deadline) == []
+    assert h.requests == []
+
+
+def test_max_batch_one_sends_one_request_per_signature():
+    sigs, results = sigs_and_results(4, none_at=(1,))
+    h = Harness(batch_handler(results), max_batch=1)
+    assert h.source.get_transactions(sigs, deadline=h.deadline) == [txr(0), None, txr(2), txr(3)]
+    assert [[(i["id"], i["params"][0]) for i in b] for b in h.bodies()] == [
+        [(0, "s0")], [(1, "s1")], [(2, "s2")], [(3, "s3")]]
+
+
+def test_very_large_max_batch_sends_everything_in_one_request():
+    sigs, results = sigs_and_results(1000)
+    h = Harness(batch_handler(results, shuffle=True), max_batch=10**6, tx_burst=10**6)
+    assert h.source.get_transactions(sigs, deadline=h.deadline) == [txr(i) for i in range(1000)]
+    assert len(h.requests) == 1 and len(h.bodies()[0]) == 1000
+
+
+# --------------------------------------------------------------------------- T-049: пейсер getTransaction (кошик токенів)
+#
+# Живий провайдер (ревʼю T-049, 16 живих прогонів): кошик токенів на кількість getTransaction-ЕЛЕМЕНТІВ —
+# ємність ≈ 40 (±3), поповнення ≈ 15–16/с; за нестачі — HTTP 429 з тілом {"error":{"code":-32005}} без
+# Retry-After. Емулятор — ця жива модель: ємність 40, 15.5/с (НЕ поблажливіша: старі дефолти 20/40 на ньому
+# червоніють, як і на живому вузлі). Дефолти адаптера: 12/с, кошик 30, max_batch 25.
+
+PROVIDER_CAPACITY = 40
+PROVIDER_RATE = 15.5
+
+
+class ProviderBucket:
+    """Кошик токенів провайдера на тому ж FakeClock, що й адаптер (пауза адаптера просуває його)."""
+
+    def __init__(self, clock, *, capacity=PROVIDER_CAPACITY, rate=PROVIDER_RATE):
+        self.clock, self.capacity, self.rate = clock, capacity, rate
+        self.tokens = float(capacity)
+        self.at = clock.monotonic()
+        self.accepted: list[tuple[float, int]] = []
+        self.rejected: list[tuple[float, int]] = []
+
+    def take(self, k: int) -> bool:
+        now = self.clock.monotonic()
+        self.tokens = min(self.capacity, self.tokens + (now - self.at) * self.rate)
+        self.at = now
+        if k > self.tokens + 1e-9:
+            self.rejected.append((now, k))
+            return False
+        self.tokens -= k
+        self.accepted.append((now, k))
+        return True
+
+
+RATE_LIMITED_429 = {"jsonrpc": "2.0", "id": None, "error": {"code": -32005, "message": "Too many requests"}}
+
+
+def bucket_handler(results, bucket_holder):
+    """batch_handler за кошиком провайдера: за нестачі токенів — HTTP 429 з тілом -32005."""
+    inner = batch_handler(results, shuffle=True)
+
+    def handler(request, h):
+        body = json.loads(request.content)
+        if isinstance(body, list) and not bucket_holder["bucket"].take(len(body)):
+            return httpx.Response(429, json=RATE_LIMITED_429)
+        return inner(request, h)
+
+    return handler
+
+
+def paced(n=150, **source_kw):
+    sigs, results = sigs_and_results(n)
+    holder = {}
+    h = Harness(bucket_handler(results, holder), **source_kw)
+    holder["bucket"] = ProviderBucket(h.clock)
+    return h, holder["bucket"], sigs
+
+
+def test_pacer_150_signatures_against_provider_bucket_never_hits_429():
+    h, bucket, sigs = paced(150)  # усі параметри — за замовчуванням: 12/с, кошик 30, max_batch 25
+    assert h.source.get_transactions(sigs, deadline=h.deadline) == [txr(i) for i in range(150)]
+    assert bucket.rejected == []
+    assert [len(b) for b in h.bodies()] == [25] * 6
+    # віртуальний час: (150 − 30) / 12 = 10 с — не менше (інакше швидше за 12/с) і не більше (без зайвих пауз)
+    assert h.clock.monotonic() == pytest.approx(10.0, abs=1e-9)
+    assert sum(h.sleeps) == pytest.approx(10.0, abs=1e-9)
+    # паузи за формулою (k − tokens) / rate: 30 − 25 = 5 -> (25 − 5)/12; далі щоразу 25/12
+    assert h.sleeps == pytest.approx([20 / 12] + [25 / 12] * 4)
+
+
+def test_old_defaults_20_per_second_burst_40_hit_429_on_the_honest_emulator():
+    # Доводить, що емулятор нарешті не поблажливий: старі дефолти на живому вузлі давали 429 у кожному прогоні.
+    h, bucket, sigs = paced(150, tx_rate_per_second=20.0, tx_burst=40, rpc_cfg=cfg(max_retries=0))
+    with pytest.raises(RpcRateLimited):
+        h.source.get_transactions(sigs, deadline=h.deadline)
+    assert len(bucket.rejected) == 1 and len(bucket.accepted) == 1  # другий під-batch: 15 + 0.5·15.5 < 25
+
+
+def test_defaults_keep_a_margin_below_the_measured_provider_model():
+    h, bucket, sigs = paced(150)
+    h.source.get_transactions(sigs, deadline=h.deadline)
+    # найменший залишок кошика провайдера після кожного прийнятого під-batch — запас, а не впритул
+    assert bucket.rejected == [] and bucket.tokens >= 10.0
+
+
+def test_without_pacer_the_same_provider_bucket_answers_429():
+    # доводить, що емулятор справді обмежує, і тест вище не вхолосту
+    h, bucket, sigs = paced(150, tx_rate_per_second=math.inf, rpc_cfg=cfg(max_retries=0))
+    with pytest.raises(RpcRateLimited):
+        h.source.get_transactions(sigs, deadline=h.deadline)
+    assert len(bucket.rejected) == 1 and len(h.requests) == 2 and h.sleeps == []
+    h, bucket, sigs = paced(150, tx_rate_per_second=math.inf)  # навіть із повторами
+    try:
+        h.source.get_transactions(sigs, deadline=h.deadline)
+    except RpcRateLimited:
+        pass
+    assert bucket.rejected
+
+
+def test_eight_sequential_calls_of_25_through_the_pacer_get_no_429():
+    h, bucket, _ = paced(25)
+    sigs = [f"s{i}" for i in range(25)]
+    for _ in range(8):
+        assert h.source.get_transactions(sigs, deadline=Deadline(h.clock, 40.0)) == [txr(i) for i in range(25)]
+    assert bucket.rejected == [] and len(bucket.accepted) == 8
+    assert h.clock.monotonic() == pytest.approx((8 * 25 - 30) / 12.0)  # ≈ 14.17 с
+
+
+def test_refill_is_capped_by_burst_after_a_long_idle():
+    h, bucket, sigs = paced(150)
+    h.clock.advance(1000.0)  # простій: кошик повний, але не більше tx_burst
+    bucket.tokens, bucket.at = PROVIDER_CAPACITY, h.clock.monotonic()
+    start = h.clock.monotonic()
+    h.source.get_transactions(sigs, deadline=Deadline(h.clock, 40.0))
+    assert bucket.rejected == []
+    assert h.clock.monotonic() - start == pytest.approx(10.0)
+
+
+def test_tokens_are_debited_before_the_request_is_sent():
+    seen = []
+    sigs, results = sigs_and_results(50)
+    inner = batch_handler(results)
+
+    def handler(request, h):
+        seen.append(h.source._tokens)
+        return inner(request, h)
+
+    h = Harness(handler)
+    h.source.get_transactions(sigs, deadline=h.deadline)
+    assert seen == pytest.approx([5.0, 0.0])  # 30 − 25; після паузи 20/12 с: 5 + 20 − 25
+
+
+def test_wait_not_fitting_the_deadline_is_budget_with_no_request_no_sleep_and_untouched_tokens():
+    h, bucket, sigs = paced(50, rpc_cfg=cfg(request_timeout_seconds=1000))
+    h.source.get_transactions(sigs[:25], deadline=h.deadline)  # лишилось 5 токенів
+    tokens, at = h.source._tokens, h.source._refilled_at
+    h.clock.advance(0.25)  # поповнення +3 (обчислюється, але при відмові НЕ записується)
+    before = len(h.requests)
+    need = (25 - 8) / 12
+    short = Deadline(h.clock, need)  # потрібно (25 − 8) / 12 с ≥ remaining
+    with pytest.raises(RpcTimeout) as ei:
+        h.source.get_transactions(sigs[25:], deadline=short)
+    assert str(ei.value) == "budget"
+    assert len(h.requests) == before and h.sleeps == []
+    assert (h.source._tokens, h.source._refilled_at) == (tokens, at)
+    # трохи більше бюджету — дочекались і відправили
+    ok_deadline = Deadline(h.clock, need + 0.01)
+    assert h.source.get_transactions(sigs[25:], deadline=ok_deadline) == [txr(i) for i in range(25, 50)]
+    assert h.sleeps == pytest.approx([need])
+
+
+def test_wait_fitting_only_some_sub_batches_stops_at_the_first_that_does_not_fit():
+    h, bucket, sigs = paced(150)
+    with pytest.raises(RpcTimeout) as ei:
+        h.source.get_transactions(sigs, deadline=Deadline(h.clock, 4.0))  # 20/12 + 25/12 = 3.75; наступна 25/12 ні
+    assert str(ei.value) == "budget"
+    assert len(h.requests) == 3 and h.sleeps == pytest.approx([20 / 12, 25 / 12]) and bucket.rejected == []
+
+
+def test_provider_429_zeroes_local_tokens_and_the_retry_goes_through_the_pacer():
+    sigs, results = sigs_and_results(25)
+    inner = batch_handler(results)
+    state = {"n": 0}
+
+    def handler(request, h):
+        state["n"] += 1
+        if state["n"] == 1:  # провайдер має менший кошик, ніж думає клієнт
+            return httpx.Response(429, json=RATE_LIMITED_429)
+        return inner(request, h)
+
+    h = Harness(handler)  # max_retries=2, backoff 0.5
+    assert h.source.get_transactions(sigs, deadline=h.deadline) == [txr(i) for i in range(25)]
+    # 429 -> токени 0; backoff 0.5 с поповнив 6; пейсер дочекався ще (25 − 6) / 12 с
+    assert h.sleeps == pytest.approx([0.5, 19 / 12])
+    assert len(h.requests) == 2
+    assert h.source._tokens == pytest.approx(0.0)
+
+
+def test_provider_429_beyond_max_retries_is_rate_limited_and_tokens_stay_zeroed():
+    h = Harness(one_shot(httpx.Response(429, json=RATE_LIMITED_429)), rpc_cfg=cfg(max_retries=1))
+    with pytest.raises(RpcRateLimited):
+        h.source.get_transactions([f"s{i}" for i in range(25)], deadline=h.deadline)
+    assert len(h.requests) == 2  # max_retries + 1
+    assert h.sleeps == pytest.approx([0.5, 19 / 12])
+    assert h.source._tokens == pytest.approx(0.0)
+
+
+def test_pacer_is_not_applied_to_other_methods():
+    h = Harness(echo_id(lambda b: {"context": {"slot": 1}, "value": None}), tx_burst=1, max_batch=1,
+                tx_rate_per_second=0.1)
+    for _ in range(50):
+        h.source.get_account_info("A", deadline=h.deadline)
+    assert h.sleeps == [] and len(h.requests) == 50
+
+
+BAD_RATES = [0, 0.0, 0.05, 0.0999, 1e-300, -1.0, float("nan"), -math.inf, True, False, "20", None]
+BAD_BURSTS = [0, -1, True, False, 40.0, "40", None]
+PACER_BAD = (
+    [({"tx_rate_per_second": v}, "tx_rate_per_second:") for v in BAD_RATES]
+    + [({"tx_burst": v, "max_batch": 1}, "tx_burst:") for v in BAD_BURSTS]  # max_batch=1: лише власна перевірка
+    + [({"max_batch": 31}, "max_batch:"), ({"max_batch": 26, "tx_burst": 25}, "max_batch:")]
+)
+
+
+@pytest.mark.parametrize("kw, prefix", PACER_BAD)
+def test_pacer_parameter_validation(kw, prefix):
+    with pytest.raises(ValueError) as ei:
+        HttpRpcSource(URL, CFG, commitment="finalized", **kw)
+    exc = ei.value
+    assert type(exc) is ValueError
+    assert str(exc).startswith(prefix)
+    if prefix == "max_batch:":
+        assert "tx_burst" in str(exc)
+    rendered = "".join(traceback.format_exception(exc))
+    assert SECRET not in rendered and "rpc.example" not in rendered
+    assert exc.__cause__ is None and exc.__context__ is None
+    for name, value in kw.items():  # значення в тексті немає
+        if not isinstance(value, (bool, type(None))) and value not in (0, 1):
+            assert repr(value) not in str(exc)
+
+
+def test_pacer_parameter_valid_boundaries():
+    for kw in ({"tx_rate_per_second": math.inf}, {"tx_rate_per_second": 0.1}, {"tx_rate_per_second": 5},
+               {"tx_burst": 25}, {"tx_burst": 1, "max_batch": 1}, {"max_batch": 30},
+               {"max_batch": 40, "tx_burst": 40}, {"max_batch": 100, "tx_burst": 100}):
+        HttpRpcSource(URL, CFG, commitment="finalized", **kw)
+
+
+def test_from_env_passes_every_adapter_parameter_through_observably():
+    clock = FakeClock()
+    sleeps = []
+    bodies = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        return httpx.Response(200, json=[{"jsonrpc": "2.0", "id": i["id"], "result": None} for i in body])
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock.advance(seconds)
+
+    src = HttpRpcSource.from_env(CFG, commitment="finalized", environ={"UNMASK_RPC_URL": URL},
+                                 transport=httpx.MockTransport(handler), clock=clock, sleep=sleep,
+                                 max_tx_version=3, max_batch=2, tx_rate_per_second=4.0, tx_burst=3)
+    assert src.get_transactions(list("abcdef"), deadline=Deadline(clock, 100)) == [None] * 6
+    assert [len(b) for b in bodies] == [2, 2, 2]  # max_batch
+    assert {i["params"][1]["maxSupportedTransactionVersion"] for b in bodies for i in b} == {3}
+    # кошик 3, 4/с: 3−2=1; чекати (2−1)/4=0.25; 0; чекати 2/4=0.5
+    assert sleeps == pytest.approx([0.25, 0.5])
+
+
+@pytest.mark.parametrize("failure", [httpx.Response(503), httpx.ConnectError("x")], ids=["http_503", "connect_error"])
+def test_5xx_and_network_errors_do_not_zero_the_bucket_but_429_does(failure):
+    sigs, results = sigs_and_results(25)
+    inner = batch_handler(results)
+
+    def handler_for(first):
+        state = {"n": 0}
+
+        def handler(request, h):
+            state["n"] += 1
+            if state["n"] == 1:
+                if isinstance(first, Exception):
+                    raise first
+                return first
+            return inner(request, h)
+
+        return handler
+
+    h = Harness(handler_for(failure))
+    h.source.get_transactions(sigs, deadline=h.deadline)
+    # 30 − 25 = 5 лишилось (не обнулено); backoff 0.5 с: +6 = 11; пейсер: (25 − 11) / 12
+    assert h.sleeps == pytest.approx([0.5, 14 / 12])
+    h = Harness(handler_for(httpx.Response(429, json=RATE_LIMITED_429)))
+    h.source.get_transactions(sigs, deadline=h.deadline)
+    assert h.sleeps == pytest.approx([0.5, 19 / 12])  # 429 обнуляє: 0 + 6, пейсер (25 − 6) / 12
+
+
+def test_single_pacer_pause_is_bounded_by_burst_over_min_rate_even_with_an_infinite_deadline():
+    # нижня межа швидкості 0.1/с: пауза ≤ tx_burst / 0.1 с, навіть коли дедлайн безкінечний
+    sigs, results = sigs_and_results(3)
+    h = Harness(batch_handler(results), tx_rate_per_second=0.1, tx_burst=1, max_batch=1)
+    forever = Deadline(h.clock, math.inf)
+    assert h.source.get_transactions(sigs, deadline=forever) == [txr(i) for i in range(3)]
+    assert h.sleeps == pytest.approx([10.0, 10.0])
+    assert max(h.sleeps) <= 1 / 0.1
+
+
+def test_budget_ending_in_the_pacer_after_a_429_surfaces_as_budget_timeout():
+    # 429 обнулив кошик; пауза backoff вміщується, але пейсер дочекатись уже не встигне -> RpcTimeout("budget")
+    h = Harness(one_shot(httpx.Response(429, json=RATE_LIMITED_429)), budget=1.0)
+    with pytest.raises(RpcTimeout) as ei:
+        h.source.get_transactions([f"s{i}" for i in range(25)], deadline=h.deadline)
+    assert str(ei.value) == "budget"
+    assert len(h.requests) == 1 and h.sleeps == [0.5]
 
 
 # --------------------------------------------------------------------------- мапування помилок
@@ -667,7 +1278,7 @@ def test_deadline_expiring_between_chunks_and_between_program_requests_stops_fur
             return httpx.Response(200, json=[{"jsonrpc": "2.0", "id": i["id"], "result": None} for i in body])
         return ok({"value": []}, id=body["id"])
 
-    h = Harness(burn, budget=50.0, rpc_cfg=cfg(page_size=1, request_timeout_seconds=1000))
+    h = Harness(burn, budget=50.0, rpc_cfg=cfg(request_timeout_seconds=1000), max_batch=1)
     with pytest.raises(RpcTimeout):
         h.source.get_transactions(["a", "b", "c"], deadline=h.deadline)
     assert len(h.requests) == 1
@@ -1106,8 +1717,25 @@ SCENARIOS = Path(__file__).parent / "fixtures" / "scenarios"
 _VOLATILE = ("analyzed_at", "elapsed_seconds", "rpc_calls", "resumed", "served_from_cache", "source")
 
 
-def _emulator(rpc: dict, commitment: str):
-    """JSON-RPC сервер поверх записаного rpc.json; batch відповідає у ЗВОРОТНОМУ порядку."""
+# Ліміти живого провайдера (known-issues §6, T-049, ревʼю): кошик токенів на getTransaction-елементи
+# (`ProviderBucket`: ємність 40, 15.5/с; за нестачі — HTTP 429 з тілом -32005); транзакція `version: 1` при
+# `maxSupportedTransactionVersion` < 1 — елемент з -32015.
+REAL_CORPUS = Path(__file__).parent / "fixtures" / "real" / "mainnet_txs_2026-10-04.json"
+
+
+def _real_v1_transaction() -> tuple[str, dict]:
+    """Перша транзакція `version: 1` з реального корпусу (підпис, getTransaction.result)."""
+    corpus = json.loads(REAL_CORPUS.read_text())["transactions"]
+    sig, tx = next((sig, tx) for sig, tx in corpus.items() if tx.get("version") == 1)
+    return sig, tx
+
+
+def _emulator(rpc: dict, commitment: str, bucket: "ProviderBucket"):
+    """JSON-RPC сервер поверх записаного rpc.json; batch відповідає у ЗВОРОТНОМУ порядку.
+
+    Поводиться як живий провайдер: batch getTransaction на k елементів списує k токенів кошика `bucket`,
+    за нестачі (зокрема k > ємності) — HTTP 429 з тілом -32005 без Retry-After; getTransaction транзакції з
+    `version` > maxSupportedTransactionVersion -> елемент з помилкою -32015 (`legacy`/без версії — завжди)."""
 
     def answer(req):
         method, params = req["method"], req["params"]
@@ -1123,9 +1751,16 @@ def _emulator(rpc: dict, commitment: str):
             stop = order.index(opts["until"]) if opts.get("until") else len(history)
             return copy.deepcopy(history[start:stop][: opts["limit"]])
         if method == "getTransaction":
-            assert params[1] == {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0,
-                                 "commitment": commitment}
-            return copy.deepcopy(rpc["getTransaction"].get(params[0]))
+            opts = params[1]
+            assert set(opts) == {"encoding", "maxSupportedTransactionVersion", "commitment"}
+            assert opts["encoding"] == "jsonParsed"
+            tx = rpc["getTransaction"].get(params[0])
+            version = tx.get("version") if isinstance(tx, dict) else None
+            if type(version) is int and version > opts["maxSupportedTransactionVersion"]:
+                return _Error(-32015, f"Transaction version ({version}) is not supported by the requesting "
+                                      f"client. Please try the request again with the following configuration "
+                                      f"parameter: \"maxSupportedTransactionVersion\": {version}")
+            return copy.deepcopy(tx)
         if method == "getTokenAccountsByOwner":
             program = params[1]["programId"]
             listed = rpc["getTokenAccountsByOwner"].get(params[0], [])
@@ -1133,14 +1768,27 @@ def _emulator(rpc: dict, commitment: str):
             return {"context": {"slot": 1}, "value": copy.deepcopy(chosen)}
         raise AssertionError(method)
 
+    def entry(req):
+        result = answer(req)
+        if isinstance(result, _Error):
+            return {"jsonrpc": "2.0", "id": req["id"], "error": {"code": result.code, "message": result.message}}
+        return {"jsonrpc": "2.0", "id": req["id"], "result": result}
+
     def handler(request):
         body = json.loads(request.content)
         if isinstance(body, list):
-            out = [{"jsonrpc": "2.0", "id": x["id"], "result": answer(x)} for x in body]
-            return httpx.Response(200, json=out[::-1])
-        return httpx.Response(200, json={"jsonrpc": "2.0", "id": body["id"], "result": answer(body)})
+            if not bucket.take(len(body)):
+                return httpx.Response(429, json=RATE_LIMITED_429)
+            return httpx.Response(200, json=[entry(x) for x in body][::-1])
+        return httpx.Response(200, json=entry(body))
 
     return handler
+
+
+@dataclasses.dataclass(frozen=True)
+class _Error:
+    code: int
+    message: str
 
 
 def _stable(result) -> dict:
@@ -1150,10 +1798,33 @@ def _stable(result) -> dict:
     return d
 
 
-@pytest.mark.parametrize("scenario", ["basic", "hub"])
-def test_ingest_service_over_http_source_equals_fixture_source(scenario):
-    directory = SCENARIOS / scenario
+def _scenario_with_v1_transaction(scenario: str, tmp_path: Path) -> Path:
+    """Копія сценарію, де одна транзакція, яку ядро справді запитує, має `version: 1` (як у корпусі)."""
+    target = tmp_path / scenario
+    target.mkdir()
+    for f in (SCENARIOS / scenario).iterdir():
+        (target / f.name).write_bytes(f.read_bytes())
+    rpc = json.loads((target / "rpc.json").read_text())
+    _, real = _real_v1_transaction()
+    sig = next(s for s, tx in rpc["getTransaction"].items() if isinstance(tx, dict))
+    rpc["getTransaction"][sig]["version"] = real["version"]
+    (target / "rpc.json").write_text(json.dumps(rpc))
+    return target
+
+
+@pytest.mark.parametrize("scenario, with_v1", [
+    ("basic", True),
+    ("hub", False),  # історія 1200 підписів: ядро шле пачки до rpc.page_size=1000
+    ("hub", True),
+])
+def test_ingest_service_over_http_source_equals_fixture_source(scenario, with_v1, tmp_path):
+    # Емулятор поводиться як живий RPC: кошик токенів на getTransaction-елементи (ємність 40, 15.5/с) і
+    # відмова -32015 на maxSupportedTransactionVersion < version. Без T-049 (batch = rpc.page_size, версія 0,
+    # без пейсера) тест дає 429 / `incomplete` — він доводить виправлення.
+    directory = _scenario_with_v1_transaction(scenario, tmp_path) if with_v1 else SCENARIOS / scenario
     rpc = json.loads((directory / "rpc.json").read_text())
+    real_sig, real_tx = _real_v1_transaction()
+    rpc["getTransaction"][real_sig] = copy.deepcopy(real_tx)  # реальна v1-транзакція корпусу на «сервері»
     expected = json.loads((directory / "expected.json").read_text())
     config = load_config(Path(__file__).parent.parent / "config" / "ingest.yaml")
     if "config" in expected:
@@ -1161,15 +1832,62 @@ def test_ingest_service_over_http_source_equals_fixture_source(scenario):
     mint = expected["mint"]
 
     from_fixture = IngestService(config, FixtureRpcSource(directory), clock=FakeClock()).collect(mint)
+    # Годинник адаптера й провайдера спільний (пауза пейсера поповнює кошик провайдера); дедлайн сервісу —
+    # окремий FakeClock: тест про сумісність і ліміт швидкості, а не про бюджет часу.
+    source_clock = FakeClock()
+    bucket = ProviderBucket(source_clock)
+    seen_batches: list[int] = []
+    emulator = _emulator(rpc, config.commitment, bucket)
+
+    def recording(request):
+        body = json.loads(request.content)
+        if isinstance(body, list):
+            seen_batches.append(len(body))
+        return emulator(request)
+
     http_source = HttpRpcSource(
-        URL, config.rpc, transport=httpx.MockTransport(_emulator(rpc, config.commitment)),
-        commitment=config.commitment, clock=FakeClock(), sleep=lambda s: None,
+        URL, config.rpc, transport=httpx.MockTransport(recording),
+        commitment=config.commitment, clock=source_clock, sleep=source_clock.advance,
     )
     from_http = IngestService(config, http_source, clock=FakeClock()).collect(mint)
 
     assert to_dict(from_http)["metadata"]["source"] == "http"
     assert _stable(from_http) == _stable(from_fixture)
     assert _stable(from_http)["completeness"]["status"] == "complete"
+    assert bucket.rejected == []  # жодного 429: пейсер не випереджає провайдера
+    assert seen_batches and max(seen_batches) <= 25  # max_batch за замовчуванням
+    if scenario == "hub":
+        assert max(seen_batches) == 25 and len(seen_batches) > 2  # пачку ядра справді розбито й розтягнуто в часі
+        assert source_clock.monotonic() >= (sum(seen_batches) - 30) / 12.0 - 1e-9  # 305 елементів: ≈ 22.9 с
+    # реальна v1-транзакція корпусу проходить крізь адаптер без змін
+    assert http_source.get_transactions([real_sig], deadline=Deadline(FakeClock(), 10)) == [real_tx]
+
+
+def test_emulator_really_rejects_what_the_live_provider_rejects():
+    # Самоперевірка емулятора: інакше зелений тест сумісності нічого б не доводив.
+    real_sig, real_tx = _real_v1_transaction()
+    rpc = {"getTransaction": {real_sig: real_tx, **{f"x{i}": None for i in range(41)}}}
+
+    def harness(**kw):
+        holder = {}
+        h = Harness(lambda request, h: _emulator(rpc, "finalized", holder["bucket"])(request),
+                    rpc_cfg=cfg(max_retries=0), **kw)
+        holder["bucket"] = ProviderBucket(h.clock)
+        return h
+
+    h = harness(max_tx_version=0)
+    with pytest.raises(RpcUnavailable) as ei:
+        h.source.get_transactions([real_sig], deadline=h.deadline)
+    assert ei.value.detail == "batch item 0: jsonrpc error code=-32015 (unsupported transaction version)"
+    h = harness(max_batch=41, tx_burst=41)  # більше за ємність кошика провайдера — ніколи не пройде
+    with pytest.raises(RpcRateLimited):
+        h.source.get_transactions([f"x{i}" for i in range(41)], deadline=h.deadline)
+    h = harness(max_batch=40, tx_burst=40)
+    assert h.source.get_transactions([f"x{i}" for i in range(40)], deadline=h.deadline) == [None] * 40
+    h = harness(tx_rate_per_second=math.inf)  # 25 і одразу ще 25 -> другий 429 (як на живому вузлі)
+    with pytest.raises(RpcRateLimited):
+        h.source.get_transactions([f"x{i}" for i in range(41)] + [f"x{i}" for i in range(9)], deadline=h.deadline)
+    assert len(h.requests) == 2
 
 
 # --------------------------------------------------------------------------- ескалація T-021: політика allow-list
