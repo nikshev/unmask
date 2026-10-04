@@ -18,7 +18,7 @@ git config core.hooksPath .githooks       # якщо репозиторій кл
 uv run pytest tests/test_hubs_config.py tests/test_hubs_changelog_guard.py -q
 ```
 
-Очікувано: зелено. Перевірка вручну: змініть `degree_threshold` у `config/hubs.yaml`, не чіпаючи `version` і `config/CHANGELOG.md` → `test_hubs_changelog_guard.py` червоний із повідомленням про розбіжність sha256 для версії 1. Поверніть значення.
+Очікувано: зелено. Перевірка вручну: змініть `degree_threshold` у `config/hubs.yaml`, не чіпаючи `version` і `config/CHANGELOG.md` → `test_hubs_changelog_guard.py` червоний із повідомленням про розбіжність sha256 для актуальної версії (зараз 2). Поверніть значення.
 
 ## 2. Фікстури й незалежні еталони (research R-18)
 
@@ -101,7 +101,8 @@ uv run pytest tests/test_hubs_dust_fanout.py -q
 ## 5. Контракт, детермінізм, інтеграція з 001, швидкодія
 
 ```bash
-uv run pytest tests/test_graph_service.py tests/test_graph_serialize_contract.py tests/test_graph_integration_001.py tests/test_graph_performance.py -q
+uv run pytest tests/test_graph_service.py tests/test_graph_serialize_contract.py tests/test_graph_integration_001.py -q
+uv run pytest -m perf tests/test_graph_performance.py -q     # SC-007; годинник; лише на вільній машині (поза типовим прогоном: addopts = -m 'not perf')
 ```
 
 Очікувано: `to_json(analyze(r))` двічі — байт у байт (SC-004); `to_dict` валідний проти `contracts/graph-result.schema.json` для всіх сценаріїв; результат справжнього `IngestService.collect` на `tests/fixtures/scenarios/{basic,hub}` проходить через `analyze` без винятків і з усіма покупцями; `g_perf` (300 покупців, ~20k переказів) — < 2 с (SC-007).
@@ -112,7 +113,7 @@ uv run pytest tests/test_graph_service.py tests/test_graph_serialize_contract.py
 uv run pytest tests/test_ingest_delegated_model.py tests/test_delegated_rule.py tests/test_delegated_wiring.py \
               tests/test_graph_delegated_edges.py tests/test_graph_delegated_contract.py -q
 uv run pytest tests/test_collector.py tests/test_serialize_contract.py tests/test_resume.py tests/test_cache.py -q   # 001 лишається зеленим
-git status --short tests/fixtures/scenarios/   # лише swapsend/ новий; basic/hub/corrupt/notfound без змін (SC-006)
+git diff --stat HEAD -- tests/fixtures/scenarios/basic tests/fixtures/scenarios/hub tests/fixtures/scenarios/corrupt tests/fixtures/scenarios/notfound   # порожньо (SC-006; swapsend — окремий сценарій, закомічений)
 ```
 
 Ручна перевірка на `swapsend`:
