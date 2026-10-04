@@ -26,7 +26,9 @@
 до побудови будь-якої частини графа): самопереказ, дубль
 `(signature, instruction_path)` — у тому числі між різними ребрами, розбіжні
 `decimals` ребра, дубль запису нерозгорнутої вершини, запис нерозгорнутої вершини
-для адреси поза графом, адреса не-покупця, що не є публічним ключем.
+для адреси поза графом, адреса не-покупця, що не є публічним ключем (T-029: покупець без
+валідного `rank`, два покупці з однією адресою, вершина без ролі, не-покупець із глибиною 0 —
+суперечність глибини; `IngestResult` частину цього вже не пропускає, перевірка подвійна, R-6).
 
 Вершини: `Node` не існує без ролей, глибини, типу адреси, `unexpanded` і вимірів,
 тож граф без них побудувати не можна. Тут — мінімальна чесна побудова за R-6
@@ -63,7 +65,7 @@ from unmask.graph.model import (
     UnexpandedMark,
     ref_sort_key,
 )
-from unmask.ingest.model import AddressType, Asset, IngestResult, Transfer
+from unmask.ingest.model import AddressType, Asset, Buyer, IngestResult, Transfer
 
 
 def build_graph(result: IngestResult) -> FundingGraph:
@@ -146,7 +148,15 @@ class _ProtoNode:
 
 
 def _proto_nodes(result: IngestResult) -> tuple[_ProtoNode, ...]:
-    buyers = {b.wallet: b for b in result.buyers}
+    buyers: dict[str, Buyer] = {}
+    for b in result.buyers:
+        # `IngestResult`/`Buyer` це вже не пропускають; перевірка навмисно подвійна (R-6).
+        if b.wallet in buyers:
+            raise GraphInputError(f"duplicate buyer {b.wallet}")
+        rank = b.rank
+        if isinstance(rank, bool) or not isinstance(rank, int) or rank < 1:
+            raise GraphInputError(f"buyer {b.wallet} has no valid rank: {rank!r}")
+        buyers[b.wallet] = b
     depth: dict[str, int] = {wallet: 0 for wallet in buyers}
     funders: set[str] = set()
     for t in result.transfers:
@@ -173,6 +183,16 @@ def _proto_nodes(result: IngestResult) -> tuple[_ProtoNode, ...]:
             roles.add(NodeRole.BUYER)
         if address in funders:
             roles.add(NodeRole.FUNDER)
+        if not roles:
+            raise GraphInputError(
+                f"{address} receives a transfer but is neither a buyer nor a sender of any transfer: "
+                "node without a role"
+            )
+        if buyer is None and depth[address] < 1:
+            raise GraphInputError(
+                f"contradictory depth: {address} is not a buyer but its depth bound is "
+                f"{depth[address]} (buyer level)"
+            )
         protos.append(_ProtoNode(
             address=address,
             roles=frozenset(roles),
