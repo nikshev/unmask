@@ -445,7 +445,7 @@ def test_v1_transaction_response_is_returned_unchanged():
 def test_get_transactions_splits_into_sub_batches_of_max_batch_preserving_order(max_batch):
     n = 23
     sigs, results = sigs_and_results(n, none_at=(4, 22))
-    h = Harness(batch_handler(results, shuffle=True), max_batch=max_batch, tx_burst=max(max_batch, 40))
+    h = Harness(batch_handler(results, shuffle=True), max_batch=max_batch, burst=max(max_batch, 40))
     got = h.source.get_transactions(sigs, deadline=h.deadline)
     # ідентичність результату не залежить від max_batch
     assert got == [None if i in (4, 22) else txr(i) for i in range(n)]
@@ -470,7 +470,7 @@ def test_page_size_does_not_control_transaction_batch_size(page_size):
     h = Harness(batch_handler(results), rpc_cfg=cfg(page_size=page_size))  # max_batch за замовчуванням: 25
     assert h.source.get_transactions(sigs, deadline=h.deadline) == [txr(i) for i in range(60)]
     assert [len(b) for b in h.bodies()] == [25, 25, 10]
-    h = Harness(batch_handler(results), rpc_cfg=cfg(page_size=page_size), max_batch=40, tx_burst=40)
+    h = Harness(batch_handler(results), rpc_cfg=cfg(page_size=page_size), max_batch=40, burst=40)
     h.source.get_transactions(sigs, deadline=h.deadline)
     assert [len(b) for b in h.bodies()] == [40, 20]
 
@@ -537,7 +537,7 @@ def test_max_batch_and_max_tx_version_validation(kw):
 
 def test_max_batch_and_max_tx_version_valid_boundaries_and_keyword_only():
     for kw in ({"max_tx_version": 0}, {"max_tx_version": 1}, {"max_tx_version": 2**31},
-               {"max_batch": 1}, {"max_batch": 10**9, "tx_burst": 10**9}):
+               {"max_batch": 1}, {"max_batch": 10**9, "burst": 10**9}):
         HttpRpcSource(URL, CFG, commitment="finalized", **kw)
     with pytest.raises(TypeError):
         HttpRpcSource(URL, CFG, None, "finalized")  # commitment, max_* — лише keyword
@@ -545,7 +545,7 @@ def test_max_batch_and_max_tx_version_valid_boundaries_and_keyword_only():
                                  transport=httpx.MockTransport(lambda r: httpx.Response(200, json=[
                                      {"jsonrpc": "2.0", "id": i["id"], "result": None}
                                      for i in json.loads(r.content)])),
-                                 max_tx_version=3, max_batch=2, tx_rate_per_second=math.inf)
+                                 max_tx_version=3, max_batch=2, rate_per_second=math.inf)
     assert src.get_transactions(["a", "b", "c"], deadline=Deadline(FakeClock(), 10)) == [None] * 3
     # прокидання перевіряє `test_from_env_passes_every_adapter_parameter_through_observably` за вмістом запитів
     with pytest.raises(ValueError):
@@ -690,7 +690,7 @@ def test_jsonrpc_rate_limit_in_a_sub_batch_body_is_not_retried_as_before(shape):
 
 @pytest.mark.parametrize("max_batch", [1, 3, 10**6])
 def test_empty_signature_list_sends_no_request_for_any_max_batch(max_batch):
-    h = Harness(batch_handler({}), max_batch=max_batch, tx_burst=max(max_batch, 40))
+    h = Harness(batch_handler({}), max_batch=max_batch, burst=max(max_batch, 40))
     assert h.source.get_transactions([], deadline=h.deadline) == []
     assert h.requests == []
 
@@ -705,7 +705,7 @@ def test_max_batch_one_sends_one_request_per_signature():
 
 def test_very_large_max_batch_sends_everything_in_one_request():
     sigs, results = sigs_and_results(1000)
-    h = Harness(batch_handler(results, shuffle=True), max_batch=10**6, tx_burst=10**6)
+    h = Harness(batch_handler(results, shuffle=True), max_batch=10**6, burst=10**6)
     assert h.source.get_transactions(sigs, deadline=h.deadline) == [txr(i) for i in range(1000)]
     assert len(h.requests) == 1 and len(h.bodies()[0]) == 1000
 
@@ -781,7 +781,7 @@ def test_pacer_150_signatures_against_provider_bucket_never_hits_429():
 
 def test_old_defaults_20_per_second_burst_40_hit_429_on_the_honest_emulator():
     # Доводить, що емулятор нарешті не поблажливий: старі дефолти на живому вузлі давали 429 у кожному прогоні.
-    h, bucket, sigs = paced(150, tx_rate_per_second=20.0, tx_burst=40, rpc_cfg=cfg(max_retries=0))
+    h, bucket, sigs = paced(150, rate_per_second=20.0, burst=40, rpc_cfg=cfg(max_retries=0))
     with pytest.raises(RpcRateLimited):
         h.source.get_transactions(sigs, deadline=h.deadline)
     assert len(bucket.rejected) == 1 and len(bucket.accepted) == 1  # другий під-batch: 15 + 0.5·15.5 < 25
@@ -796,11 +796,11 @@ def test_defaults_keep_a_margin_below_the_measured_provider_model():
 
 def test_without_pacer_the_same_provider_bucket_answers_429():
     # доводить, що емулятор справді обмежує, і тест вище не вхолосту
-    h, bucket, sigs = paced(150, tx_rate_per_second=math.inf, rpc_cfg=cfg(max_retries=0))
+    h, bucket, sigs = paced(150, rate_per_second=math.inf, rpc_cfg=cfg(max_retries=0))
     with pytest.raises(RpcRateLimited):
         h.source.get_transactions(sigs, deadline=h.deadline)
     assert len(bucket.rejected) == 1 and len(h.requests) == 2 and h.sleeps == []
-    h, bucket, sigs = paced(150, tx_rate_per_second=math.inf)  # навіть із повторами
+    h, bucket, sigs = paced(150, rate_per_second=math.inf)  # навіть із повторами
     try:
         h.source.get_transactions(sigs, deadline=h.deadline)
     except RpcRateLimited:
@@ -819,7 +819,7 @@ def test_eight_sequential_calls_of_25_through_the_pacer_get_no_429():
 
 def test_refill_is_capped_by_burst_after_a_long_idle():
     h, bucket, sigs = paced(150)
-    h.clock.advance(1000.0)  # простій: кошик повний, але не більше tx_burst
+    h.clock.advance(1000.0)  # простій: кошик повний, але не більше burst
     bucket.tokens, bucket.at = PROVIDER_CAPACITY, h.clock.monotonic()
     start = h.clock.monotonic()
     h.source.get_transactions(sigs, deadline=Deadline(h.clock, 40.0))
@@ -896,20 +896,22 @@ def test_provider_429_beyond_max_retries_is_rate_limited_and_tokens_stay_zeroed(
     assert h.source._tokens == pytest.approx(0.0)
 
 
-def test_pacer_is_not_applied_to_other_methods():
-    h = Harness(echo_id(lambda b: {"context": {"slot": 1}, "value": None}), tx_burst=1, max_batch=1,
-                tx_rate_per_second=0.1)
-    for _ in range(50):
-        h.source.get_account_info("A", deadline=h.deadline)
-    assert h.sleeps == [] and len(h.requests) == 50
+def test_pacer_is_applied_to_other_methods_too():
+    # T-053 (було `test_pacer_is_not_applied_to_other_methods`): ліміт провайдера — один на всі методи.
+    h = Harness(echo_id(lambda b: {"context": {"slot": 1}, "value": None}), burst=1, max_batch=1,
+                rate_per_second=0.1)
+    forever = Deadline(h.clock, math.inf)
+    for _ in range(5):
+        h.source.get_account_info("A", deadline=forever)
+    assert h.sleeps == pytest.approx([10.0] * 4) and len(h.requests) == 5
 
 
 BAD_RATES = [0, 0.0, 0.05, 0.0999, 1e-300, -1.0, float("nan"), -math.inf, True, False, "20", None]
 BAD_BURSTS = [0, -1, True, False, 40.0, "40", None]
 PACER_BAD = (
-    [({"tx_rate_per_second": v}, "tx_rate_per_second:") for v in BAD_RATES]
-    + [({"tx_burst": v, "max_batch": 1}, "tx_burst:") for v in BAD_BURSTS]  # max_batch=1: лише власна перевірка
-    + [({"max_batch": 31}, "max_batch:"), ({"max_batch": 26, "tx_burst": 25}, "max_batch:")]
+    [({"rate_per_second": v}, "rate_per_second:") for v in BAD_RATES]
+    + [({"burst": v, "max_batch": 1}, "burst:") for v in BAD_BURSTS]  # max_batch=1: лише власна перевірка
+    + [({"max_batch": 31}, "max_batch:"), ({"max_batch": 26, "burst": 25}, "max_batch:")]
 )
 
 
@@ -921,7 +923,7 @@ def test_pacer_parameter_validation(kw, prefix):
     assert type(exc) is ValueError
     assert str(exc).startswith(prefix)
     if prefix == "max_batch:":
-        assert "tx_burst" in str(exc)
+        assert "burst" in str(exc)
     rendered = "".join(traceback.format_exception(exc))
     assert SECRET not in rendered and "rpc.example" not in rendered
     assert exc.__cause__ is None and exc.__context__ is None
@@ -931,9 +933,9 @@ def test_pacer_parameter_validation(kw, prefix):
 
 
 def test_pacer_parameter_valid_boundaries():
-    for kw in ({"tx_rate_per_second": math.inf}, {"tx_rate_per_second": 0.1}, {"tx_rate_per_second": 5},
-               {"tx_burst": 25}, {"tx_burst": 1, "max_batch": 1}, {"max_batch": 30},
-               {"max_batch": 40, "tx_burst": 40}, {"max_batch": 100, "tx_burst": 100}):
+    for kw in ({"rate_per_second": math.inf}, {"rate_per_second": 0.1}, {"rate_per_second": 5},
+               {"burst": 25}, {"burst": 1, "max_batch": 1}, {"max_batch": 30},
+               {"max_batch": 40, "burst": 40}, {"max_batch": 100, "burst": 100}):
         HttpRpcSource(URL, CFG, commitment="finalized", **kw)
 
 
@@ -953,7 +955,7 @@ def test_from_env_passes_every_adapter_parameter_through_observably():
 
     src = HttpRpcSource.from_env(CFG, commitment="finalized", environ={"UNMASK_RPC_URL": URL},
                                  transport=httpx.MockTransport(handler), clock=clock, sleep=sleep,
-                                 max_tx_version=3, max_batch=2, tx_rate_per_second=4.0, tx_burst=3)
+                                 max_tx_version=3, max_batch=2, rate_per_second=4.0, burst=3)
     assert src.get_transactions(list("abcdef"), deadline=Deadline(clock, 100)) == [None] * 6
     assert [len(b) for b in bodies] == [2, 2, 2]  # max_batch
     assert {i["params"][1]["maxSupportedTransactionVersion"] for b in bodies for i in b} == {3}
@@ -989,9 +991,9 @@ def test_5xx_and_network_errors_do_not_zero_the_bucket_but_429_does(failure):
 
 
 def test_single_pacer_pause_is_bounded_by_burst_over_min_rate_even_with_an_infinite_deadline():
-    # нижня межа швидкості 0.1/с: пауза ≤ tx_burst / 0.1 с, навіть коли дедлайн безкінечний
+    # нижня межа швидкості 0.1/с: пауза ≤ burst / 0.1 с, навіть коли дедлайн безкінечний
     sigs, results = sigs_and_results(3)
-    h = Harness(batch_handler(results), tx_rate_per_second=0.1, tx_burst=1, max_batch=1)
+    h = Harness(batch_handler(results), rate_per_second=0.1, burst=1, max_batch=1)
     forever = Deadline(h.clock, math.inf)
     assert h.source.get_transactions(sigs, deadline=forever) == [txr(i) for i in range(3)]
     assert h.sleeps == pytest.approx([10.0, 10.0])
@@ -1064,7 +1066,7 @@ def test_expired_deadline_and_nonpositive_request_timeout_raise_rpc_budget_timeo
             def request_timeout(self, cap, _v=value):
                 return _v
 
-        h = Harness(good, tx_rate_per_second=math.inf)
+        h = Harness(good, rate_per_second=math.inf)
         s = h.source
         for c in (
             lambda: s.get_account_info("A", deadline=D()),
@@ -1114,7 +1116,9 @@ def test_pacer_budget_cut_before_deadline_expiry_is_budget_exhausted_through_the
     http_source = HttpRpcSource(
         URL, config.rpc, transport=httpx.MockTransport(_emulator(rpc, config.commitment, bucket)),
         commitment=config.commitment, clock=source_clock, sleep=source_clock.advance,
-        max_batch=1, tx_burst=1, tx_rate_per_second=0.1,  # друга транзакція — через 10 с > бюджету 5 с
+        # T-053: кошик спільний для всіх методів — запас на звернення до першого getTransaction
+        # (getAccountInfo + getSignaturesForAddress = 2 одиниці) + одна транзакція; друга — через 10 с > бюджету 5 с
+        max_batch=1, burst=3, rate_per_second=0.1,
     )
     service_clock = FakeClock()  # стоїть: deadline.expired() так і не стає істинним
     result = IngestService(config, http_source, clock=service_clock).collect(expected["mint"])
@@ -1853,12 +1857,13 @@ def _real_v1_transaction() -> tuple[str, dict]:
     return sig, tx
 
 
-def _emulator(rpc: dict, commitment: str, bucket: "ProviderBucket"):
+def _emulator(rpc: dict, commitment: str, bucket: "ProviderBucket", *, shared: bool = False):
     """JSON-RPC сервер поверх записаного rpc.json; batch відповідає у ЗВОРОТНОМУ порядку.
 
     Поводиться як живий провайдер: batch getTransaction на k елементів списує k токенів кошика `bucket`,
     за нестачі (зокрема k > ємності) — HTTP 429 з тілом -32005 без Retry-After; getTransaction транзакції з
-    `version` > maxSupportedTransactionVersion -> елемент з помилкою -32015 (`legacy`/без версії — завжди)."""
+    `version` > maxSupportedTransactionVersion -> елемент з помилкою -32015 (`legacy`/без версії — завжди).
+    `shared=True` — модель Helius free (T-053): ОДИН кошик на всі методи, одиночний запит списує 1 токен."""
 
     def answer(req):
         method, params = req["method"], req["params"]
@@ -1903,6 +1908,8 @@ def _emulator(rpc: dict, commitment: str, bucket: "ProviderBucket"):
             if not bucket.take(len(body)):
                 return httpx.Response(429, json=RATE_LIMITED_429)
             return httpx.Response(200, json=[entry(x) for x in body][::-1])
+        if shared and not bucket.take(1):
+            return httpx.Response(429, json=RATE_LIMITED_429)
         return httpx.Response(200, json=entry(body))
 
     return handler
@@ -2002,12 +2009,12 @@ def test_emulator_really_rejects_what_the_live_provider_rejects():
     with pytest.raises(RpcUnavailable) as ei:
         h.source.get_transactions([real_sig], deadline=h.deadline)
     assert ei.value.detail == "batch item 0: jsonrpc error code=-32015 (unsupported transaction version)"
-    h = harness(max_batch=41, tx_burst=41)  # більше за ємність кошика провайдера — ніколи не пройде
+    h = harness(max_batch=41, burst=41)  # більше за ємність кошика провайдера — ніколи не пройде
     with pytest.raises(RpcRateLimited):
         h.source.get_transactions([f"x{i}" for i in range(41)], deadline=h.deadline)
-    h = harness(max_batch=40, tx_burst=40)
+    h = harness(max_batch=40, burst=40)
     assert h.source.get_transactions([f"x{i}" for i in range(40)], deadline=h.deadline) == [None] * 40
-    h = harness(tx_rate_per_second=math.inf)  # 25 і одразу ще 25 -> другий 429 (як на живому вузлі)
+    h = harness(rate_per_second=math.inf)  # 25 і одразу ще 25 -> другий 429 (як на живому вузлі)
     with pytest.raises(RpcRateLimited):
         h.source.get_transactions([f"x{i}" for i in range(41)] + [f"x{i}" for i in range(9)], deadline=h.deadline)
     assert len(h.requests) == 2
@@ -2351,3 +2358,473 @@ def test_key_in_the_middle_never_reaches_the_ingest_result_json(case, caplog):
     assert expected in out  # причина видна — категорією з allow-list
     logs = "\n".join(f"{r.name} {r.getMessage()} {r.args!r}" for r in caplog.records)
     _assert_no_key_anywhere("\n".join([out, logs, *(str(w.message) for w in caught)]), key)
+
+
+# --------------------------------------------------------------------------- T-053: глобальний лімітер і профілі
+#
+# Виміри (known-issues §8, Helius free): ОДИН кошик на всі методи (getSignaturesForAddress, getTokenAccountsByOwner,
+# getAccountInfo, getTransaction), кожен елемент batch = одиниця; ємність ≈ 30 (batch 30 проходить, 35 ні),
+# поповнення ≈ 5/с (10/12/16 запитів/с протягом 6 с -> прийнято 59–60 = 30 + 5·6; сталі 5/с — без 429).
+# Емулятор — ця модель: один кошик на ВСІ запити, ємність 30, 5/с. Профіль helius_free = 4.5/с, кошик 20,
+# max_batch 10 (рішення власника процесу після живої перевірки: 0×429 за 80 с); попередні 8/10 — 429.
+# RPC Fast «Start» (known-issues §6, T-049): ємність ≈ 40, поповнення ≈ 15–16/с.
+
+import ast  # noqa: E402
+
+import unmask.ingest.rpc.http as http_module  # noqa: E402
+
+HELIUS_CAPACITY = 30
+HELIUS_RATE = 5.0
+
+
+def all_methods_handler(*, tx=None):
+    """Відповідає на будь-який метод (одиночний або batch) валідною формою; без лімітів."""
+
+    def handler(request, h):
+        body = json.loads(request.content)
+        if isinstance(body, list):
+            return httpx.Response(200, json=[{"jsonrpc": "2.0", "id": i["id"], "result": tx} for i in body])
+        result = {"getAccountInfo": {"context": {"slot": 1}, "value": None},
+                  "getSignaturesForAddress": [],
+                  "getTokenAccountsByOwner": {"context": {"slot": 1}, "value": []}}[body["method"]]
+        return ok(result, id=body["id"])
+
+    return handler
+
+
+def test_global_limiter_paces_every_method_not_only_get_transaction():
+    seen = []
+    inner = all_methods_handler()
+
+    def handler(request, h):
+        body = json.loads(request.content)
+        seen.append((body[0]["method"] if isinstance(body, list) else body["method"], h.source._tokens))
+        return inner(request, h)
+
+    h = Harness(handler, rate_per_second=2.0, burst=2, max_batch=2)
+    s, d = h.source, h.deadline
+    s.get_account_info("A", deadline=d)                     # 2 -> 1, без паузи
+    s.get_signatures_for_address("A", before=None, until=None, limit=5, deadline=d)  # 1 -> 0
+    s.get_account_info("A", deadline=d)                     # чекати 1/2 с
+    s.get_transactions(["a", "b"], deadline=d)              # 2 одиниці: чекати 2/2 с
+    s.get_token_accounts_by_owner("O", deadline=d)          # 2 запити по 1: двічі по 1/2 с
+    assert h.sleeps == pytest.approx([0.5, 1.0, 0.5, 0.5])
+    assert [m for m, _ in seen] == ["getAccountInfo", "getSignaturesForAddress", "getAccountInfo",
+                                    "getTransaction", "getTokenAccountsByOwner", "getTokenAccountsByOwner"]
+    # одиниці списуються ДО відправки запиту, для кожного методу
+    assert [t for _, t in seen] == pytest.approx([1.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    assert h.clock.monotonic() == pytest.approx(2.5)  # (1 + 1 + 1 + 2 + 2 − 2) / 2
+
+
+def test_get_token_accounts_by_owner_costs_two_units():
+    seen = []
+    inner = all_methods_handler()
+
+    def handler(request, h):
+        seen.append(h.source._tokens)
+        return inner(request, h)
+
+    h = Harness(handler, rate_per_second=1.0, burst=2, max_batch=1)
+    h.source.get_token_accounts_by_owner("O", deadline=h.deadline)
+    assert len(h.requests) == 2 and h.sleeps == [] and seen == pytest.approx([1.0, 0.0])
+    h.source.get_token_accounts_by_owner("O", deadline=h.deadline)
+    # кожен з двох запитів (Token, Token-2022) окремо проходить кошик: по 1 с, а не одна пауза на 2 одиниці
+    assert h.sleeps == pytest.approx([1.0, 1.0]) and seen[2:] == pytest.approx([0.0, 0.0])
+    h = Harness(all_methods_handler(), rate_per_second=1.0, burst=1, max_batch=1)
+    h.source.get_token_accounts_by_owner("O", deadline=h.deadline)
+    assert h.sleeps == pytest.approx([1.0])  # кошик на 1: другий запит виклику вже чекає
+
+
+def test_429_on_any_method_zeroes_the_shared_bucket():
+    answers = [httpx.Response(429, json=RATE_LIMITED_429)]
+
+    def handler(request, h):
+        if answers:
+            return answers.pop(0)
+        return all_methods_handler()(request, h)
+
+    h = Harness(handler, rate_per_second=2.0, burst=4, max_batch=4)
+    h.source.get_signatures_for_address("A", before=None, until=None, limit=5, deadline=h.deadline)
+    # 429 -> 0; backoff 0.5 с поповнив 1 -> повтор без паузи пейсера; далі batch на 4: чекати (4 − 0) / 2
+    assert h.sleeps == pytest.approx([0.5])
+    h.source.get_transactions(list("abcd"), deadline=h.deadline)
+    assert h.sleeps == pytest.approx([0.5, 2.0])
+
+
+def test_global_limiter_wait_not_fitting_the_deadline_is_budget_for_single_calls():
+    h = Harness(all_methods_handler(), rate_per_second=1.0, burst=1, max_batch=1)
+    h.source.get_account_info("A", deadline=h.deadline)
+    tokens, at = h.source._tokens, h.source._refilled_at
+    short = Deadline(h.clock, 1.0)  # потрібно рівно 1 с ≥ remaining
+    for c in (lambda: h.source.get_account_info("A", deadline=short),
+              lambda: h.source.get_signatures_for_address("A", before=None, until=None, limit=5, deadline=short),
+              lambda: h.source.get_token_accounts_by_owner("A", deadline=short)):
+        with pytest.raises(RpcBudgetTimeout) as ei:
+            c()
+        assert ei.value.__cause__ is None and ei.value.__context__ is None
+    assert len(h.requests) == 1 and h.sleeps == []
+    assert (h.source._tokens, h.source._refilled_at) == (tokens, at)
+    h.source.get_account_info("A", deadline=Deadline(h.clock, 1.01))
+    assert h.sleeps == pytest.approx([1.0]) and len(h.requests) == 2
+
+
+def _mixed_rpc(n_wallets=12, per_wallet=25):
+    rpc = {"getAccountInfo": {}, "getSignaturesForAddress": {}, "getTransaction": {}, "getTokenAccountsByOwner": {}}
+    for w in range(n_wallets):
+        addr = f"W{w}"
+        sigs = [f"{addr}s{i}" for i in range(per_wallet)]
+        rpc["getSignaturesForAddress"][addr] = [sig_entry(s, 1000 - i) for i, s in enumerate(sigs)]
+        rpc["getTransaction"].update({s: txr(w * 1000 + i) for i, s in enumerate(sigs)})
+        rpc["getAccountInfo"][addr] = {"lamports": w}
+        rpc["getTokenAccountsByOwner"][addr] = [{"pubkey": f"{addr}T", "account": {"owner": TOKEN_PROGRAM}},
+                                                {"pubkey": f"{addr}T22", "account": {"owner": TOKEN_2022_PROGRAM}}]
+    return rpc
+
+
+def helius_harness(rpc, **source_kw):
+    holder = {}
+    source_kw.setdefault("rpc_cfg", cfg(max_retries=0))
+    h = Harness(lambda request, h: _emulator(rpc, "finalized", holder["bucket"], shared=True)(request), **source_kw)
+    holder["bucket"] = ProviderBucket(h.clock, capacity=HELIUS_CAPACITY, rate=HELIUS_RATE)
+    return h, holder["bucket"]
+
+
+def _run_mixed(h, rpc):
+    """Мішаний збір по гаманцях: signatures + account_info + token_accounts (2) + transactions (25)."""
+    units = 0
+    for addr, history in rpc["getSignaturesForAddress"].items():
+        d = Deadline(h.clock, 40.0)
+        sigs = h.source.get_signatures_for_address(addr, before=None, until=None, limit=1000, deadline=d)
+        assert [e["signature"] for e in sigs] == [e["signature"] for e in history]
+        assert h.source.get_account_info(addr, deadline=d) == rpc["getAccountInfo"][addr]
+        assert [e["pubkey"] for e in h.source.get_token_accounts_by_owner(addr, deadline=d)] == [
+            f"{addr}T", f"{addr}T22"]
+        got = h.source.get_transactions([e["signature"] for e in sigs], deadline=d)
+        assert got == [rpc["getTransaction"][e["signature"]] for e in sigs]
+        units += 1 + 1 + 2 + len(sigs)
+    return units
+
+
+def test_mixed_workload_against_shared_provider_bucket_never_hits_429():
+    rpc = _mixed_rpc()
+    h, bucket = helius_harness(rpc, profile="helius_free")
+    units = _run_mixed(h, rpc)
+    assert bucket.rejected == []
+    batches = [len(b) for b in h.bodies() if isinstance(b, list)]
+    assert max(batches) == 10  # max_batch профілю helius_free
+    # рівно швидкість профілю (4.5/с) після початкового кошика 20: не швидше й без зайвих пауз (348 од. ≈ 72.9 с)
+    assert h.clock.monotonic() == pytest.approx((units - 20) / 4.5)
+    # без глобального лімітера той самий емулятор відповідає 429 — він не поблажливий, тест вище не вхолосту
+    h, bucket = helius_harness(rpc, profile="helius_free", rate_per_second=math.inf)
+    with pytest.raises(RpcRateLimited):
+        _run_mixed(h, rpc)
+    assert bucket.rejected
+
+
+def test_helius_emulator_rejects_the_previous_helius_profile_and_rpcfast_start():
+    # Закріплює знахідку живої перевірки: попередній профіль helius_free (8/с, кошик 10) і rpcfast_start (12/с,
+    # кошик 30) на моделі «ємність 30, 5/с» ловлять 429 — емулятор не поблажливий; 4.5/20 — ні (тест вище).
+    rpc = _mixed_rpc()
+    for kw in ({"profile": "helius_free", "rate_per_second": 8.0, "burst": 10},
+               {"profile": "rpcfast_start", "max_batch": 10},
+               {"profile": "rpcfast_start"},
+               {"profile": "helius_free", "rate_per_second": 5.5}):  # навіть трохи вище виміряних 5/с
+        h, bucket = helius_harness(rpc, **kw)
+        with pytest.raises(RpcRateLimited):
+            _run_mixed(h, rpc)
+        assert bucket.rejected, kw
+    # межа моделі: рівно 5/с з кошиком 20 ще проходить (поповнення провайдера не повільніше за наше)
+    h, bucket = helius_harness(rpc, profile="helius_free", rate_per_second=5.0)
+    _run_mixed(h, rpc)
+    assert bucket.rejected == []
+
+
+def test_shared_emulator_rejects_batches_above_its_capacity_and_single_calls_too():
+    # самоперевірка: одиночні запити справді списують з того ж кошика
+    rpc = _mixed_rpc(n_wallets=1)
+    h, bucket = helius_harness(rpc, profile="helius_free", rate_per_second=math.inf)
+    for _ in range(HELIUS_CAPACITY):
+        h.source.get_account_info("W0", deadline=h.deadline)
+    with pytest.raises(RpcRateLimited):
+        h.source.get_account_info("W0", deadline=h.deadline)
+    rpc["getTransaction"].update({f"x{i}": None for i in range(35)})
+    h, bucket = helius_harness(rpc, max_batch=30, burst=30, rate_per_second=math.inf)
+    assert h.source.get_transactions([f"x{i}" for i in range(30)], deadline=h.deadline) == [None] * 30  # 30 так
+    h, bucket = helius_harness(rpc, max_batch=35, burst=35, rate_per_second=math.inf)
+    with pytest.raises(RpcRateLimited):  # 35 — ні, як на живому вузлі
+        h.source.get_transactions([f"x{i}" for i in range(35)], deadline=h.deadline)
+
+
+EXPECTED_PROFILES = {
+    "rpcfast_start": {"rate_per_second": 12.0, "burst": 30, "max_batch": 25, "max_tx_version": 1},
+    "helius_free": {"rate_per_second": 4.5, "burst": 20, "max_batch": 10, "max_tx_version": 1},
+}
+
+
+def _observe(n=60, **source_kw):
+    """Розміри під-batch, паузи і версія транзакцій для n підписів — спостережувано, через запити."""
+    sigs, results = sigs_and_results(n)
+    h = Harness(batch_handler(results), budget=1000.0, **source_kw)
+    assert h.source.get_transactions(sigs, deadline=h.deadline) == [txr(i) for i in range(n)]
+    versions = {i["params"][1]["maxSupportedTransactionVersion"] for i in tx_items(h)}
+    return [len(b) for b in h.bodies()], h.sleeps, versions
+
+
+def test_profile_defaults_and_overrides():
+    # таблиця профілів — golden (виміряні числа; не секрети, на результат не впливають) і незмінна
+    assert {k: dict(v) for k, v in http_module.RPC_PROFILES.items()} == EXPECTED_PROFILES
+    with pytest.raises(TypeError):
+        http_module.RPC_PROFILES["x"] = {}
+    with pytest.raises(TypeError):
+        http_module.RPC_PROFILES["helius_free"]["burst"] = 99
+    assert http_module.DEFAULT_PROFILE == "rpcfast_start"
+
+    # за замовчуванням — rpcfast_start: під-batch 25, кошик 30, 12/с
+    default = _observe()
+    assert default == ([25, 25, 10], pytest.approx([20 / 12, 10 / 12]), {1})  # 30−25=5; (25−5)/12; 10/12
+    assert _observe(profile="rpcfast_start") == default
+    # helius_free: під-batch 10, кошик 20, 4.5/с: два під-batch без паузи, далі по 10/4.5 с
+    assert _observe(profile="helius_free") == ([10] * 6, pytest.approx([10 / 4.5] * 4), {1})
+
+    # явні параметри перекривають профіль — кожен окремо
+    assert _observe(profile="helius_free", rate_per_second=4.0)[1] == pytest.approx([10 / 4] * 4)
+    assert _observe(profile="helius_free", burst=30)[:2] == ([10] * 6, pytest.approx([10 / 4.5] * 3))
+    assert _observe(profile="helius_free", max_batch=5)[0] == [5] * 12
+    assert _observe(profile="helius_free", max_tx_version=0)[2] == {0}
+    assert _observe(profile="rpcfast_start", max_batch=30, burst=30)[0] == [30, 30]
+    assert _observe(profile="helius_free", rate_per_second=math.inf)[1] == []
+    # перевірки застосовуються до підсумкових значень: max_batch з явного параметра проти burst профілю
+    with pytest.raises(ValueError) as ei:
+        HttpRpcSource(URL, CFG, commitment="finalized", profile="helius_free", max_batch=21)
+    assert str(ei.value).startswith("max_batch:") and "burst" in str(ei.value)
+    with pytest.raises(ValueError):
+        HttpRpcSource(URL, CFG, commitment="finalized", burst=24)  # rpcfast_start: max_batch 25 > 24
+    # from_env приймає профіль і ті самі перекриття
+    bodies = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        bodies.append(len(body))
+        return httpx.Response(200, json=[{"jsonrpc": "2.0", "id": i["id"], "result": None} for i in body])
+
+    clock = FakeClock()
+    src = HttpRpcSource.from_env(CFG, commitment="finalized", environ={"UNMASK_RPC_URL": URL},
+                                 transport=httpx.MockTransport(handler), clock=clock, sleep=clock.advance,
+                                 profile="helius_free")
+    src.get_transactions([f"s{i}" for i in range(25)], deadline=Deadline(clock, 100))
+    assert bodies == [10, 10, 5] and clock.monotonic() == pytest.approx(5 / 4.5)  # кошик 20: лише третій чекає
+    bodies.clear()
+    src = HttpRpcSource.from_env(CFG, commitment="finalized", environ={"UNMASK_RPC_URL": URL},
+                                 transport=httpx.MockTransport(handler), profile="helius_free", max_batch=3,
+                                 rate_per_second=math.inf)
+    src.get_transactions([f"s{i}" for i in range(7)], deadline=Deadline(FakeClock(), 100))
+    assert bodies == [3, 3, 1]
+
+
+BAD_PROFILES = ["helius", "", "RPCFAST_START", " rpcfast_start", None, 5, True, ["helius_free"], URL,
+                f"helius_free{SECRET}"]
+
+
+@pytest.mark.parametrize("profile", BAD_PROFILES, ids=repr)
+def test_unknown_profile_and_old_parameter_names_are_rejected(profile):
+    requests = []
+    transport = httpx.MockTransport(lambda r: requests.append(r) or httpx.Response(200))
+    for make in (
+        lambda: HttpRpcSource(URL, CFG, transport=transport, commitment="finalized", profile=profile),
+        lambda: HttpRpcSource.from_env(CFG, commitment="finalized", environ={"UNMASK_RPC_URL": URL},
+                                       transport=transport, profile=profile),
+    ):
+        with pytest.raises(ValueError) as ei:
+            make()
+        exc = ei.value
+        assert type(exc) is ValueError and str(exc).startswith("profile:")
+        rendered = "".join(traceback.format_exception(exc))
+        assert SECRET not in rendered and "rpc.example" not in rendered
+        if isinstance(profile, str) and profile:
+            assert repr(profile) not in rendered and f"{profile!s}" not in str(exc).replace(
+                "rpcfast_start", "").replace("helius_free", "")
+        assert exc.__cause__ is None and exc.__context__ is None
+    assert requests == []
+    # старі імена (T-049) — не тихі аліаси: TypeError і в конструкторі, і в from_env
+    for old in ({"tx_rate_per_second": 12.0}, {"tx_burst": 30}):
+        with pytest.raises(TypeError):
+            HttpRpcSource(URL, CFG, commitment="finalized", **old)
+        with pytest.raises(TypeError):
+            HttpRpcSource.from_env(CFG, commitment="finalized", environ={"UNMASK_RPC_URL": URL}, **old)
+
+
+URL_ALT = "https://alt.example/?api-key=ALTSECRET456"
+
+
+def test_from_env_url_var_selects_variable_without_leaking_value():
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        return good(request)
+
+    environ = {"UNMASK_RPC_URL": URL, "UNMASK_RPC_URL_ALT": URL_ALT}
+    for var, want in ((None, URL), ("UNMASK_RPC_URL", URL), ("UNMASK_RPC_URL_ALT", URL_ALT)):
+        kw = {} if var is None else {"url_var": var}
+        src = HttpRpcSource.from_env(CFG, commitment="finalized", environ=environ,
+                                     transport=httpx.MockTransport(handler), **kw)
+        src.get_account_info("A", deadline=Deadline(FakeClock(), 10))
+        assert seen[-1] == want
+        assert "ALTSECRET456" not in repr(src) and SECRET not in repr(src)
+    # змінна відсутня / порожня / з невалідним URL: ConfigError з ІМЕНЕМ змінної, без жодного значення
+    for env in ({"UNMASK_RPC_URL": URL}, {"UNMASK_RPC_URL": URL, "UNMASK_RPC_URL_ALT": ""},
+                {"UNMASK_RPC_URL": URL, "UNMASK_RPC_URL_ALT": "ftp://alt.example/?k=ALTSECRET456"},
+                {"UNMASK_RPC_URL": URL, "UNMASK_RPC_URL_ALT": "https://alt.example:ALTSECRET456/"}):
+        with pytest.raises(ConfigError) as ei:
+            HttpRpcSource.from_env(CFG, commitment="finalized", environ=env, url_var="UNMASK_RPC_URL_ALT")
+        exc = ei.value
+        assert "UNMASK_RPC_URL_ALT" in str(exc)
+        rendered = "".join(traceback.format_exception(exc))
+        assert "ALTSECRET456" not in rendered and SECRET not in rendered and "example" not in rendered
+        assert exc.__cause__ is None and exc.__context__ is None
+    # ім'я змінної — лише ім'я: інакше (напр. помилково переданий сам URL) — ValueError без відлуння
+    for bad in (URL, "", "UNMASK RPC", "1ABC", None, 5, b"UNMASK_RPC_URL", "unmask-rpc"):
+        with pytest.raises(ValueError) as ei:
+            HttpRpcSource.from_env(CFG, commitment="finalized", environ={**environ, str(bad): URL}, url_var=bad)
+        rendered = "".join(traceback.format_exception(ei.value))
+        assert str(ei.value).startswith("url_var:")
+        assert SECRET not in rendered and "rpc.example" not in rendered
+        assert ei.value.__cause__ is None and ei.value.__context__ is None
+
+
+@pytest.mark.parametrize("scenario", ["basic", "hub"])
+def test_helius_profile_core_collect_over_emulator_completes_without_rate_limit(scenario):
+    # Ядро шле пачки по rpc.tx_batch_size=25; профіль helius_free ділить їх на під-batch по 10 (all-or-nothing
+    # лишається на рівні виклику). Емулятор — модель Helius free: один кошик ємністю 30, 5/с, на ВСІ методи.
+    directory = SCENARIOS / scenario
+    rpc = json.loads((directory / "rpc.json").read_text())
+    expected = json.loads((directory / "expected.json").read_text())
+    config = load_config(Path(__file__).parent.parent / "config" / "ingest.yaml")
+    if "config" in expected:
+        config = dataclasses.replace(config, **expected["config"])
+    assert config.rpc.tx_batch_size == 25
+    mint = expected["mint"]
+    from_fixture = IngestService(config, FixtureRpcSource(directory), clock=FakeClock()).collect(mint)
+
+    def run(rpc_config=config.rpc, **source_kw):
+        source_clock = FakeClock()
+        bucket = ProviderBucket(source_clock, capacity=HELIUS_CAPACITY, rate=HELIUS_RATE)
+        emulator = _emulator(rpc, config.commitment, bucket, shared=True)
+        sizes: list[int] = []
+
+        def recording(request):
+            body = json.loads(request.content)
+            sizes.append(len(body) if isinstance(body, list) else 1)
+            return emulator(request)
+
+        src = HttpRpcSource(URL, rpc_config, transport=httpx.MockTransport(recording),
+                            commitment=config.commitment, clock=source_clock, sleep=source_clock.advance,
+                            **source_kw)
+        # дедлайн сервісу — окремий FakeClock: тест про ліміт швидкості, а не про бюджет часу
+        run_config = dataclasses.replace(config, rpc=rpc_config)
+        return IngestService(run_config, src, clock=FakeClock()).collect(mint), bucket, sizes, source_clock
+
+    result, bucket, sizes, source_clock = run(profile="helius_free")
+    out = to_dict(result)
+    assert _stable(result) == _stable(from_fixture)
+    assert out["completeness"]["status"] == "complete"
+    assert not [m for m in out["completeness"]["missing"] if m["reason"] == "rate_limited"]
+    assert bucket.rejected == []
+    assert max(sizes) <= 10 and len(bucket.accepted) == len(sizes)
+    assert source_clock.monotonic() >= (sum(sizes) - 20) / 4.5 - 1e-9  # не швидше за 4.5/с: (Σ − 20) / 4.5
+    if scenario == "hub":
+        assert sizes.count(10) > 2  # пачки ядра по 25 справді розбито на під-batch по 10
+
+    # без повторів (rpc.max_retries=0) лімітер сам по собі дає повний результат — не повтори його рятують
+    no_retries = dataclasses.replace(config.rpc, max_retries=0)
+    result, bucket, _, _ = run(no_retries, profile="helius_free")
+    assert _stable(result) == _stable(from_fixture)
+    assert to_dict(result)["completeness"]["status"] == "complete" and bucket.rejected == []
+
+    # без глобального лімітера той самий збір ловить ліміт провайдера — тест вище не вхолосту. З повторами
+    # ядра (max_retries=2, backoff 0.5·2^n) емулятор встигає поповнитись, тому — без повторів, як і вище.
+    result, bucket, _, _ = run(no_retries, profile="helius_free", rate_per_second=math.inf)
+    out = to_dict(result)
+    assert bucket.rejected
+    assert out["completeness"]["status"] == "incomplete"
+    assert [m for m in out["completeness"]["missing"] if m["reason"] == "rate_limited"]
+
+
+# --------------------------------------------------------------------------- T-053: змагальні тести секретів
+
+
+@pytest.mark.parametrize("kw, prefix", [
+    ({"profile": URL}, "profile:"),
+    ({"profile": f"x{SECRET}"}, "profile:"),
+    ({"rate_per_second": URL}, "rate_per_second:"),
+    ({"rate_per_second": float("nan")}, "rate_per_second:"),
+    ({"burst": URL, "max_batch": 1}, "burst:"),
+    ({"burst": 3}, "max_batch:"),
+    ({"max_batch": URL}, "max_batch:"),
+])
+def test_t053_parameter_errors_carry_no_value_and_no_url(kw, prefix, caplog):
+    with caplog.at_level(1):
+        with pytest.raises(ValueError) as ei:
+            HttpRpcSource(URL, CFG, commitment="finalized", **kw)
+    exc = ei.value
+    assert type(exc) is ValueError and str(exc).startswith(prefix)
+    assert_clean(exc, [SECRET, URL, "rpc.example"])
+    assert exc.__cause__ is None and exc.__context__ is None
+    assert SECRET not in caplog.text and "rpc.example" not in caplog.text
+
+
+def test_t053_errors_raised_through_from_env_carry_no_url_either():
+    for kw in ({"profile": URL}, {"rate_per_second": 0.0}, {"burst": 0}, {"url_var": URL}):
+        with pytest.raises(ValueError) as ei:
+            HttpRpcSource.from_env(CFG, commitment="finalized", environ={"UNMASK_RPC_URL": URL}, **kw)
+        assert_clean(ei.value, [SECRET, "rpc.example"])
+        assert ei.value.__cause__ is None and ei.value.__context__ is None
+
+
+def test_t053_url_var_pointing_to_a_variable_with_a_leaky_url_is_config_error_without_it():
+    for leaky in LEAKY_URLS:
+        with pytest.raises(ConfigError) as ei:
+            HttpRpcSource.from_env(CFG, commitment="finalized", environ={"ALT_RPC": leaky}, url_var="ALT_RPC")
+        assert "SECRETKEY99" not in "".join(traceback.format_exception(ei.value))
+        assert ei.value.__cause__ is None and ei.value.__context__ is None
+
+
+def test_t053_repr_and_failures_under_profiles_do_not_leak_the_url(caplog):
+    for profile in http_module.RPC_PROFILES:
+        h = Harness(one_shot(httpx.Response(429, text=f"{URL} {SECRET}")), profile=profile,
+                    rpc_cfg=cfg(max_retries=1, retry_backoff_seconds=0.0))
+        with caplog.at_level(1):
+            with pytest.raises(RpcError) as ei:
+                h.source.get_token_accounts_by_owner("O", deadline=h.deadline)
+        assert_clean(ei.value, [SECRET])
+        assert ei.value.__cause__ is None and ei.value.__context__ is None
+        assert SECRET not in repr(h.source) + str(h.source) + caplog.text
+        assert "rpc.example" not in repr(h.source) and len(h.requests) == 2  # Token: 1 + 1 повтор; Token-2022 не відправлено
+
+
+def _raises_in(func: ast.FunctionDef):
+    for node in ast.walk(func):
+        if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+            yield node.exc
+
+
+def test_t053_validation_messages_are_not_built_from_external_values():
+    # Статично: у конструкторі й `from_env` тексти помилок — константи; f-рядок/конкатенація/format
+    # дозволені лише з іменами модульних констант і `url_var` (ім'я змінної, провалідоване регексом до
+    # використання). Виняток — дотеперішнє `commitment` (не секрет, порівнюється з фіксованим списком).
+    tree = ast.parse(Path(http_module.__file__).read_text())
+    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "HttpRpcSource")
+    funcs = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in ("__init__", "from_env")]
+    assert len(funcs) == 2
+    allowed = {"url_var", "ENV_URL", "_INVALID_URL", "_PROFILE_ERROR"}
+    checked = 0
+    for func in funcs:
+        for call_node in _raises_in(func):
+            for arg in call_node.args:
+                names = {n.id for n in ast.walk(arg) if isinstance(n, ast.Name)}
+                if "commitment" in names and func.name == "__init__":
+                    continue
+                assert not any(isinstance(n, ast.Call) for n in ast.walk(arg)), ast.unparse(arg)
+                assert names <= allowed, ast.unparse(arg)
+                checked += 1
+    assert checked >= 8
