@@ -28,7 +28,7 @@ uv run python tests/fixtures/build_fixtures.py --check         # 001 + swapsend:
 uv run pytest tests/test_graph_fixture_builder.py tests/test_delegated_fixtures.py -q
 ```
 
-Очікувано: кожен `tests/fixtures/graph/*/ingest.json` валідний проти `specs/001-onchain-data-ingest/contracts/ingest-result.schema.json`; `expected.json` 001-сценаріїв без змін у `git status`.
+Очікувано: кожен `tests/fixtures/graph/*/ingest.json` валідний проти `specs/001-onchain-data-ingest/contracts/ingest-result.schema.json`; `expected.json` 001-сценаріїв без змін у `git status`. Після T-056 сценаріїв 002 одинадцять (`g_dust`, `g_financier`, `g_dust_mixed` додано; `g_delegated` — T-047), `expected.config.version == 2`, у `measures` кожної вершини є `buyer_fanout` і `median_to_buyers`.
 
 ## 3. User Story 1 — граф з прослідковністю
 
@@ -88,6 +88,16 @@ EOF
 
 Списки недоступні (FR-002-12): `load_hub_config(Path("config/hubs.yaml"), None)` → `metadata.lists_applied == false`, `address_lists_version == null`, `warnings` містить `address_lists_not_applied`, записів із `detail` `list:*` немає.
 
+Пилове роздавання (FR-002-22, SC-009; research R-22, `calibration.md`) — той самий скрипт на `g_dust` і `g_financier`:
+
+```bash
+uv run pytest tests/test_hubs_dust_fanout.py -q
+```
+
+Очікувано на `g_dust`: джерело D відсічено з єдиним критерієм `dust_fanout`, `measured` — медіана в лампортах (< 1000000), `threshold` — `1000000`, у `measures` запису `buyer_fanout` ≥ 5 (один переказ на 5 SOL серед пилу медіану не зрушив); джерело E з fan-out 4 — не відсічене (передумова `dust_min_fanout = 5`, включно); частка до ≥ 0.9, після < 0.5. На `g_financier`: `pruned` порожній — фінансист R (30 покупців по ≥ 0,1 SOL, ступінь 32) лишається; `warnings` містить `giant_component` — це чесний результат (усі покупці профінансовані одним гаманцем), сигнал для кластеризації, а не хаб. На `g_dust_mixed`: X (4 пилових + 3 справжніх) відсічено, Y (3 + 3) — ні; W (5 × 999 999) відсічено, Z (5 × 1 000 000, рівно поріг) і V (5 × 1 000 001) — ні.
+
+`metadata.hub_config_version == 2`, `metadata.thresholds` містить `dust_amount_lamports` і `dust_min_fanout`.
+
 ## 5. Контракт, детермінізм, інтеграція з 001, швидкодія
 
 ```bash
@@ -134,6 +144,6 @@ python3 scripts/trace.py --check
 
 Очікувано: зелено; `trace.py` — без порушень (кожна виконана задача має `impl:` і `verifies:`).
 
-## Калібрування (поза цією фічею, research R-12)
+## Калібрування (research R-12, R-22; `calibration.md`)
 
-Коли з'являться реальні фікстури з RPC Fast: зняти `measures` усіх вершин на 3 інсайдерських і 3 чистих токенах, подивитись розподіл `degree`/`one_off_share` для відомих бірж і для вершин, що фінансують ≥ 3 покупців, обрати пороги в розриві, підняти `version` і записати в `config/CHANGELOG.md` з sha256 і переліком токенів. Адреси бірж — лише з джерелом і датою.
+Виконано 2026-10-04 на 9 реальних токенах pump.fun (Helius, збір фічі 001): пилові джерела є в кожному токені, ступінь їх не відрізняє від справжніх фінансистів (макс. ступінь 45 < 100), тож `degree_threshold` лишено 100, а додано критерій `dust_fanout` (`config/hubs.yaml` v2: `dust_amount_lamports=1000000`, `dust_min_fanout=5`; запис `## 2` у `config/CHANGELOG.md` з sha256). Перевірка журналу — розділ 1 вище. Наступний крок (R-23, після T-032/T-057): прогнати збережені результати 001 цих 9 токенів через `GraphService` і звірити `pruned[]` з таблицями `calibration.md`; розбіжність → нова версія `hubs.yaml` із записом, не правка коду. Адреси бірж/ММ — лише з джерелом і датою; у калібруванні джерела не було, категорії порожні.

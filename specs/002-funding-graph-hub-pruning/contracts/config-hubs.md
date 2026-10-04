@@ -6,16 +6,19 @@
 
 Завантаження: `unmask.hubs.config.load_hub_config(thresholds_path, lists_path) -> HubConfig`. Невідоме/відсутнє поле чи значення поза межами → `ConfigError` з назвою поля.
 
-## `config/hubs.yaml` (версія 1)
+## `config/hubs.yaml` (версія 2; версія 1 — без двох останніх ключів `dust_*`)
+
+Версія 2 вводиться задачею T-054 за калібруванням (`calibration.md`, research R-22): додано критерій `dust_fanout` (FR-002-22). Решта значень v1 без змін — свідомо (`degree_threshold` на реальних даних неактивний, але зниження відсікло б справжнього фінансиста).
 
 ```yaml
 # Версіонована конфігурація відсікання хабів (принцип III, VI).
 # Схема: specs/002-funding-graph-hub-pruning/contracts/config-hubs.md
 # Будь-яка зміна: підняти version і додати запис із sha256 у config/CHANGELOG.md (розділ "# config/hubs.yaml").
-version: 1
+version: 2
 
-# Правило порогу (FR-002-14, research R-9): критерій спрацьовує, коли виміряне значення СТРОГО БІЛЬШЕ за поріг.
-# Рівно поріг — не хаб. Те саме для попередження про гігантську компоненту.
+# Правило порогу (FR-002-14, research R-9, R-22): рівно поріг НІКОЛИ не спрацьовує, нерівність строга.
+# Напрямок — властивість критерію: degree / one_off_senders_share / giant_component_warn_share — СТРОГО БІЛЬШЕ
+# (багато — хаб); dust_amount_lamports — СТРОГО МЕНШЕ (мало — пил). Передумови (*_min_*) — «>=», включно.
 
 degree_threshold: 100            # int ≥ 1. Унікальних контрагентів (вхідні ∪ вихідні, всі активи й види ребер).
                                  # Хаб, якщо degree > 100. Страхувальний критерій: у графі 002 вхідний ступінь
@@ -31,9 +34,20 @@ prune_off_curve: true            # bool. Вершини поза кривою ed
                                  # хаби за критерієм known_list із detail address_type:off_curve.
 prune_ingest_high_degree: true   # bool. Вершини, які збір позначив unexpanded(high_degree), — хаби (FR-002-07г).
                                  # signature_cap критерієм не є.
+dust_amount_lamports: 1000000    # int ≥ 1 (лампорти; 1_000_000 = 0,001 SOL). Критерій dust_fanout (FR-002-22,
+                                 # research R-22): хаб, якщо медіана сум SOL-ребер до РІЗНИХ покупців (одна сума на
+                                 # покупця — агрегат усіх SOL-переказів до нього; верхня медіана) СТРОГО МЕНША за поріг.
+                                 # Рівно поріг — не хаб. SPL і делеговані купівлі не рахуються. Значення 1 вимикає
+                                 # критерій (жодна сума ребра не < 1). Калібровано на 9 токенах pump.fun
+                                 # (calibration.md): пил < 0,001 SOL при fan-out 5–23; фінансисти ≥ 0,7 SOL.
+dust_min_fanout: 5               # int ≥ 2. ПЕРЕДУМОВА критерію dust_fanout (не поріг хаба): застосовується, лише коли
+                                 # різних покупців, профінансованих у SOL, >= 5 (включно). 5 — найменший fan-out
+                                 # пилових джерел у калібруванні.
 ```
 
-Обмеження: `version ≥ 1`; `degree_threshold ≥ 1`; `0 ≤ one_off_senders_share ≤ 1`; `one_off_min_senders ≥ 2`; `0 < giant_component_warn_share ≤ 1`; булеві — лише `true`/`false`.
+Обмеження: `version ≥ 1`; `degree_threshold ≥ 1`; `0 ≤ one_off_senders_share ≤ 1`; `one_off_min_senders ≥ 2`; `0 < giant_component_warn_share ≤ 1`; булеві — лише `true`/`false`; `dust_amount_lamports ≥ 1` (ціле, не bool); `dust_min_fanout ≥ 2`. Усі дев'ять ключів обов'язкові; відсутній або невідомий → `ConfigError(field)`.
+
+Знімок у результаті (`metadata.thresholds`, `ThresholdsSnapshot`) містить усі ключі, крім `version` (вісім полів); `metadata.hub_config_version` несе `version`.
 
 ## `config/hub_addresses.yaml` (версія 1)
 
@@ -92,6 +106,16 @@ one_off_min_senders=10, giant_component_warn_share=0.5, prune_off_curve=true, pr
 Обґрунтування — specs/002-funding-graph-hub-pruning/research.md R-12.
 sha256: <hex канонічного вмісту файла>
 
+## 2 — 2026-10-0X
+Калібрування на 9 реальних токенах pump.fun (5 інсайдерських за MELT, 4 чисті; Helius, N=30, depth=2, кап 30;
+specs/002-funding-graph-hub-pruning/calibration.md). Додано критерій dust_fanout (FR-002-22, research R-22):
+dust_amount_lamports=1000000 (0,001 SOL; хаб, якщо медіана SOL-сум до різних покупців СТРОГО МЕНША),
+dust_min_fanout=5 (передумова, включно). Чому: пилові джерела (fan-out 5–23, медіана < 0,001 SOL) є в кожному
+токені й склеюють до 21/30 покупців; жоден критерій v1 їх не ловить. degree_threshold=100 лишено свідомо: на цих
+даних неактивний (макс. ступінь 45), зниження до ~30 відсікло б справжнього фінансиста ins1 (ступінь 45, медіана
+≥ 0,7 SOL). Решта значень v1 без змін. Пил/фінансист розділяє сума, не ступінь.
+sha256: fdf65bb5369e4e40e629ca4cd45f4952466ee21447ae8bbe79a4ee0035f45409
+
 # config/hub_addresses.yaml
 
 ## 1 — 2026-10-0X
@@ -100,7 +124,9 @@ exchanges(0), market_makers(0). Джерела — коментарі у фай�
 sha256: <hex>
 ```
 
-Правила: розділ рівня 1 — ім'я файла; запис рівня 2 — `## <version> — <дата>`; останній рядок запису — `sha256: <64 hex>`. `changelog_entries(changelog, "hubs.yaml")` повертає `{1: "<hex>", …}`. Канонічний вміст = `json.dumps(yaml.safe_load(text), sort_keys=True, separators=(",", ":"), ensure_ascii=False)`; коментарі й форматування на дайджест не впливають.
+Правила: розділ рівня 1 — ім'я файла; запис рівня 2 — `## <version> — <дата>`; останній рядок запису — `sha256: <64 hex>`. `changelog_entries(changelog, "hubs.yaml")` повертає `{1: "<hex>", 2: "<hex>", …}`; `check_changelog` вимагає, щоб `version` файла був останнім записом розділу. Канонічний вміст = `json.dumps(yaml.safe_load(text), sort_keys=True, separators=(",", ":"), ensure_ascii=False)`; коментарі й форматування на дайджест не впливають.
+
+Дайджест запису 2 вище обчислено з канонічного вмісту `{"degree_threshold":100,"dust_amount_lamports":1000000,"dust_min_fanout":5,"giant_component_warn_share":0.5,"one_off_min_senders":10,"one_off_senders_share":0.8,"prune_ingest_high_degree":true,"prune_off_curve":true,"version":2}` — він не залежить від коментарів, тож T-054 має отримати рівно його (`content_digest(Path("config/hubs.yaml"))`); розбіжність означає інше значення або тип у файлі.
 
 Кожен наступний запис: що змінено, чому, на яких токенах перевірено. Підбір порогів «під результат» без запису заборонений (гейт критерію успіху).
 

@@ -4,13 +4,15 @@
 
 Розташування: `src/unmask/graph/model.py` (граф, звіт, результат), `src/unmask/hubs/config.py` (конфігурація), `src/unmask/ingest/model.py` (розширення 001 для swap-and-send).
 
+Доповнення за калібруванням (`calibration.md`, research R-22, FR-002-22): критерій `dust_fanout`, два виміри `NodeMeasures`, два пороги `HubThresholds`/`ThresholdsSnapshot` — позначені в таблицях нижче з посиланням на задачі T-054/T-055, бо `model.py` і `config.py` уже написані (T-023…T-025) і змінюються цими задачами.
+
 ## Перелічення
 
 | Тип | Значення | Зміст |
 |---|---|---|
 | `NodeRole` | `buyer` \| `funder` \| `delegated_payer` \| `delegated_receiver` | ролі вершини; множина, непорожня |
 | `EdgeKind` | `transfer` \| `delegated_buy` | вид ребра (FR-002-18: не зливаються) |
-| `HubCriterion` | `known_list` \| `degree` \| `one_off_senders` \| `ingest_high_degree` | критерії FR-002-07 (а)…(г) |
+| `HubCriterion` | `known_list` \| `degree` \| `one_off_senders` \| `ingest_high_degree` \| `dust_fanout` | критерії FR-002-07 (а)…(г) і FR-002-22 (пилове роздавання, research R-22); порядок хітів — за рядковим значенням: `degree < dust_fanout < ingest_high_degree < known_list < one_off_senders` |
 | `CriterionSource` (у `detail`) | `list:<category>` \| `address_type:off_curve` \| `unexpanded:high_degree` \| `measured` | звідки спрацювання |
 | `GraphWarning` | `address_lists_not_applied` \| `giant_component` \| `empty_graph` \| `all_sources_pruned` \| `delegated_incomplete` | попередження звіту (R-16) |
 | `GraphCompletenessStatus` | `complete` \| `incomplete` | похідний статус (FR-002-05) |
@@ -63,15 +65,19 @@
 
 ### `HubThresholds` — з `config/hubs.yaml`
 
-| Поле | Тип | Обмеження | v1 |
-|---|---|---|---|
-| `version` | int | ≥ 1; підіймається із записом у `config/CHANGELOG.md` (розділ `# config/hubs.yaml`) + `sha256` | 1 |
-| `degree_threshold` | int | ≥ 1; хаб iff `degree > degree_threshold` | 100 |
-| `one_off_senders_share` | float | 0 ≤ x ≤ 1; хаб iff `one_off_share > x` | 0.8 |
-| `one_off_min_senders` | int | ≥ 2; критерій застосовний iff `unique_senders >= one_off_min_senders` | 10 |
-| `giant_component_warn_share` | float | 0 < x ≤ 1; попередження iff `share_after > x` | 0.5 |
-| `prune_off_curve` | bool | | true |
-| `prune_ingest_high_degree` | bool | | true |
+| Поле | Тип | Обмеження | v1 | v2 (T-054, research R-22) |
+|---|---|---|---|---|
+| `version` | int | ≥ 1; підіймається із записом у `config/CHANGELOG.md` (розділ `# config/hubs.yaml`) + `sha256` | 1 | 2 |
+| `degree_threshold` | int | ≥ 1; хаб iff `degree > degree_threshold` | 100 | 100 (свідомо без змін — `calibration.md`) |
+| `one_off_senders_share` | float | 0 ≤ x ≤ 1; хаб iff `one_off_share > x` | 0.8 | 0.8 |
+| `one_off_min_senders` | int | ≥ 2; критерій застосовний iff `unique_senders >= one_off_min_senders` | 10 | 10 |
+| `giant_component_warn_share` | float | 0 < x ≤ 1; попередження iff `share_after > x` | 0.5 | 0.5 |
+| `prune_off_curve` | bool | | true | true |
+| `prune_ingest_high_degree` | bool | | true | true |
+| `dust_amount_lamports` | int | ≥ 1; хаб iff `median_to_buyers < dust_amount_lamports` (строго **менше** — пил; `1` вимикає критерій, бо суми ребер ≥ 1) | — | 1 000 000 (0,001 SOL) |
+| `dust_min_fanout` | int | ≥ 2; критерій застосовний iff `buyer_fanout >= dust_min_fanout` (передумова, включно) | — | 5 |
+
+Поля без умовчань: у файлі v2 обов'язкові всі дев'ять ключів; файл v1 (без `dust_*`) → `ConfigError(dust_amount_lamports: missing required field)`.
 
 ### `AddressLists` — з `config/hub_addresses.yaml`
 
@@ -91,7 +97,7 @@ HubConfig(thresholds: HubThresholds, lists: AddressLists | None, thresholds_dige
 
 ## Граф (`src/unmask/graph/model.py`)
 
-### `NodeMeasures` — виміри для критеріїв хаба (research R-7, R-8)
+### `NodeMeasures` — виміри для критеріїв хаба (research R-7, R-8, R-22)
 
 | Поле | Тип | Правило |
 |---|---|---|
@@ -99,6 +105,10 @@ HubConfig(thresholds: HubThresholds, lists: AddressLists | None, thresholds_dige
 | `unique_senders` | int ≥ 0 | унікальні відправники вхідних ребер `transfer` |
 | `one_off_senders` | int ≥ 0 | з них із сумарним `count == 1`; `≤ unique_senders` |
 | `one_off_share` | float \| None | `one_off_senders / unique_senders`; `None`, якщо `unique_senders == 0` |
+| `buyer_fanout` | int ≥ 0 | кількість різних вершин із роллю `buyer`, до яких є вихідне ребро `(transfer, v, b, sol)`; SPL і `delegated_buy` не рахуються (T-055 додає поле; T-032 обчислює) |
+| `median_to_buyers` | int \| None | верхня медіана `Edge.amount` тих самих ребер (одне значення на покупця): `sorted(amounts)[len(amounts) // 2]`, у лампортах; `None` ⇔ `buyer_fanout == 0`; інакше `≥ 1` |
+
+Усі шість полів без умовчань (конструктор вимагає кожне — як решта моделі). `median_to_buyers` — ціле з даних, не похідний float: конструктор перевіряє лише `None`-інваріант і `≥ 1`, бо відтворити медіану без списку сум неможливо (на відміну від `one_off_share`).
 
 ### `UnexpandedMark` — атрибут нерозгорнутості (FR-002-06)
 
@@ -156,12 +166,12 @@ FundingGraph(nodes: tuple[Node, …], edges: tuple[Edge, …])
 | Поле | Тип | Правило |
 |---|---|---|
 | `criterion` | `HubCriterion` | |
-| `measured` | int \| float \| None | `degree`: int; `one_off_senders`: float (частка); `ingest_high_degree`: `counterparties_seen`; `known_list`: `None` |
-| `threshold` | int \| float \| None | з конфігу; для `ingest_high_degree` — `metadata.counterparty_threshold` 001; для `known_list` — `None` |
+| `measured` | int \| float \| None | `degree`: int; `one_off_senders`: float (частка); `ingest_high_degree`: `counterparties_seen`; `dust_fanout`: int — `median_to_buyers` у лампортах; `known_list`: `None` |
+| `threshold` | int \| float \| None | з конфігу; для `ingest_high_degree` — `metadata.counterparty_threshold` 001; для `dust_fanout` — `dust_amount_lamports`; для `known_list` — `None` |
 | `detail` | str | `list:<category>` \| `address_type:off_curve` \| `unexpanded:high_degree` \| `measured` |
 | `lists_version` | int \| None | лише для `detail = list:*` |
 
-Інваріант: `criterion in {degree, one_off_senders, ingest_high_degree}` ⇒ `measured > threshold` (правило R-9 закодоване в типі: хіт, що не перевищує порогу, не конструюється).
+Інваріант (правило R-9 закодоване в типі: хіт на порозі не конструюється): `criterion in {degree, one_off_senders, ingest_high_degree}` ⇒ `measured > threshold`; `criterion == dust_fanout` ⇒ `measured < threshold` (напрямок — властивість критерію, строгість і «рівно поріг — не хаб» — спільні, FR-002-14). Передумова `dust_fanout` (`buyer_fanout >= dust_min_fanout`) у хіті окремого поля не має — вона читається з `measures.buyer_fanout` запису/позначки, так само як `unique_senders` для `one_off_senders`.
 
 ### `PruneRecord` — запис відсікання (FR-002-09)
 
@@ -239,7 +249,7 @@ EffectReport(before: EffectSnapshot, after: EffectSnapshot, pruned_nodes: int, p
 | `hub_config_version` | int |
 | `address_lists_version` | int \| None |
 | `lists_applied` | bool — `address_lists_version is None` ⇔ `lists_applied == False` |
-| `thresholds` | знімок: `degree_threshold`, `one_off_senders_share`, `one_off_min_senders`, `giant_component_warn_share`, `prune_off_curve`, `prune_ingest_high_degree` |
+| `thresholds` | `ThresholdsSnapshot` — знімок усіх порогів `hubs.yaml`, крім `version`: `degree_threshold`, `one_off_senders_share`, `one_off_min_senders`, `giant_component_warn_share`, `prune_off_curve`, `prune_ingest_high_degree`, `dust_amount_lamports` (≥ 1), `dust_min_fanout` (≥ 2) — вісім полів з тими самими межами, що й `HubThresholds` (T-055) |
 | `nodes_total`, `edges_total` | int — повний граф до відсікання |
 
 ### `GraphResult`

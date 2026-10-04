@@ -6,9 +6,9 @@
 
 ## Summary
 
-З `IngestResult` фічі 001 побудувати орієнтований зважений граф фінансування (вершини — гаманці з ролями й глибиною, ребра — агреговані за `(вид, відправник, отримувач, актив)` з сумою, кількістю, часами й первинними посиланнями), окремим модулем відсікти хаби за чотирма незалежними критеріями (відомі списки/PDA, ступінь, частка одноразових відправників, позначка збору `high_degree`) з пояснювальним записом на кожне відсікання, ніколи не відсікаючи покупців, і видати звіт ефекту (компоненти й частка покупців у найбільшій компоненті до/після з попередженнями). Додатково розширити результат 001 зворотно сумісним полем `delegated` (swap-and-send: «делегована купівля» платник→отримувач і кандидати без пари), яке граф перетворює на окремий вид ребра.
+З `IngestResult` фічі 001 побудувати орієнтований зважений граф фінансування (вершини — гаманці з ролями й глибиною, ребра — агреговані за `(вид, відправник, отримувач, актив)` з сумою, кількістю, часами й первинними посиланнями), окремим модулем відсікти хаби за п'ятьма незалежними критеріями (відомі списки/PDA, ступінь, частка одноразових відправників, позначка збору `high_degree`, і — за калібруванням на 9 реальних токенах — пилове роздавання покупцям `dust_fanout`, FR-002-22) з пояснювальним записом на кожне відсікання, ніколи не відсікаючи покупців, і видати звіт ефекту (компоненти й частка покупців у найбільшій компоненті до/після з попередженнями). Додатково розширити результат 001 зворотно сумісним полем `delegated` (swap-and-send: «делегована купівля» платник→отримувач і кандидати без пари), яке граф перетворює на окремий вид ребра.
 
-Підхід: два пакети — `unmask.graph` (модель, побудова, виміри, компоненти, сервіс, серіалізація) і `unmask.hubs` (конфіг з двох версіонованих YAML, критерії, відсікання, звіт) — принцип VI буквально: `graph` не знає про хаби, `hubs` працює з готовим графом через його модель. Усі результато-впливові числа й адреси — у `config/hubs.yaml` і `config/hub_addresses.yaml` з версіями й журналом, захищеним дайджестом (SC-008). Результат детермінований побайтово (без годинника), серіалізується за власним контрактом `contracts/graph-result.schema.json` (версія `002.1`). Рішення й їх обґрунтування — [research.md](research.md) R-1…R-21.
+Підхід: два пакети — `unmask.graph` (модель, побудова, виміри, компоненти, сервіс, серіалізація) і `unmask.hubs` (конфіг з двох версіонованих YAML, критерії, відсікання, звіт) — принцип VI буквально: `graph` не знає про хаби, `hubs` працює з готовим графом через його модель. Усі результато-впливові числа й адреси — у `config/hubs.yaml` (версія 2 після калібрування) і `config/hub_addresses.yaml` з версіями й журналом, захищеним дайджестом (SC-008). Результат детермінований побайтово (без годинника), серіалізується за власним контрактом `contracts/graph-result.schema.json` (версія `002.1`). Рішення й їх обґрунтування — [research.md](research.md) R-1…R-23; дані калібрування — [calibration.md](calibration.md).
 
 ## Technical Context
 
@@ -28,7 +28,7 @@
 
 **Constraints**: без мережі; без волатильних полів у результаті (SC-004 — побайтово); усі пороги/списки — YAML з версією й дайджестом у CHANGELOG; покупці ніколи не відсікаються (SC-003); жодна зміна `expected.json` фічі 001 (SC-006); `spec.md` 001 і 002 не змінюються
 
-**Scale/Scope**: ≤ 500 покупців, ≤ 3 рівні, ~10⁴ вершин, ~3·10⁴ ребер; 21 FR, 3 user stories, 26 задач (T-023…T-048)
+**Scale/Scope**: ≤ 500 покупців, ≤ 3 рівні, ~10⁴ вершин, ~3·10⁴ ребер; 22 FR, 3 user stories, 30 задач (T-023…T-048 і T-054…T-057 — доповнення за калібруванням; T-049…T-053 належать фічі 001)
 
 ## Constitution Check
 
@@ -38,7 +38,7 @@
 |---|---|---|
 | I. Трасування | кожна задача `tasks.md` несе `[FR-002-NN]`; розкладка `impl:`/`verifies:` — розділ «Маркери трасування»; `__init__.py` і генератор фікстур — `trace: ignore-file`; файли 001, що змінюються, додають FR-002-ID у шапку | PASS |
 | II. Test-First | у кожній задачі названо тест(и), що пишуться першими й червоніють з очікуваної причини; фікстури й генератор — у фазах 1–2; еталони незалежні від коду, що тестується (research R-18); мережі немає | PASS |
-| III. Версіонування | пороги й перемикачі — `config/hubs.yaml` (`version`), списки — `config/hub_addresses.yaml` (`version`); обидві версії й знімок порогів — у `metadata` результату; `CHANGELOG.md` із sha256, зміна без запису → червоний тест (SC-008) | PASS |
+| III. Версіонування | пороги й перемикачі — `config/hubs.yaml` (`version`; калібрування підняло 1 → 2 із записом, а не правкою коду), списки — `config/hub_addresses.yaml` (`version`); обидві версії й знімок усіх порогів — у `metadata` результату; `CHANGELOG.md` із sha256, зміна без запису → червоний тест (SC-008) | PASS |
 | IV. Межі модулів | `graph` ↔ `hubs` через модель; `hubs.criteria` / `prune` / `report` / `config` — окремі модулі з окремими тестами; залежність від 001 лише через `IngestResult` (тест забороняє імпорт внутрішніх модулів 001) | PASS |
 | V. Доказ і чесна неповнота | кожне ребро — `refs[]` з підписом і слотом; кожне відсікання — критерії з виміряними значеннями й порогами (SC-002); статус повноти графа похідний і не може бути `complete` над неповним збором; `lists_applied=false` → обов'язкове попередження; `delegated` має явну повноту, умовчання — `not_analyzed`, не «порожньо» | PASS |
 | VI. Хаби окремо | пакет `unmask.hubs` зі своїм інтерфейсом (`evaluate`, `prune_hubs`, `effect_report`, `load_hub_config`) і тестами; `graph.build` не містить жодної гілки про хаби; у результаті видно, що відсічено й чому (`pruned[]`, `buyer_flags[]`) | PASS |
@@ -53,9 +53,10 @@ Re-check після Phase 1: data-model і контракти не додали 
 
 ```text
 specs/002-funding-graph-hub-pruning/
-├── spec.md                           # FR-002-01..21 (не змінюється)
+├── spec.md                           # FR-002-01..22 (FR-002-22 додано рішенням власника за calibration.md; під час імплементації не змінюється)
 ├── plan.md                           # цей файл
-├── research.md                       # R-1…R-21
+├── research.md                       # R-1…R-23 (R-22 — dust_fanout, R-23 — нотатки для 003)
+├── calibration.md                    # калібрування на 9 реальних токенах (2026-10-04): дані, висновки, рішення
 ├── data-model.md                     # сутності графа, відсікання, звіту, результату; розширення 001
 ├── quickstart.md                     # як переконатися, що фіча працює
 ├── contracts/
@@ -64,7 +65,7 @@ specs/002-funding-graph-hub-pruning/
 │   ├── graph-result.schema.json      # JSON Schema 2020-12 результату графа (schema 002.1), інваріанти в if/then
 │   └── ingest-delegated-extension.md # єдина зміна контракту 001: schema 1.1, $defs/delegated, гарантії SC-006
 ├── checklists/requirements.md
-└── tasks.md                          # T-023…T-048
+└── tasks.md                          # T-023…T-048, T-054…T-057
 ```
 
 ### Source Code (repository root)
@@ -72,7 +73,7 @@ specs/002-funding-graph-hub-pruning/
 ```text
 config/
 ├── ingest.yaml                       # 001, без змін
-├── hubs.yaml                         # НОВЕ: пороги й перемикачі, version=1
+├── hubs.yaml                         # НОВЕ: пороги й перемикачі, version=2 (v1 — T-023; v2 + dust_* — T-054)
 ├── hub_addresses.yaml                # НОВЕ: списки адрес за категоріями, version=1
 └── CHANGELOG.md                      # реструктуровано: розділ на файл; записи 002 з sha256
 src/unmask/
@@ -88,14 +89,14 @@ src/unmask/
 │   ├── __init__.py                   # trace: ignore-file
 │   ├── model.py                      # Node, Edge, EdgeRef, FundingGraph, NodeMeasures, UnexpandedMark, GraphCompleteness, GraphMetadata, GraphResult, enum'и, ключі порядку, GraphInputError
 │   ├── build.py                      # build_graph(IngestResult) -> FundingGraph (вершини, ребра обох видів, глибина, off-curve)
-│   ├── measures.py                   # compute(nodes, edges) -> {address: NodeMeasures}
+│   ├── measures.py                   # compute(nodes, edges) -> {address: NodeMeasures} (ступінь, відправники, одноразові; fan-out/медіана до покупців — R-22)
 │   ├── components.py                 # union-find; Components
 │   ├── service.py                    # GraphService.analyze
 │   └── serialize.py                  # to_dict / to_json за graph-result.schema.json
 └── hubs/
     ├── __init__.py                   # trace: ignore-file
     ├── config.py                     # load_hub_config, HubThresholds, AddressLists, HubConfig, content_digest, changelog_entries, ConfigError
-    ├── criteria.py                   # CriterionHit; evaluate(node, config, ingest_counterparty_threshold)
+    ├── criteria.py                   # CriterionHit; evaluate(node, config, ingest_counterparty_threshold) — п'ять критеріїв (FR-002-07 а–г, FR-002-22)
     ├── prune.py                      # PruneRecord, BuyerFlag, PruneOutcome; prune_hubs
     └── report.py                     # EffectSnapshot, EffectReport, GraphWarning; effect_report
 
@@ -104,18 +105,19 @@ tests/
 │   ├── build_fixtures.py             # 001; + сценарій swapsend (Launch.schedule_buy_for), expected.delegated
 │   ├── scenarios/swapsend/{rpc.json, expected.json}        # НОВЕ (001-форма)
 │   ├── build_graph_fixtures.py       # НОВЕ, trace: ignore-file; не імпортує unmask; еталони-оракули
-│   └── graph/<scenario>/{ingest.json, expected.json}      # g_basic, g_hub, g_known, g_buyer_hub, g_incomplete, g_empty, g_all_hubs, g_unexpanded, g_delegated
-├── test_hubs_config.py               # verifies: FR-002-08, FR-002-13, FR-002-14
+│   └── graph/<scenario>/{ingest.json, expected.json}      # g_basic, g_hub, g_known, g_buyer_hub, g_incomplete, g_empty, g_all_hubs, g_unexpanded, g_dust, g_financier, g_dust_mixed (T-056), g_delegated (T-047)
+├── test_hubs_config.py               # verifies: FR-002-08, FR-002-13, FR-002-14, FR-002-22 (T-054 додає)
 ├── test_hubs_changelog_guard.py      # verifies: FR-002-08
-├── test_graph_model.py               # verifies: FR-002-02, FR-002-03, FR-002-05, FR-002-06, FR-002-18
+├── test_graph_model.py               # verifies: FR-002-02, FR-002-03, FR-002-05, FR-002-06, FR-002-18, FR-002-22 (T-055 додає)
 ├── test_graph_fixture_builder.py     # verifies: FR-002-20
 ├── test_graph_components.py          # verifies: FR-002-11
 ├── test_graph_build.py               # verifies: FR-002-01, FR-002-02, FR-002-18
 ├── test_graph_build_nodes.py         # verifies: FR-002-03
 ├── test_graph_completeness.py        # verifies: FR-002-05, FR-002-06
 ├── test_graph_determinism.py         # verifies: FR-002-04
-├── test_hubs_measures.py             # verifies: FR-002-07
+├── test_hubs_measures.py             # verifies: FR-002-07, FR-002-22
 ├── test_hubs_threshold_rule.py       # verifies: FR-002-07, FR-002-14
+├── test_hubs_dust_fanout.py          # verifies: FR-002-22, FR-002-07, FR-002-14 (T-057)
 ├── test_hubs_criteria_lists.py       # verifies: FR-002-07
 ├── test_hubs_prune.py                # verifies: FR-002-09, FR-002-10
 ├── test_hubs_report.py               # verifies: FR-002-11
@@ -141,10 +143,10 @@ tests/
 |---|---|---|---|
 | `graph.model` | типи графа й результату з інваріантами; похідна повнота | дата-класи; `GraphCompleteness.derive(result)`; `FundingGraph.without(…)` | `ingest.model` (типи 001) |
 | `graph.build` | з `IngestResult` — вершини й ребра обох видів, глибина, off-curve | `build_graph(result) -> FundingGraph` | `graph.model`, `graph.measures`, `solders` |
-| `graph.measures` | ступінь, відправники, одноразові відправники | `compute(nodes, edges) -> dict[str, NodeMeasures]` | `graph.model` |
+| `graph.measures` | ступінь, відправники, одноразові відправники; fan-out до покупців у SOL і верхня медіана сум до них (R-22) | `compute(nodes, edges) -> dict[str, NodeMeasures]` | `graph.model` |
 | `graph.components` | слабка зв'язність, union-find | `components(graph) -> Components` | `graph.model` |
 | `hubs.config` | два YAML, валідація, дайджести, журнал | `load_hub_config(thresholds_path, lists_path)`, `content_digest`, `changelog_entries` | `pyyaml` |
-| `hubs.criteria` | чотири критерії, правило порогу | `evaluate(node, config, *, ingest_counterparty_threshold) -> tuple[CriterionHit]` | `graph.model`, `hubs.config` |
+| `hubs.criteria` | п'ять критеріїв (FR-002-07 а–г, FR-002-22), правило порогу | `evaluate(node, config, *, ingest_counterparty_threshold) -> tuple[CriterionHit]` | `graph.model`, `hubs.config` |
 | `hubs.prune` | записи відсікання, захист покупців, граф без хабів | `prune_hubs(graph, config, *, ingest_counterparty_threshold) -> PruneOutcome` | `hubs.criteria`, `graph.model` |
 | `hubs.report` | знімки до/після, попередження | `effect_report(before, after, config, *, lists_applied, delegated_complete) -> EffectReport` | `graph.components`, `graph.model` |
 | `graph.service` | публічний вхід | `GraphService(config).analyze(result) -> GraphResult` | усе вище |
@@ -158,14 +160,14 @@ tests/
 | Файл | Шапка |
 |---|---|
 | `src/unmask/graph/__init__.py`, `src/unmask/hubs/__init__.py`, `tests/fixtures/build_graph_fixtures.py` | `# trace: ignore-file` |
-| `graph/model.py` | `# impl: FR-002-02, FR-002-03, FR-002-05, FR-002-06, FR-002-18` |
+| `graph/model.py` | `# impl: FR-002-02, FR-002-03, FR-002-05, FR-002-06, FR-002-18` → T-055 **додає** `FR-002-22` |
 | `graph/build.py` | `# impl: FR-002-01, FR-002-02, FR-002-03, FR-002-04, FR-002-05, FR-002-06, FR-002-18` |
-| `graph/measures.py` | `# impl: FR-002-07` |
+| `graph/measures.py` | `# impl: FR-002-07, FR-002-22` |
 | `graph/components.py` | `# impl: FR-002-11` |
 | `graph/service.py` | `# impl: FR-002-04, FR-002-13, FR-002-19, FR-002-20, FR-002-21` |
 | `graph/serialize.py` | `# impl: FR-002-04, FR-002-13, FR-002-21` |
-| `hubs/config.py` | `# impl: FR-002-08, FR-002-12, FR-002-13, FR-002-14` |
-| `hubs/criteria.py` | `# impl: FR-002-07, FR-002-14` |
+| `hubs/config.py` | `# impl: FR-002-08, FR-002-12, FR-002-13, FR-002-14` → T-054 **додає** `FR-002-22` |
+| `hubs/criteria.py` | `# impl: FR-002-07, FR-002-14, FR-002-22` |
 | `hubs/prune.py` | `# impl: FR-002-07, FR-002-09, FR-002-10, FR-002-12` |
 | `hubs/report.py` | `# impl: FR-002-11, FR-002-12` |
 | `ingest/delegated.py` | `# impl: FR-002-15, FR-002-16, FR-002-19` |
@@ -181,8 +183,8 @@ tests/
 
 ## Межі фічі й що відкладено
 
-- **Входить**: FR-002-01…21; два YAML з журналом; фікстури 002 і сценарій `swapsend` 001; зворотно сумісне розширення контракту 001 (schema 1.1).
-- **Не входить**: кластеризація (union-find за спільним джерелом, Louvain — фіча 003), поведінкові сигнали, оцінка ризику, API, бот, рендер графа, калібрування порогів і заповнення списків бірж на реальних даних (потребує RPC-ключа; процедура — research R-12), зміна правила купівлі 001 для swap-and-send-отримувачів (їх **не** додають у перші N — FR-002-17).
+- **Входить**: FR-002-01…22; два YAML з журналом (`hubs.yaml` v2); фікстури 002 і сценарій `swapsend` 001; зворотно сумісне розширення контракту 001 (schema 1.1); застосування результатів калібрування (`calibration.md` → R-22, T-054…T-057).
+- **Не входить**: кластеризація (union-find за спільним джерелом, Louvain — фіча 003), поведінкові сигнали, оцінка ризику, API, бот, рендер графа, заповнення списків бірж/ММ (джерела адрес у калібруванні не було — лишаються порожніми), перерахунок калібрування на графі 002 після T-032/T-057 (research R-23; нова версія `hubs.yaml` із записом, якщо розійдеться), мінімальна сума ребра для кластеризації (нотатка для 003 — R-23), зміна правила купівлі 001 для swap-and-send-отримувачів (їх **не** додають у перші N — FR-002-17).
 - Жодна задача не тягне в «Поза межами» PRD.
 
 ## Відкриті питання (не BLOCKED — архітектура однакова за будь-якої відповіді; змінюється одна задача)
@@ -195,6 +197,8 @@ tests/
 | Q4 | Вікно swap-and-send = транзакції mint, розібрані перелічувачем покупців (до слота N-го покупця включно), без додаткових звернень (research R-1) | так | окреме перегортання — мережа, нова FR; поза цією фічею |
 | Q5 | `depth` вершин лише з делегованих ребер: отримувач 0, платник 1 (research R-6) | так | `null` — зміна `graph/model.py`/`build.py` (T-029, T-047) і схеми |
 | Q6 | Два YAML (пороги / списки) з окремими версіями (research R-13) | так | один файл з двома полями версій — лише `hubs/config.py` (T-023) |
+| Q7 | `median_to_buyers` по **ребрах** (одна сума на покупця) чи по **переказах**, як рахувало калібрування (research R-22) | по ребрах — стійко до повторних дрібних переказів одному покупцю | по переказах — лише `graph/measures.py` (T-032), оракул генератора (T-056) і data-model; пороги ті самі. Перевірити на тих самих 9 токенах після T-032/T-057 (R-23) — розбіжність очікується нульовою |
+| Q8 | Змішаний відправник (пил частині покупців, справжні суми іншим): верхня медіана = відсікати при **строгій більшості** пилових (research R-22) | так; справжні ребра лишаються в `pruned[].incident_edges` для 003 | нижня медіана (відсікати при рівності) або окрема частка пилових із власним порогом — `hubs/criteria.py` (T-057), `measures.py` (T-032), поле конфігу v3 із записом |
 
 ## Complexity Tracking
 

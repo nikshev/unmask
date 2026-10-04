@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://unmask.local/schemas/002/graph-result-1.json",
   "title": "unmask graph result (feature 002, schema 002.1)",
-  "description": "Serialized GraphResult: funding graph for clustering (hubs removed, all buyers kept), prune records with explanations, effect report, inherited completeness. Versioned independently from feature 001 (FR-002-21). Amounts are integers in base units; shares are ratios of the integers stored beside them.",
+  "description": "Serialized GraphResult: funding graph for clustering (hubs removed, all buyers kept), prune records with explanations, effect report, inherited completeness. Versioned independently from feature 001 (FR-002-21). Amounts are integers in base units; shares are ratios of the integers stored beside them. 2026-10-04: dust_fanout criterion, buyer_fanout/median_to_buyers measures and dust_* thresholds added after calibration (FR-002-22, research R-22) before any result was ever serialized, so the schema version stays 002.1.",
   "type": "object",
   "additionalProperties": false,
   "required": ["metadata", "completeness", "graph", "pruned", "buyer_flags", "report"],
@@ -98,9 +98,11 @@
     "thresholds": {
       "type": "object",
       "additionalProperties": false,
+      "description": "Snapshot of every hubs.yaml threshold except version (FR-002-13). hubs.yaml v2 (FR-002-22, research R-22) added dust_amount_lamports and dust_min_fanout.",
       "required": [
         "degree_threshold", "one_off_senders_share", "one_off_min_senders",
-        "giant_component_warn_share", "prune_off_curve", "prune_ingest_high_degree"
+        "giant_component_warn_share", "prune_off_curve", "prune_ingest_high_degree",
+        "dust_amount_lamports", "dust_min_fanout"
       ],
       "properties": {
         "degree_threshold": { "$ref": "#/$defs/posInt" },
@@ -108,7 +110,9 @@
         "one_off_min_senders": { "type": "integer", "minimum": 2 },
         "giant_component_warn_share": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
         "prune_off_curve": { "type": "boolean" },
-        "prune_ingest_high_degree": { "type": "boolean" }
+        "prune_ingest_high_degree": { "type": "boolean" },
+        "dust_amount_lamports": { "$ref": "#/$defs/posInt" },
+        "dust_min_fanout": { "type": "integer", "minimum": 2 }
       }
     },
 
@@ -169,12 +173,20 @@
     "measures": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["degree", "unique_senders", "one_off_senders", "one_off_share"],
+      "required": ["degree", "unique_senders", "one_off_senders", "one_off_share", "buyer_fanout", "median_to_buyers"],
       "properties": {
         "degree": { "$ref": "#/$defs/nonNegInt" },
         "unique_senders": { "$ref": "#/$defs/nonNegInt" },
         "one_off_senders": { "$ref": "#/$defs/nonNegInt" },
-        "one_off_share": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/share" } ] }
+        "one_off_share": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/share" } ] },
+        "buyer_fanout": {
+          "description": "FR-002-22 (research R-22): distinct buyer nodes that received at least one sol transfer edge from this node; SPL and delegated_buy edges do not count",
+          "$ref": "#/$defs/nonNegInt"
+        },
+        "median_to_buyers": {
+          "description": "upper median (sorted[n // 2]) of the per-buyer aggregated sol edge amounts, in lamports; null exactly when buyer_fanout is 0",
+          "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/posInt" } ]
+        }
       },
       "allOf": [
         {
@@ -182,6 +194,12 @@
           "if": { "properties": { "unique_senders": { "const": 0 } } },
           "then": { "properties": { "one_off_share": { "type": "null" } } },
           "else": { "properties": { "one_off_share": { "type": "number" } } }
+        },
+        {
+          "description": "FR-002-22: median is null exactly when no buyer was funded in sol",
+          "if": { "properties": { "buyer_fanout": { "const": 0 } } },
+          "then": { "properties": { "median_to_buyers": { "type": "null" } } },
+          "else": { "properties": { "median_to_buyers": { "type": "integer" } } }
         }
       ]
     },
@@ -291,7 +309,10 @@
       "additionalProperties": false,
       "required": ["criterion", "measured", "threshold", "detail", "lists_version"],
       "properties": {
-        "criterion": { "enum": ["known_list", "degree", "one_off_senders", "ingest_high_degree"] },
+        "criterion": {
+          "description": "FR-002-07 (a)-(d) plus dust_fanout (FR-002-22, research R-22). Threshold rule (FR-002-14): a hit is never produced at exactly the threshold; degree/one_off_senders/ingest_high_degree fire when measured > threshold, dust_fanout fires when measured < threshold (the model enforces the direction; JSON Schema cannot compare two fields)",
+          "enum": ["known_list", "degree", "one_off_senders", "ingest_high_degree", "dust_fanout"]
+        },
         "measured": { "oneOf": [ { "type": "null" }, { "type": "number" } ] },
         "threshold": { "oneOf": [ { "type": "null" }, { "type": "number" } ] },
         "detail": { "type": "string", "pattern": "^(list:[a-z_]+|address_type:off_curve|unexpanded:high_degree|measured)$" },
@@ -300,9 +321,14 @@
       "allOf": [
         {
           "description": "FR-002-09: measured criteria always carry the measured value and the threshold",
-          "if": { "properties": { "criterion": { "enum": ["degree", "one_off_senders", "ingest_high_degree"] } } },
+          "if": { "properties": { "criterion": { "enum": ["degree", "one_off_senders", "ingest_high_degree", "dust_fanout"] } } },
           "then": { "properties": { "measured": { "type": "number" }, "threshold": { "type": "number" } } },
           "else": { "properties": { "measured": { "type": "null" }, "threshold": { "type": "null" } } }
+        },
+        {
+          "description": "FR-002-22: a dust_fanout hit measures the median in lamports (integer >= 1) against dust_amount_lamports (integer >= 1), detail is 'measured'",
+          "if": { "properties": { "criterion": { "const": "dust_fanout" } } },
+          "then": { "properties": { "measured": { "$ref": "#/$defs/posInt" }, "threshold": { "$ref": "#/$defs/posInt" }, "detail": { "const": "measured" } } }
         },
         {
           "description": "a list hit cites the list version; any other hit does not",

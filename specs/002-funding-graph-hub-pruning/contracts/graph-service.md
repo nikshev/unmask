@@ -37,6 +37,8 @@ compute(nodes: Iterable[Node], edges: Iterable[Edge]) -> dict[str, NodeMeasures]
 
 `degree` — унікальні контрагенти (вхідні ∪ вихідні, всі `kind` і активи); `unique_senders` — унікальні відправники вхідних ребер `kind=transfer`; `one_off_senders` — з них із сумарним `count == 1` по всіх активах; `one_off_share = one_off_senders / unique_senders` або `None`. Чиста функція; порядок входу не впливає.
 
+Виміри пилового роздавання (research R-22, FR-002-22): `buyer_fanout` — кількість різних вершин з роллю `buyer`, до яких є ребро `(transfer, v, b, sol)` (SPL і `delegated_buy` не рахуються); `median_to_buyers` — верхня медіана `Edge.amount` цих ребер (одне значення на покупця): `sorted(amounts)[len(amounts) // 2]`, ціле в лампортах; `None` ⇔ `buyer_fanout == 0`. Роль `buyer` береться з вершин, переданих у `compute` (тому `build_graph` формує вершини з ролями до виклику `compute`).
+
 ## 3. `unmask.graph.components` — компоненти
 
 ```python
@@ -64,8 +66,9 @@ evaluate(node: Node, config: HubConfig, *, ingest_counterparty_threshold: int) -
 | `degree` | `node.measures.degree > degree_threshold` | `degree` / `degree_threshold` / `measured` |
 | `one_off_senders` | `unique_senders >= one_off_min_senders` **і** `one_off_share > one_off_senders_share` | `one_off_share` / `one_off_senders_share` / `measured` |
 | `ingest_high_degree` | `prune_ingest_high_degree` і `node.unexpanded.reason == high_degree` | `counterparties_seen` / `ingest_counterparty_threshold` / `unexpanded:high_degree` |
+| `dust_fanout` (FR-002-22, R-22) | `buyer_fanout >= dust_min_fanout` **і** `median_to_buyers < dust_amount_lamports` | `median_to_buyers` (int, лампорти) / `dust_amount_lamports` / `measured`; передумова видима через `measures.buyer_fanout` запису |
 
-Правило порогу (FR-002-14): усі пороги — **строго більше**; рівно поріг — не спрацьовує. `one_off_min_senders` — передумова (включно). `signature_cap` критерієм не є.
+Правило порогу (FR-002-14): **рівно поріг ніколи не спрацьовує, нерівність строга**. Напрямок — властивість критерію: `degree`, `one_off_senders` — строго більше (багато — хаб); `dust_fanout` — строго менше (мало — пил). `one_off_min_senders` і `dust_min_fanout` — передумови (включно). `signature_cap` критерієм не є. Хіти впорядковані за рядком `criterion`: `degree < dust_fanout < ingest_high_degree < known_list < one_off_senders`; вершина може мати 1…5 хітів.
 
 ## 5. `unmask.hubs.prune` — відсікання (FR-002-09, FR-002-10)
 
@@ -94,7 +97,7 @@ GraphService(config: HubConfig)
 GraphService.analyze(result: IngestResult) -> GraphResult
 ```
 
-Кроки: `build_graph` → `prune_hubs` → `effect_report(before=повний, after=outcome.graph)` → `GraphCompleteness.derive(result)` → `GraphMetadata` (версії обох YAML, знімок порогів, `ingest_*` з метаданих 001) → `GraphResult`.
+Кроки: `build_graph` → `prune_hubs` → `effect_report(before=повний, after=outcome.graph)` → `GraphCompleteness.derive(result)` → `GraphMetadata` (версії обох YAML, знімок усіх восьми порогів `hubs.yaml` включно з `dust_amount_lamports`/`dust_min_fanout`, `ingest_*` з метаданих 001) → `GraphResult`.
 
 Гарантії:
 - Не піднімає винятків через дані: будь-який валідний `IngestResult` (повний, неповний, порожній, з `NOT_ANALYZED`) дає `GraphResult`. Винятки — лише `GraphInputError` (порушення контракту 001) і `ConfigError` (при завантаженні, до створення сервісу).
