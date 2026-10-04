@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **38** · задач: **57** (виконано 44) · вимог у роботі: **15** · порушень: **0**
+Вимог: **38** · задач: **57** (виконано 45) · вимог у роботі: **15** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -16,7 +16,7 @@
 | `FR-001-06` | Кожен переказ у результаті MUST нести: відправника, отримувача, актив, суму, час, слот і підпис транзакції — п | `T-003`, `T-007`, `T-008`, `T-009`, `T-020`, `T-050` | `src/unmask/ingest/parse.py`, `src/unmask/ingest/serialize.py`, `src/unmask/ingest/model.py` | `tests/test_parse_spl.py`, `tests/test_parse_corrupt.py`, `tests/test_parse_sol.py`, `tests/test_model_completeness.py`, `tests/test_parse_real_corpus.py`, `tests/test_serialize_contract.py` |
 | `FR-001-07` | Система MUST не включати переказ, що відбувся пізніше за першу купівлю відповідного покупця, і MUST не дублюва | `T-012` | `src/unmask/ingest/funding.py` | `tests/test_funding.py` |
 | `FR-001-08` | Гаманець фінансувався з дуже «жвавої» адреси (біржа, роутер) із тисячами контрагентів: обхід через неї не розг | `T-002`, `T-012`, `T-013` | `src/unmask/ingest/funding.py`, `src/unmask/ingest/config.py` | `tests/test_funding_limits.py`, `tests/test_config.py` |
-| `FR-001-09` | Результат MUST містити статус повноти («повний» або «неповний») і для кожного гаманця з недоотриманою історією | `T-003`, `T-007`, `T-009`, `T-014`, `T-016`, `T-050` | `src/unmask/ingest/parse.py`, `src/unmask/ingest/collector.py`, `src/unmask/ingest/funding.py`, `src/unmask/ingest/buyers.py`, `src/unmask/ingest/model.py` | `tests/test_parse_corrupt.py`, `tests/test_model_completeness.py`, `tests/test_parse_real_corpus.py`, `tests/test_collector.py`, `tests/test_collector_failures.py` |
+| `FR-001-09` | Результат MUST містити статус повноти («повний» або «неповний») і для кожного гаманця з недоотриманою історією | `T-003`, `T-007`, `T-009`, `T-014`, `T-016`, `T-050` | `src/unmask/ingest/parse.py`, `src/unmask/ingest/collector.py`, `src/unmask/ingest/funding.py`, `src/unmask/ingest/buyers.py`, `src/unmask/ingest/model.py` | `tests/test_delegated_wiring.py`, `tests/test_parse_corrupt.py`, `tests/test_model_completeness.py`, `tests/test_parse_real_corpus.py`, `tests/test_collector.py`, `tests/test_collector_failures.py` |
 | `FR-001-10` | Система MUST NOT видавати неповний результат як повний; відсутність даних MUST бути видимою у відповіді, а не  | `T-003`, `T-014`, `T-016` | `src/unmask/ingest/collector.py`, `src/unmask/ingest/funding.py`, `src/unmask/ingest/buyers.py`, `src/unmask/ingest/model.py` | `tests/test_model_completeness.py`, `tests/test_collector.py`, `tests/test_collector_failures.py` |
 | `FR-001-11` | Коли токена не існує або адреса некоректна, система MUST повертати явну відповідь («токен не знайдено» або «не | `T-006`, `T-018`, `T-019` | `src/unmask/ingest/addresses.py`, `src/unmask/ingest/service.py` | `tests/test_service_rejections.py`, `tests/test_addresses.py` |
 | `FR-001-12` | Система MUST кешувати повний результат за адресою токена; повторний запит MUST віддаватися з кешу без звернень | `T-017`, `T-018` | `src/unmask/ingest/service.py`, `src/unmask/ingest/cache.py` | `tests/test_cache.py` |
@@ -45,9 +45,9 @@
 | `FR-002-14` | Правило порогу (рівно поріг) MUST бути визначене однозначно й однаково для всіх критеріїв. | `T-023`, `T-033`, `T-057` | `src/unmask/hubs/criteria.py`, `src/unmask/hubs/config.py` | `tests/test_hubs_dust_fanout.py`, `tests/test_hubs_config.py`, `tests/test_hubs_threshold_rule.py` |
 | `FR-002-15` | Система MUST розпізнавати в транзакціях mint «делеговану купівлю»: платник витратив кошти й не отримав токен,  | `T-043`, `T-045` | `src/unmask/ingest/delegated.py` | `tests/test_delegated_fixtures.py`, `tests/test_delegated_rule.py` |
 | `FR-002-16` | Неоднозначні випадки (кілька платників чи отримувачів без однозначної відповідності) MUST фіксуватися як «канд | `T-043`, `T-045` | `src/unmask/ingest/delegated.py` | `tests/test_delegated_fixtures.py`, `tests/test_delegated_rule.py` |
-| `FR-002-17` | Розпізнавання swap-and-send MUST NOT змінювати склад, порядок і порядкові номери перших N покупців із фічі 001 | `T-046` | — | — |
+| `FR-002-17` | Розпізнавання swap-and-send MUST NOT змінювати склад, порядок і порядкові номери перших N покупців із фічі 001 | `T-046` | `src/unmask/ingest/buyers.py`, `src/unmask/ingest/cache.py` | `tests/test_delegated_wiring.py` |
 | `FR-002-18` | Зв'язки «делегована купівля» MUST потрапляти в граф як окремий вид ребра з первинним посиланням; ребра цього в | `T-025`, `T-028`, `T-047` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_build.py`, `tests/test_graph_model.py` |
-| `FR-002-19` | Якщо транзакції не вдалося розібрати для цього аналізу, результат MUST це позначати як неповний щодо swap-and- | `T-039`, `T-044`, `T-045`, `T-046`, `T-048` | `src/unmask/ingest/delegated.py`, `src/unmask/ingest/model.py` | `tests/test_ingest_delegated_model.py` |
+| `FR-002-19` | Якщо транзакції не вдалося розібрати для цього аналізу, результат MUST це позначати як неповний щодо swap-and- | `T-039`, `T-044`, `T-045`, `T-046`, `T-048` | `src/unmask/ingest/parse.py`, `src/unmask/ingest/collector.py`, `src/unmask/ingest/service.py`, `src/unmask/ingest/delegated.py`, `src/unmask/ingest/model.py` | `tests/test_delegated_wiring.py`, `tests/test_ingest_delegated_model.py` |
 | `FR-002-20` | Усі зовнішні дані MUST надходити лише з результату збору (фіча 001); фіча не звертається до мережі напряму, те | `T-026`, `T-039`, `T-041`, `T-056` | `src/unmask/ingest/serialize.py` | `tests/test_ingest_from_dict.py` |
 | `FR-002-21` | Результат MUST серіалізуватися у JSON за контрактом, версіонованим окремо від контракту фічі 001; зміни контра | `T-039`, `T-040`, `T-044`, `T-048` | `src/unmask/ingest/serialize.py`, `src/unmask/ingest/model.py` | `tests/test_ingest_delegated_model.py` |
 | `FR-002-22` | Система MUST позначати вершину хабом за п'ятим незалежним критерієм «пилове роздавання» (`dust_fanout`): верши | `T-032`, `T-033`, `T-035`, `T-040`, `T-054`, `T-055`, `T-056`, `T-057` | `src/unmask/graph/measures.py`, `src/unmask/graph/model.py`, `src/unmask/hubs/criteria.py`, `src/unmask/hubs/config.py` | `tests/test_hubs_dust_fanout.py`, `tests/test_graph_model.py`, `tests/test_hubs_config.py`, `tests/test_hubs_measures.py` |
@@ -83,7 +83,7 @@
 - `T-032` (002-funding-graph-hub-pruning) — виконано
 - `T-033` (002-funding-graph-hub-pruning) — виконано
 - `T-057` (002-funding-graph-hub-pruning) — виконано
-- `T-034` (002-funding-graph-hub-pruning) — у роботі
+- `T-034` (002-funding-graph-hub-pruning) — виконано
 - `T-035` (002-funding-graph-hub-pruning) — у роботі
 - `T-036` (002-funding-graph-hub-pruning) — у роботі
 - `T-039` (002-funding-graph-hub-pruning) — у роботі

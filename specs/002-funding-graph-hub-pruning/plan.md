@@ -146,7 +146,7 @@ tests/
 | `graph.measures` | ступінь, відправники, одноразові відправники; fan-out до покупців у SOL і верхня медіана сум до них (R-22) | `compute(nodes, edges) -> dict[str, NodeMeasures]` | `graph.model` |
 | `graph.components` | слабка зв'язність, union-find | `components(graph) -> Components` | `graph.model` |
 | `hubs.config` | два YAML, валідація, дайджести, журнал | `load_hub_config(thresholds_path, lists_path)`, `content_digest`, `changelog_entries` | `pyyaml` |
-| `hubs.criteria` | п'ять критеріїв (FR-002-07 а–г, FR-002-22), правило порогу | `evaluate(node, config, *, ingest_counterparty_threshold) -> tuple[CriterionHit]` | `graph.model`, `hubs.config` |
+| `hubs.criteria` | п'ять критеріїв (FR-002-07 а–г, FR-002-22), правило порогу | `evaluate(node, config, *, ingest_counterparty_threshold) -> tuple[CriterionHit]` | `graph.model`, `hubs.config`, `ingest.model` (типи `AddressType`, `UnexpandedReason`) |
 | `hubs.prune` | записи відсікання, захист покупців, граф без хабів | `prune_hubs(graph, config, *, ingest_counterparty_threshold) -> PruneOutcome` | `hubs.criteria`, `graph.model` |
 | `hubs.report` | знімки до/після, попередження | `effect_report(before, after, config, *, lists_applied, delegated_complete) -> EffectReport` | `graph.components`, `graph.model` |
 | `graph.service` | публічний вхід | `GraphService(config).analyze(result) -> GraphResult` | усе вище |

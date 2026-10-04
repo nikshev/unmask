@@ -178,7 +178,7 @@ FundingGraph(nodes: tuple[Node, …], edges: tuple[Edge, …])
 | Поле | Тип | Правило |
 |---|---|---|
 | `address` | str | не покупець |
-| `criteria` | tuple[`CriterionHit`, …] | **непорожній** (SC-002), упорядкований за `criterion` |
+| `criteria` | tuple[`CriterionHit`, …] | **непорожній** (SC-002), упорядкований за `(criterion, detail)`; до 6 хітів (два незалежні джерела `known_list`) |
 | `incident_edges` | tuple[`Edge`, …] | усі ребра графа з цією вершиною на будь-якому кінці |
 | `measures` | `NodeMeasures` | виміри вершини на момент рішення |
 | `config_version` | int | `HubThresholds.version` |

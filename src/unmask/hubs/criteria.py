@@ -1,10 +1,10 @@
 # impl: FR-002-07, FR-002-14, FR-002-22
-"""Критерії хаба й правило порогу (принцип VI; contracts/graph-service.md §4; research R-9, R-22).
+"""Критерії хаба й правило порогу (принцип VI; contracts/graph-service.md §4; research R-9, R-11, R-15, R-22).
 
 `evaluate(node, config, *, ingest_counterparty_threshold) -> tuple[CriterionHit, ...]` — усі спрацьовані критерії
 вершини (порожній кортеж — не хаб), незалежно від того, чи вершина покупець: захист покупців — у `hubs.prune`
-(FR-002-10). Чиста функція: лише читає `node.measures` і пороги `config.thresholds`; констант порогів у коді немає
-(принцип III).
+(FR-002-10). Чиста функція: лише читає вершину (`measures`, `address`, `address_type`, `unexpanded`), пороги,
+перемикачі й списки `config`; констант порогів у коді немає (принцип III).
 
 Правило порогу (FR-002-14, R-9) — спільне для всіх критеріїв: **рівно поріг ніколи не спрацьовує, нерівність
 строга**; напрямок — властивість критерію (R-22). Тут реалізовано:
@@ -16,14 +16,24 @@
   `median_to_buyers < dust_amount_lamports` (строго менше: мало — пил). `buyer_fanout == 0` (`median_to_buyers is
   None`) — не застосовний. Перемикача немає: вимкнення — `dust_amount_lamports: 1` (медіана суми ребра ≥ 1).
 
+Критерії-джерела (T-034):
+
+- `ingest_high_degree` (R-15) — `prune_ingest_high_degree` і `unexpanded.reason == high_degree`;
+  `measured = counterparties_seen`, `threshold = ingest_counterparty_threshold` (метадані збору 001),
+  `detail = unexpanded:high_degree`. `signature_cap` — ніколи. Позначка `high_degree` з `counterparties_seen <=
+  threshold` суперечить збору 001 → `GraphInputError` (незалежно від перемикача);
+- `known_list` за списком (R-11) — `config.lists` не `None` і адреса в `lists.index`; `detail = list:<category>`,
+  `lists_version = lists.version`. `lists=None` вимикає лише цей критерій (FR-002-12);
+- `known_list` за типом (R-11) — `prune_off_curve` і `node.address_type == off_curve` (тип — з вершини, без
+  перерахунку); `detail = address_type:off_curve`, без `lists_version`.
+
 Правило закодоване в типі: `CriterionHit` на порозі (чи по «неправильний» бік від нього) не конструюється —
 `degree`/`one_off_senders`/`ingest_high_degree` ⇒ `measured > threshold`; `dust_fanout` ⇒ `measured < threshold`
-(T-057). Критерії-джерела `known_list` (список / PDA) та `ingest_high_degree` у
-`evaluate` додає T-034; форма їхніх хітів (data-model `CriterionHit`) перевіряється вже тут.
+(T-057); форма хітів `known_list` (data-model `CriterionHit`) теж перевіряється в типі.
 
 Хіти впорядковані за рядком `criterion` (`degree < dust_fanout < ingest_high_degree < known_list <
-one_off_senders`). Залежності: `graph.model`, `hubs.config` (plan «Правило залежностей»; `graph.*` не імпортує
-`hubs.*`, тож циклу немає).
+one_off_senders`), нічия двох джерел `known_list` — за `detail`. Залежності: `graph.model`, `hubs.config`,
+`ingest.model` (переліки; plan «Правило залежностей»; `graph.*` не імпортує `hubs.*`, тож циклу немає).
 """
 
 from __future__ import annotations
@@ -31,8 +41,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from unmask.graph.model import HubCriterion, Node
+from unmask.graph.model import GraphInputError, HubCriterion, Node, UnexpandedMark
 from unmask.hubs.config import ADDRESS_CATEGORIES, HubConfig
+from unmask.ingest.model import AddressType, UnexpandedReason
 
 __all__ = ["CriterionHit", "evaluate"]
 
@@ -146,15 +157,38 @@ class CriterionHit:
             raise ValueError(f"criterion_hit: known_list detail must be 'list:<category>' or {DETAIL_OFF_CURVE!r}")
 
 
-def _sort_key(hit: CriterionHit) -> str:
-    return hit.criterion.value
+def _sort_key(hit: CriterionHit) -> tuple[str, str]:
+    # Нічия можлива лише у двох джерел `known_list` (адреса зі списку, що ще й поза кривою): `detail` її розв'язує
+    # детерміновано (`address_type:off_curve < list:<category>`), як оракул генератора фікстур.
+    return hit.criterion.value, hit.detail
+
+
+def _ingest_mark(node: Node, threshold: int) -> UnexpandedMark | None:
+    """Позначка збору `high_degree` вершини, звірена з порогом збору; `None` — позначки немає (або `signature_cap`).
+
+    Збір 001 позначає `high_degree` лише понад поріг (`counterparties_seen == threshold + 1`, `ingest/funding.py`),
+    тож `counterparties_seen <= threshold` — порушення контракту 001 на вході (вручну складений `ingest.json` або
+    не той `ingest_counterparty_threshold` у виклику), а не дані мережі. Це `GraphInputError` тут, на межі, де
+    позначка зустрічає метадані збору, — не голий `ValueError` з `CriterionHit` (той стереже власний інваріант
+    типу для всіх критеріїв). Перевіряється незалежно від перемикача: вимкнений критерій не ховає дефект входу.
+    """
+    mark = node.unexpanded
+    if mark is None or mark.reason is not UnexpandedReason.HIGH_DEGREE:
+        return None
+    if not mark.counterparties_seen > threshold:
+        raise GraphInputError(
+            f"node {node.address}: unexpanded high_degree mark with counterparties_seen={mark.counterparties_seen} "
+            f"not above the ingest counterparty threshold={threshold}; collection 001 marks high_degree only above "
+            "it (inconsistent ingest result or wrong ingest_counterparty_threshold)"
+        )
+    return mark
 
 
 def evaluate(node: Node, config: HubConfig, *, ingest_counterparty_threshold: int) -> tuple[CriterionHit, ...]:
     """Усі спрацьовані критерії вершини, упорядковані за рядком `criterion`; `()` — не хаб.
 
     `ingest_counterparty_threshold` — `metadata.counterparty_threshold` збору 001 (int ≥ 1); поріг хіта
-    `ingest_high_degree` (критерій додає T-034).
+    `ingest_high_degree`. Позначка `high_degree`, що йому суперечить, → `GraphInputError`.
     """
     if not isinstance(node, Node):
         raise TypeError(f"evaluate: expected Node, got {type(node).__name__}")
@@ -195,5 +229,25 @@ def evaluate(node: Node, config: HubConfig, *, ingest_counterparty_threshold: in
         and m.median_to_buyers < t.dust_amount_lamports
     ):
         hits.append(CriterionHit(HubCriterion.DUST_FANOUT, m.median_to_buyers, t.dust_amount_lamports, MEASURED, None))
+
+    # Позначена збором (R-15): лише `high_degree`; `signature_cap` — ніколи (довга історія ≠ багато контрагентів).
+    # Поріг — `metadata.counterparty_threshold` збору 001 (аргумент), не конфіг відсікання.
+    mark = _ingest_mark(node, ingest_counterparty_threshold)
+    if mark is not None and t.prune_ingest_high_degree:
+        hits.append(CriterionHit(HubCriterion.INGEST_HIGH_DEGREE, mark.counterparties_seen,
+                                 ingest_counterparty_threshold, DETAIL_HIGH_DEGREE, None))
+
+    # Відомий список (R-11): лише коли списки завантажено; `lists=None` — «списки не застосовано» (FR-002-12,
+    # попередження — у звіті), а не «хабів немає». Адреса належить щонайбільше одній категорії (завантажувач
+    # відхиляє дублі між категоріями).
+    lists = config.lists
+    if lists is not None:
+        category = lists.index.get(node.address)
+        if category is not None:
+            hits.append(CriterionHit(HubCriterion.KNOWN_LIST, None, None, _LIST_PREFIX + category, lists.version))
+
+    # PDA (R-11): тип адреси — з вершини (дають `ingest`/`build`), без перерахунку тут.
+    if t.prune_off_curve and node.address_type is AddressType.OFF_CURVE:
+        hits.append(CriterionHit(HubCriterion.KNOWN_LIST, None, None, DETAIL_OFF_CURVE, None))
 
     return tuple(sorted(hits, key=_sort_key))

@@ -68,7 +68,7 @@ evaluate(node: Node, config: HubConfig, *, ingest_counterparty_threshold: int) -
 | `ingest_high_degree` | `prune_ingest_high_degree` і `node.unexpanded.reason == high_degree` | `counterparties_seen` / `ingest_counterparty_threshold` / `unexpanded:high_degree` |
 | `dust_fanout` (FR-002-22, R-22) | `buyer_fanout >= dust_min_fanout` **і** `median_to_buyers < dust_amount_lamports` | `median_to_buyers` (int, лампорти) / `dust_amount_lamports` / `measured`; передумова видима через `measures.buyer_fanout` запису |
 
-Правило порогу (FR-002-14): **рівно поріг ніколи не спрацьовує, нерівність строга**. Напрямок — властивість критерію: `degree`, `one_off_senders` — строго більше (багато — хаб); `dust_fanout` — строго менше (мало — пил). `one_off_min_senders` і `dust_min_fanout` — передумови (включно). `signature_cap` критерієм не є. Хіти впорядковані за рядком `criterion`: `degree < dust_fanout < ingest_high_degree < known_list < one_off_senders`; вершина може мати 1…5 хітів.
+Правило порогу (FR-002-14): **рівно поріг ніколи не спрацьовує, нерівність строга**. Напрямок — властивість критерію: `degree`, `one_off_senders` — строго більше (багато — хаб); `dust_fanout` — строго менше (мало — пил). `one_off_min_senders` і `dust_min_fanout` — передумови (включно). `signature_cap` критерієм не є. Хіти впорядковані за `(criterion, detail)`: `degree < dust_fanout < ingest_high_degree < known_list < one_off_senders`, а два хіти `known_list` (за списком і за `address_type:off_curve`) — за `detail`; вершина може мати 1…6 хітів (до п'яти різних критеріїв, `known_list` — з двох незалежних джерел).
 
 ## 5. `unmask.hubs.prune` — відсікання (FR-002-09, FR-002-10)
 
