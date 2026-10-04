@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **37** · задач: **52** (виконано 26) · вимог у роботі: **21** · порушень: **0**
+Вимог: **37** · задач: **53** (виконано 26) · вимог у роботі: **23** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -22,8 +22,8 @@
 | `FR-001-12` | Система MUST кешувати повний результат за адресою токена; повторний запит MUST віддаватися з кешу без звернень | `T-017`, `T-018` | `src/unmask/ingest/service.py`, `src/unmask/ingest/cache.py` | `tests/test_cache.py` |
 | `FR-001-13` | Неповний результат MUST NOT потрапляти в кеш як остаточний; повторний запит MUST домагатися лише відсутніх дан | `T-014`, `T-017`, `T-018`, `T-022`, `T-052` | `src/unmask/ingest/collector.py`, `src/unmask/ingest/service.py`, `src/unmask/ingest/funding.py`, `src/unmask/ingest/buyers.py`, `src/unmask/ingest/cache.py`, `src/unmask/ingest/config.py` | `tests/test_resume.py`, `tests/test_tx_batch_size.py`, `tests/test_scan_memo.py` |
 | `FR-001-14` | Результат MUST містити метадані: адресу токена, час аналізу, кількість покупців у вибірці, використані значенн | `T-002`, `T-003`, `T-014`, `T-020` | `src/unmask/ingest/serialize.py`, `src/unmask/ingest/collector.py`, `src/unmask/ingest/model.py`, `src/unmask/ingest/config.py` | `tests/test_config.py`, `tests/test_collector.py`, `tests/test_serialize_contract.py` |
-| `FR-001-15` | Доступ до зовнішнього джерела даних MUST бути прихований за інтерфейсом, що дозволяє підставити записані фікст | `T-001`, `T-004`, `T-005`, `T-021`, `T-049` | `src/unmask/ingest/rpc/fixture.py`, `src/unmask/ingest/rpc/protocol.py`, `src/unmask/ingest/rpc/http.py` | `tests/test_rpc_http.py`, `tests/test_fixture_builder.py`, `tests/test_rpc_fixture.py`, `tests/test_no_network.py` |
-| `FR-001-16` | Збір MUST вкладатися в налаштований бюджет часу (за замовчуванням 40 с із 60 с на весь холодний запит); при ви | `T-002`, `T-004`, `T-014`, `T-015`, `T-051`, `T-052` | `src/unmask/ingest/collector.py`, `src/unmask/ingest/funding.py`, `src/unmask/ingest/buyers.py`, `src/unmask/ingest/budget.py`, `src/unmask/ingest/config.py`, `src/unmask/ingest/rpc/protocol.py`, `src/unmask/ingest/rpc/http.py` | `tests/test_rpc_http.py`, `tests/test_tx_batch_size.py`, `tests/test_config.py`, `tests/test_budget.py` |
+| `FR-001-15` | Доступ до зовнішнього джерела даних MUST бути прихований за інтерфейсом, що дозволяє підставити записані фікст | `T-001`, `T-004`, `T-005`, `T-021`, `T-049`, `T-053` | `src/unmask/ingest/rpc/fixture.py`, `src/unmask/ingest/rpc/protocol.py`, `src/unmask/ingest/rpc/http.py` | `tests/test_rpc_http.py`, `tests/test_fixture_builder.py`, `tests/test_rpc_fixture.py`, `tests/test_no_network.py` |
+| `FR-001-16` | Збір MUST вкладатися в налаштований бюджет часу (за замовчуванням 40 с із 60 с на весь холодний запит); при ви | `T-002`, `T-004`, `T-014`, `T-015`, `T-051`, `T-052`, `T-053` | `src/unmask/ingest/collector.py`, `src/unmask/ingest/funding.py`, `src/unmask/ingest/buyers.py`, `src/unmask/ingest/budget.py`, `src/unmask/ingest/config.py`, `src/unmask/ingest/rpc/protocol.py`, `src/unmask/ingest/rpc/http.py` | `tests/test_rpc_http.py`, `tests/test_tx_batch_size.py`, `tests/test_config.py`, `tests/test_budget.py` |
 
 ## 002-funding-graph-hub-pruning
 
@@ -71,6 +71,7 @@
 - `T-050` (001-onchain-data-ingest) — виконано
 - `T-051` (001-onchain-data-ingest) — виконано
 - `T-052` (001-onchain-data-ingest) — виконано
+- `T-053` (001-onchain-data-ingest) — у роботі
 - `T-024` (002-funding-graph-hub-pruning) — у роботі
 - `T-025` (002-funding-graph-hub-pruning) — у роботі
 - `T-027` (002-funding-graph-hub-pruning) — у роботі
