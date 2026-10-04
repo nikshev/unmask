@@ -2,7 +2,7 @@
 """Генератор синтетичних сценаріїв у формі відповідей Solana JSON-RPC.
 
 Запуск: `uv run python tests/fixtures/build_fixtures.py [--check]` (без аргументів перезаписує
-`tests/fixtures/scenarios/{basic,hub,corrupt,notfound}`; `--check` лише порівнює з диском).
+`tests/fixtures/scenarios/{basic,hub,corrupt,notfound,swapsend}`; `--check` лише порівнює з диском).
 
 Принципи
 --------
@@ -453,6 +453,36 @@ class Launch:
         tx.add(tx.program_call(self.dex, [buyer, ata, self.vault, self.pool, self.pool_ata, self.mint], inner))
         tx.finish()
 
+    def schedule_buy_for(self, label: str, slot: int, payer: str, receiver: str, lamports: int, tokens: int) -> None:
+        """Делегована купівля (swap-and-send, FR-002-15): платить `payer`, токен отримує `receiver`."""
+        self.schedule_multi_buy_for(label, slot, [(payer, lamports)], [(receiver, tokens)])
+
+    def schedule_multi_buy_for(self, label: str, slot: int, payers: list[tuple[str, int]],
+                               receivers: list[tuple[str, int]]) -> None:
+        """Одна транзакція з кількома платниками `(адреса, лампорти)` і отримувачами `(адреса, токени)`."""
+        self.w.at(slot, self._buy_for, label, slot, list(payers), list(receivers))
+
+    def _buy_for(self, label: str, slot: int, payers: list[tuple[str, int]],
+                 receivers: list[tuple[str, int]]) -> None:
+        """Перший платник — fee payer; він створює й оплачує ATA усіх отримувачів. Усі платники — підписанти
+        й переказують SOL у `vault`; отримувачі не підписують, не платять і не мають токена до транзакції."""
+        assert payers and receivers
+        lead = payers[0][0]
+        tx = Tx(self.w, label, slot, lead)
+        for payer, _ in payers[1:]:
+            tx.signers.append(payer)
+            tx._touch(payer)
+        atas = [ata_address(receiver, self.mint) for receiver, _ in receivers]
+        for receiver, _ in receivers:
+            tx.add(tx.ata_create(lead, receiver, self.mint))
+        for payer, lamports in payers:
+            tx.add(tx.sys_transfer(payer, self.vault, lamports))
+        inner = [tx.token_transfer(self.pool_ata, ata, self.pool, tokens, mint=self.mint)
+                 for ata, (_, tokens) in zip(atas, receivers)]
+        accounts = [p for p, _ in payers] + atas + [self.vault, self.pool, self.pool_ata, self.mint]
+        tx.add(tx.program_call(self.dex, accounts, inner))
+        tx.finish()
+
     def schedule_airdrop(self, slot: int, recipient: str, amount: int) -> None:
         self.w.at(slot, self._airdrop, slot, recipient, amount)
 
@@ -857,6 +887,119 @@ def build_notfound() -> dict:
 
 
 # ---------------------------------------------------------------------------------------
+# Сценарій swapsend (фіча 002, FR-002-15, FR-002-16): делегована купівля
+# ---------------------------------------------------------------------------------------
+
+# Усі події — до слота 3-го покупця (P3, слот 200): вікно «перших N» (N=3) їх бачить.
+SWAPSEND_CONFIG = {
+    "first_buyers_n": 3, "funding_depth": 3, "counterparty_threshold": 200,
+    "max_signatures_per_wallet": 300, "collect_spl_inbound": True,
+}
+SWAPSEND_BUYS = [
+    {"label": "buy_P1", "wallet": "P1", "slot": 100, "spent_sol": 600_000_000, "received": 4_000_000_000},
+    {"label": "buy_P2", "wallet": "P2", "slot": 110, "spent_sol": 400_000_000, "received": 2_500_000_000},
+    {"label": "buy_P3", "wallet": "P3", "slot": 200, "spent_sol": 300_000_000, "received": 1_500_000_000},
+]
+# делегована купівля: A платить 2 SOL, B отримує токен (A і B — не покупці)
+SWAPSEND_DELEGATED = {"label": "delegated_A_B", "slot": 120, "payer": "A", "receiver": "B",
+                      "lamports": 2 * SOL, "tokens": 3_000_000_000}
+# неоднозначні: (мітка, слот, [(платник, лампорти)], [(отримувач, токени)])
+SWAPSEND_AMBIGUOUS = [
+    ("multi_2x2", 130, [("C1", 1 * SOL), ("C2", SOL // 2)], [("D1", 700_000_000), ("D2", 300_000_000)]),
+    ("multi_1x2", 140, [("E", 1 * SOL)], [("F1", 400_000_000), ("F2", 600_000_000)]),
+]
+
+
+def delegated_link_record(w: World, label: str, payer: str, receiver: str) -> dict:
+    sig, slot = w.labels[label]
+    return {"signature": sig, "slot": slot, "block_time": BASE_TIME + slot,
+            "payer": w.cast[payer], "receiver": w.cast[receiver]}
+
+
+def unpaired_records(w: World, label: str, payers: list[str], receivers: list[str]) -> list[dict]:
+    """По одному кандидату на кожного учасника неоднозначної транзакції (research R-2: нічого не вгадується)."""
+    sig, slot = w.labels[label]
+    detail = f"payers={len(payers)} receivers={len(receivers)}"
+    return [{"signature": sig, "slot": slot, "block_time": BASE_TIME + slot, "wallet": w.cast[name],
+             "side": side, "detail": detail}
+            for side, names in (("payer", payers), ("receiver", receivers)) for name in names]
+
+
+def build_swapsend() -> tuple[dict, dict]:
+    w = World("swapsend", "Делегована купівля (swap-and-send): A платить, B отримує токен; три звичайні купівлі P1-P3; "
+                          "ейрдроп творця; створення (mintTo); транзакції 2 платники x 2 отримувачі та 1 x 2 "
+                          "(кандидати без пари).")
+    dex = w.program("DEX")
+    mint = w.mint("M", 6)
+    creator = w.wallet("CREATOR", lamports=10 * SOL)
+    pool = w.pda("POOL", [b"pool", bytes(Pubkey.from_string(mint))], dex, lamports=50 * SOL)
+    vault = w.wallet("SOL_VAULT", lamports=1 * SOL)
+    launch = Launch(w, mint=mint, dex=dex, creator=creator, pool=pool, vault=vault)
+    c = w.cast
+    for label in ("P1", "P2", "P3"):
+        w.wallet(label, lamports=2 * SOL)
+    for label in ("A", "C1", "C2", "E"):
+        w.wallet(label, lamports=5 * SOL)
+    for label in ("B", "D1", "D2", "F1", "F2", "AIR"):  # свіжі гаманці без SOL
+        w.wallet(label)
+    c["POOL_ATA"] = launch.pool_ata
+
+    launch.schedule_creation(10, 1_000_000_000_000, 900_000_000_000)
+    launch.schedule_airdrop(12, c["AIR"], 5_000_000_000)
+    for b in SWAPSEND_BUYS:
+        launch.schedule_buy(b["label"], b["slot"], c[b["wallet"]], b["spent_sol"], b["received"])
+    d = SWAPSEND_DELEGATED
+    launch.schedule_buy_for(d["label"], d["slot"], c[d["payer"]], c[d["receiver"]], d["lamports"], d["tokens"])
+    for label, slot, payers, receivers in SWAPSEND_AMBIGUOUS:
+        launch.schedule_multi_buy_for(label, slot, [(c[n], v) for n, v in payers], [(c[n], v) for n, v in receivers])
+    w.run()
+
+    buy_programs = [ATA_PROGRAM, SYSTEM, dex]
+    buys = [dict(b, programs=buy_programs) for b in SWAPSEND_BUYS]
+    unpaired = []
+    for label, _, payers, receivers in SWAPSEND_AMBIGUOUS:
+        unpaired += unpaired_records(w, label, [n for n, _ in payers], [n for n, _ in receivers])
+    unpaired.sort(key=lambda r: (r["slot"], r["signature"], r["wallet"], r["side"]))
+    no_link = [
+        excluded_record(w, "create_mint", "mint_to_creation",
+                        "створення: mintTo творцю й пулу, рента й комісія — творця; платників без токена немає"),
+        excluded_record(w, f"airdrop_{c['AIR'][:6]}", "airdrop_creator_pays_rent",
+                        "ейрдроп творця: отримувач нічого не витратив, але творець віддав токен (Δ<0) і платив лише "
+                        "комісію й ренту ATA — платника немає"),
+    ] + [excluded_record(w, b["label"], "ordinary_purchase",
+                         f"{b['wallet']} отримав токен і сам заплатив: покупець, ні платник, ні отримувач")
+         for b in SWAPSEND_BUYS]
+    no_link.sort(key=lambda r: (r["slot"], r["signature"]))
+
+    expected = {
+        "scenario": "swapsend",
+        "description": w.description,
+        "mint": launch.mint,
+        "wallets": w.cast,
+        "config": SWAPSEND_CONFIG,
+        "rules": {
+            "delegated_buy": "платник P: Δ(mint)==0 і витратив (SOL понад комісію й ренту створених ним рахунків, "
+                             "або від'ємна дельта іншого токена); отримувач R: Δ(mint)>0 і нічого не витратив; "
+                             "|P|==1 і |R|==1 -> links; обидві сторони непорожні й не 1:1 -> unpaired (кожен "
+                             "учасник, detail 'payers=<p> receivers=<r>'); одна сторона порожня -> нічого (no_link)",
+            "window": "усе до слота 3-го покупця (P3): вікно перших N=3; покупці — лише P1..P3 (B, D*, F*, AIR "
+                      "токен отримали, але не платили -> не покупці; A, C*, E платили без токена -> не покупці)",
+        },
+        "completeness": {"status": "complete", "missing": [], "buyers_complete": True},
+        "buyers": buyer_records(w, buys),
+        "transfers": [],
+        "unexpanded": [],
+        "excluded": [],
+        "delegated": {
+            "links": [delegated_link_record(w, d["label"], d["payer"], d["receiver"])],
+            "unpaired": unpaired,
+            "no_link": no_link,
+        },
+    }
+    return w.rpc_document(), expected
+
+
+# ---------------------------------------------------------------------------------------
 # Серіалізація й запис
 # ---------------------------------------------------------------------------------------
 
@@ -910,8 +1053,21 @@ def build_all() -> dict[str, str]:
     }
 
 
+def build_extended() -> dict[str, str]:
+    """`build_all()` (контракт 001: рівно чотири сценарії, байти не змінюються) + сценарії фічі 002.
+
+    `build_all` навмисно не поповнюється: тест 001 перевіряє точний склад його ключів.
+    """
+    swap_rpc, swap_expected = build_swapsend()
+    return {
+        **build_all(),
+        "swapsend/rpc.json": dump_pretty(swap_rpc),
+        "swapsend/expected.json": dump_pretty(swap_expected),
+    }
+
+
 def main(argv: list[str]) -> int:
-    built = build_all()
+    built = build_extended()
     stale = []
     for rel, text in built.items():
         path = SCENARIOS_DIR / rel

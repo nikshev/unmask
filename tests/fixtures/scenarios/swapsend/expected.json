@@ -1,0 +1,208 @@
+{
+  "scenario": "swapsend",
+  "description": "Делегована купівля (swap-and-send): A платить, B отримує токен; три звичайні купівлі P1-P3; ейрдроп творця; створення (mintTo); транзакції 2 платники x 2 отримувачі та 1 x 2 (кандидати без пари).",
+  "mint": "CPhVqEuHVkgVtz7bMKcEYQUhDkCtNu6tQm8JWUrcgB5y",
+  "wallets": {
+    "DEX": "BkiouChT52xpD7ViikyTpQDbpsiZpTcYbru6q8RSX1Wr",
+    "M": "CPhVqEuHVkgVtz7bMKcEYQUhDkCtNu6tQm8JWUrcgB5y",
+    "CREATOR": "8KMnupsmaJFnKkrumhra4iizjde7hMi18XtGnhjkqFPA",
+    "POOL": "3p72KWG8EnzeABmUNfhdpTuY5r8vwPTTUaLNJ6eHvKqT",
+    "SOL_VAULT": "Bw9TgJwWg1CnmCz2QDcDV2AruLpSih2W1YkTiMQm8wnA",
+    "P1": "BX75EGSU8xaTnassaMFAyz9TbrAim6wG8DKEpYBcVEWT",
+    "P2": "EVat9dEkYaZ9y2WAp7215UcmsiijWy9Keqevmeovn5Xt",
+    "P3": "nqfQn7HS2cxvNRxZrJTXtAuUacLa7iPCkTZF8AL6xsh",
+    "A": "tBK2nY8XTpgBwzCdWf4EzRGm2Juy5kZS6G1ddRa6fPe",
+    "C1": "6QZt9pMdwBKbjwx7v5g24Ui1SjLk7by7TkFZa8rb4vkk",
+    "C2": "6JF8RGrhHbv6hq7ZP72q1eph1YuZaMPC3PUT21EzFFep",
+    "E": "GXESUjuxttptzemfzsWxVZJTA6Hb11iNatTAV2Yoomz9",
+    "B": "DFojzLzjthmqZ8DbdG9Psh4cReSbLufHrE4ugEYGfCcJ",
+    "D1": "D3xCNCb7GPxP6s9b5N2wszMnGAhuz3DL5BWTTHwp2Vv9",
+    "D2": "3TyfoyDsZ93KmoYLq7Z6ztTFD1axfVfHqF8gWHmZ8KJr",
+    "F1": "4T6JFJJg5TAowwCFTDbdotWbgV1hJEVNcb29MTpYMvM6",
+    "F2": "AJJuhQbCDdiBx3tTpQdmJx8oFEqzPm7p6osujatwaabU",
+    "AIR": "FWgpPWrZYZjUuYo9LQ3uDMfCdLRL3i1vfz8D6U1gSGHD",
+    "POOL_ATA": "FtjV184o84SxzYiPRcqcPeq1pLH7cYLvJomrBSQCHMje"
+  },
+  "config": {
+    "first_buyers_n": 3,
+    "funding_depth": 3,
+    "counterparty_threshold": 200,
+    "max_signatures_per_wallet": 300,
+    "collect_spl_inbound": true
+  },
+  "rules": {
+    "delegated_buy": "платник P: Δ(mint)==0 і витратив (SOL понад комісію й ренту створених ним рахунків, або від'ємна дельта іншого токена); отримувач R: Δ(mint)>0 і нічого не витратив; |P|==1 і |R|==1 -> links; обидві сторони непорожні й не 1:1 -> unpaired (кожен учасник, detail 'payers=<p> receivers=<r>'); одна сторона порожня -> нічого (no_link)",
+    "window": "усе до слота 3-го покупця (P3): вікно перших N=3; покупці — лише P1..P3 (B, D*, F*, AIR токен отримали, але не платили -> не покупці; A, C*, E платили без токена -> не покупці)"
+  },
+  "completeness": {
+    "status": "complete",
+    "missing": [],
+    "buyers_complete": true
+  },
+  "buyers": [
+    {
+      "wallet": "BX75EGSU8xaTnassaMFAyz9TbrAim6wG8DKEpYBcVEWT",
+      "rank": 1,
+      "first_buy_signature": "5amaSdTpREynH7Q2iMwQEmeie67NRmKmssnjBbtjC2SewvAoLGiAy2etnujVqgyNPoHAMKer7H28XeBEa9Tqdppu",
+      "first_buy_slot": 100,
+      "first_buy_time": 1759400100,
+      "received_amount": 4000000000,
+      "spent": [
+        {
+          "asset": "sol",
+          "amount": 600000000
+        }
+      ],
+      "programs": [
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "11111111111111111111111111111111",
+        "BkiouChT52xpD7ViikyTpQDbpsiZpTcYbru6q8RSX1Wr"
+      ],
+      "address_type": "wallet"
+    },
+    {
+      "wallet": "EVat9dEkYaZ9y2WAp7215UcmsiijWy9Keqevmeovn5Xt",
+      "rank": 2,
+      "first_buy_signature": "24sqWFN9ZXA4RN1jz2GkiC9eF2tYRc6n9vDttoQ3C8noFWc6TtvNVGL7MaH5veTXcGrYP6LRFj1TJPdnMvS9WCv5",
+      "first_buy_slot": 110,
+      "first_buy_time": 1759400110,
+      "received_amount": 2500000000,
+      "spent": [
+        {
+          "asset": "sol",
+          "amount": 400000000
+        }
+      ],
+      "programs": [
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "11111111111111111111111111111111",
+        "BkiouChT52xpD7ViikyTpQDbpsiZpTcYbru6q8RSX1Wr"
+      ],
+      "address_type": "wallet"
+    },
+    {
+      "wallet": "nqfQn7HS2cxvNRxZrJTXtAuUacLa7iPCkTZF8AL6xsh",
+      "rank": 3,
+      "first_buy_signature": "5smCyheXUJsJNDHjDUKJfyBytTT2WzzJRZ9hF4JVPQxZfvy8ufYvPjhXU82uMR47BakxvYzMPdGU8E6DQUW3N7tf",
+      "first_buy_slot": 200,
+      "first_buy_time": 1759400200,
+      "received_amount": 1500000000,
+      "spent": [
+        {
+          "asset": "sol",
+          "amount": 300000000
+        }
+      ],
+      "programs": [
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "11111111111111111111111111111111",
+        "BkiouChT52xpD7ViikyTpQDbpsiZpTcYbru6q8RSX1Wr"
+      ],
+      "address_type": "wallet"
+    }
+  ],
+  "transfers": [],
+  "unexpanded": [],
+  "excluded": [],
+  "delegated": {
+    "links": [
+      {
+        "signature": "AgU6Cm91RvLAAXxT6a1dV9pV6cuSPMrUYv7AxbuHgZeRubNVsZLoPSGbErNQfacVFy9B262QwfJHCUU8D55BHWK",
+        "slot": 120,
+        "block_time": 1759400120,
+        "payer": "tBK2nY8XTpgBwzCdWf4EzRGm2Juy5kZS6G1ddRa6fPe",
+        "receiver": "DFojzLzjthmqZ8DbdG9Psh4cReSbLufHrE4ugEYGfCcJ"
+      }
+    ],
+    "unpaired": [
+      {
+        "signature": "2shVZSmkr4HiaroQMgFL5HB2iWEoz7bbUgegEC1GCJqn9HnqN4uCRRuwUfrym5W3nKLsMSHZZNnBME7m6NDSXZkQ",
+        "slot": 130,
+        "block_time": 1759400130,
+        "wallet": "3TyfoyDsZ93KmoYLq7Z6ztTFD1axfVfHqF8gWHmZ8KJr",
+        "side": "receiver",
+        "detail": "payers=2 receivers=2"
+      },
+      {
+        "signature": "2shVZSmkr4HiaroQMgFL5HB2iWEoz7bbUgegEC1GCJqn9HnqN4uCRRuwUfrym5W3nKLsMSHZZNnBME7m6NDSXZkQ",
+        "slot": 130,
+        "block_time": 1759400130,
+        "wallet": "6JF8RGrhHbv6hq7ZP72q1eph1YuZaMPC3PUT21EzFFep",
+        "side": "payer",
+        "detail": "payers=2 receivers=2"
+      },
+      {
+        "signature": "2shVZSmkr4HiaroQMgFL5HB2iWEoz7bbUgegEC1GCJqn9HnqN4uCRRuwUfrym5W3nKLsMSHZZNnBME7m6NDSXZkQ",
+        "slot": 130,
+        "block_time": 1759400130,
+        "wallet": "6QZt9pMdwBKbjwx7v5g24Ui1SjLk7by7TkFZa8rb4vkk",
+        "side": "payer",
+        "detail": "payers=2 receivers=2"
+      },
+      {
+        "signature": "2shVZSmkr4HiaroQMgFL5HB2iWEoz7bbUgegEC1GCJqn9HnqN4uCRRuwUfrym5W3nKLsMSHZZNnBME7m6NDSXZkQ",
+        "slot": 130,
+        "block_time": 1759400130,
+        "wallet": "D3xCNCb7GPxP6s9b5N2wszMnGAhuz3DL5BWTTHwp2Vv9",
+        "side": "receiver",
+        "detail": "payers=2 receivers=2"
+      },
+      {
+        "signature": "4hVTuA9yKDQxQ7qZuh96nRV2UunJzZ8GuQ6DJgsWGqmiKhUdtZi7RQLCLJ62Z6hFH7ygopUNQQsEXpxpArd6ste8",
+        "slot": 140,
+        "block_time": 1759400140,
+        "wallet": "4T6JFJJg5TAowwCFTDbdotWbgV1hJEVNcb29MTpYMvM6",
+        "side": "receiver",
+        "detail": "payers=1 receivers=2"
+      },
+      {
+        "signature": "4hVTuA9yKDQxQ7qZuh96nRV2UunJzZ8GuQ6DJgsWGqmiKhUdtZi7RQLCLJ62Z6hFH7ygopUNQQsEXpxpArd6ste8",
+        "slot": 140,
+        "block_time": 1759400140,
+        "wallet": "AJJuhQbCDdiBx3tTpQdmJx8oFEqzPm7p6osujatwaabU",
+        "side": "receiver",
+        "detail": "payers=1 receivers=2"
+      },
+      {
+        "signature": "4hVTuA9yKDQxQ7qZuh96nRV2UunJzZ8GuQ6DJgsWGqmiKhUdtZi7RQLCLJ62Z6hFH7ygopUNQQsEXpxpArd6ste8",
+        "slot": 140,
+        "block_time": 1759400140,
+        "wallet": "GXESUjuxttptzemfzsWxVZJTA6Hb11iNatTAV2Yoomz9",
+        "side": "payer",
+        "detail": "payers=1 receivers=2"
+      }
+    ],
+    "no_link": [
+      {
+        "signature": "2jfuWPNGJt3ApDGnsGA69uJZJB1G8oEMRPKDj9tSzQpAPeCGYN7qf8UGeobAU7rCP4Nu2AueeSRcgAFU7B3Wjt75",
+        "slot": 10,
+        "reason": "mint_to_creation",
+        "note": "створення: mintTo творцю й пулу, рента й комісія — творця; платників без токена немає"
+      },
+      {
+        "signature": "4fX8XrjaGcnvJWoZzYfewFKu89L6it36WkQzGeTD2dMXGPTtMQrg4MMcbyrTVRjfFwziFBn5uNDHdhkYD5MLUHNC",
+        "slot": 12,
+        "reason": "airdrop_creator_pays_rent",
+        "note": "ейрдроп творця: отримувач нічого не витратив, але творець віддав токен (Δ<0) і платив лише комісію й ренту ATA — платника немає"
+      },
+      {
+        "signature": "5amaSdTpREynH7Q2iMwQEmeie67NRmKmssnjBbtjC2SewvAoLGiAy2etnujVqgyNPoHAMKer7H28XeBEa9Tqdppu",
+        "slot": 100,
+        "reason": "ordinary_purchase",
+        "note": "P1 отримав токен і сам заплатив: покупець, ні платник, ні отримувач"
+      },
+      {
+        "signature": "24sqWFN9ZXA4RN1jz2GkiC9eF2tYRc6n9vDttoQ3C8noFWc6TtvNVGL7MaH5veTXcGrYP6LRFj1TJPdnMvS9WCv5",
+        "slot": 110,
+        "reason": "ordinary_purchase",
+        "note": "P2 отримав токен і сам заплатив: покупець, ні платник, ні отримувач"
+      },
+      {
+        "signature": "5smCyheXUJsJNDHjDUKJfyBytTT2WzzJRZ9hF4JVPQxZfvy8ufYvPjhXU82uMR47BakxvYzMPdGU8E6DQUW3N7tf",
+        "slot": 200,
+        "reason": "ordinary_purchase",
+        "note": "P3 отримав токен і сам заплатив: покупець, ні платник, ні отримувач"
+      }
+    ]
+  }
+}
