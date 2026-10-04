@@ -32,7 +32,7 @@ build_graph(result: IngestResult) -> FundingGraph
 ## 2a. `unmask.graph.measures` — виміри вершин (research R-7, R-8)
 
 ```python
-compute(nodes: Iterable[Node], edges: Iterable[Edge]) -> dict[str, NodeMeasures]
+compute(nodes: Iterable[HasAddressAndRoles], edges: Iterable[Edge]) -> dict[str, NodeMeasures]   # вузол — будь-який обʼєкт з `address` і `roles` (`Node` підходить; `build_graph` викликає до створення `Node`, бо `Node` вимагає `measures`)
 ```
 
 `degree` — унікальні контрагенти (вхідні ∪ вихідні, всі `kind` і активи); `unique_senders` — унікальні відправники вхідних ребер `kind=transfer`; `one_off_senders` — з них із сумарним `count == 1` по всіх активах; `one_off_share = one_off_senders / unique_senders` або `None`. Чиста функція; порядок входу не впливає.
