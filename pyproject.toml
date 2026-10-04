@@ -18,3 +18,7 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    "perf: wall-clock performance tests (SC-007); excluded from the default run, run explicitly with `pytest -m perf` on an idle machine",
+]
+addopts = "-m 'not perf'"
