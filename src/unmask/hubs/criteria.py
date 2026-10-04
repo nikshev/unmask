@@ -1,4 +1,4 @@
-# impl: FR-002-07, FR-002-14
+# impl: FR-002-07, FR-002-14, FR-002-22
 """Критерії хаба й правило порогу (принцип VI; contracts/graph-service.md §4; research R-9, R-22).
 
 `evaluate(node, config, *, ingest_counterparty_threshold) -> tuple[CriterionHit, ...]` — усі спрацьовані критерії
@@ -11,12 +11,14 @@
 
 - `degree` — `measures.degree > degree_threshold`;
 - `one_off_senders` — передумова `unique_senders >= one_off_min_senders` (включно; не поріг хаба) **і**
-  `one_off_share > one_off_senders_share`.
+  `one_off_share > one_off_senders_share`;
+- `dust_fanout` (FR-002-22, R-22) — передумова `buyer_fanout >= dust_min_fanout` (включно) **і**
+  `median_to_buyers < dust_amount_lamports` (строго менше: мало — пил). `buyer_fanout == 0` (`median_to_buyers is
+  None`) — не застосовний. Перемикача немає: вимкнення — `dust_amount_lamports: 1` (медіана суми ребра ≥ 1).
 
 Правило закодоване в типі: `CriterionHit` на порозі (чи по «неправильний» бік від нього) не конструюється —
-`degree`/`one_off_senders`/`ingest_high_degree` ⇒ `measured > threshold`. Напрямок `dust_fanout ⇒ measured <
-threshold` і сам критерій додає T-057; до того хіт `dust_fanout` відхиляється (`ValueError`), щоб жоден код не
-сконструював його без перевірки напрямку. Критерії-джерела `known_list` (список / PDA) та `ingest_high_degree` у
+`degree`/`one_off_senders`/`ingest_high_degree` ⇒ `measured > threshold`; `dust_fanout` ⇒ `measured < threshold`
+(T-057). Критерії-джерела `known_list` (список / PDA) та `ingest_high_degree` у
 `evaluate` додає T-034; форма їхніх хітів (data-model `CriterionHit`) перевіряється вже тут.
 
 Хіти впорядковані за рядком `criterion` (`degree < dust_fanout < ingest_high_degree < known_list <
@@ -45,10 +47,15 @@ _ABOVE: dict[HubCriterion, tuple[type, ...]] = {
     HubCriterion.ONE_OFF_SENDERS: (int, float),
     HubCriterion.INGEST_HIGH_DEGREE: (int,),
 }
+# Критерії з порогом «строго менше» (мало — хаб; R-22) і тип їхнього `measured`/`threshold`.
+_BELOW: dict[HubCriterion, tuple[type, ...]] = {
+    HubCriterion.DUST_FANOUT: (int,),  # медіана сум ребер до покупців і поріг — лампорти
+}
 _DETAIL: dict[HubCriterion, str] = {
     HubCriterion.DEGREE: MEASURED,
     HubCriterion.ONE_OFF_SENDERS: MEASURED,
     HubCriterion.INGEST_HIGH_DEGREE: DETAIL_HIGH_DEGREE,
+    HubCriterion.DUST_FANOUT: MEASURED,
 }
 
 
@@ -85,15 +92,14 @@ class CriterionHit:
 
         if criterion in _ABOVE:
             self._check_above(criterion)
+        elif criterion in _BELOW:
+            self._check_below(criterion)
         elif criterion is HubCriterion.KNOWN_LIST:
             self._check_known_list()
-        else:
-            # dust_fanout: напрямок «строго менше» і сам критерій — T-057 (research R-22). До того хіт не
-            # конструюється взагалі, щоб він не з'явився без перевірки напрямку.
-            raise ValueError(f"criterion_hit: criterion {criterion.value!r} is not supported yet (T-057)")
+        else:  # новий член HubCriterion без правила порогу не конструюється мовчки
+            raise ValueError(f"criterion_hit: criterion {criterion.value!r} has no threshold rule")
 
-    def _check_above(self, criterion: HubCriterion) -> None:
-        types = _ABOVE[criterion]
+    def _check_measured_shape(self, criterion: HubCriterion, types: tuple[type, ...]) -> None:
         _number("measured", self.measured, types)
         _number("threshold", self.threshold, types)
         if self.detail != _DETAIL[criterion]:
@@ -102,10 +108,25 @@ class CriterionHit:
             )
         if self.lists_version is not None:
             raise ValueError(f"criterion_hit: {criterion.value} carries no lists_version")
+
+    def _check_above(self, criterion: HubCriterion) -> None:
+        self._check_measured_shape(criterion, _ABOVE[criterion])
         # `not (a > b)`, а не `a <= b`: NaN теж відхиляється (R-9: спрацювання — лише строго понад поріг).
         if not self.measured > self.threshold:
             raise ValueError(
                 f"criterion_hit: {criterion.value} requires measured > threshold "
+                f"(measured={self.measured!r}, threshold={self.threshold!r}); at threshold is not a hub"
+            )
+
+    def _check_below(self, criterion: HubCriterion) -> None:
+        self._check_measured_shape(criterion, _BELOW[criterion])
+        # Медіана сум ребер — ціле ≥ 1 (інваріант `NodeMeasures.median_to_buyers`).
+        if self.measured < 1:
+            raise ValueError(f"criterion_hit: {criterion.value} requires measured >= 1, got {self.measured!r}")
+        # R-9/R-22: рівно поріг ніколи не спрацьовує; для «пилу» — лише строго нижче порогу.
+        if not self.measured < self.threshold:
+            raise ValueError(
+                f"criterion_hit: {criterion.value} requires measured < threshold "
                 f"(measured={self.measured!r}, threshold={self.threshold!r}); at threshold is not a hub"
             )
 
@@ -164,5 +185,15 @@ def evaluate(node: Node, config: HubConfig, *, ingest_counterparty_threshold: in
         hits.append(
             CriterionHit(HubCriterion.ONE_OFF_SENDERS, m.one_off_share, t.one_off_senders_share, MEASURED, None)
         )
+
+    # Пилове роздавання (FR-002-22, R-22): передумова — кількість різних покупців, яким вершина надіслала SOL
+    # (`buyer_fanout`, не `degree`), включно; поріг — верхня медіана сум цих ребер, строго менше. `median is None`
+    # ⇔ `buyer_fanout == 0` — не застосовний (і за `HubThresholds` у пам'яті з `dust_min_fanout < 2`).
+    if (
+        m.median_to_buyers is not None
+        and m.buyer_fanout >= t.dust_min_fanout
+        and m.median_to_buyers < t.dust_amount_lamports
+    ):
+        hits.append(CriterionHit(HubCriterion.DUST_FANOUT, m.median_to_buyers, t.dust_amount_lamports, MEASURED, None))
 
     return tuple(sorted(hits, key=_sort_key))
