@@ -18,9 +18,17 @@
   своєму кінці — час сусіднього переказу не підставляється, нуль теж;
 - `decimals` — спільні для всіх переказів ребра; розбіжність — `GraphInputError`.
 
-Ребра `delegated_buy` (R-5, FR-002-18) будуються з `result.delegated.links`, яке
-з'являється в контракті 001 з T-044 (T-047); поки цього поля в `IngestResult`
-немає, делегованих ребер нема з чого будувати.
+Ребра `delegated_buy` (T-047; R-5, FR-002-18) — з `result.delegated.links`, окремою
+групою за `(payer, receiver)`, ніколи не в групі переказів тієї ж пари: ключ ребра
+`(delegated_buy, payer, receiver, None)` відрізняється від `(transfer, …, asset)`, а
+суми й докази двох видів не змішуються. `asset`/`amount`/`decimals` — `None` (сума
+невідома, R-5); `count` — кількість зв'язків; `refs` — `(signature, slot, None)` у
+порядку `ref_sort_key`; `first/last_*` — як у переказів (з крайніх refs, `None` не
+підставляється). `delegated.unpaired` у граф не потрапляють (FR-002-16: пару не
+вгадано — це не ребро й не вершина; кандидати лишаються в результаті 001). Граф
+будує ребра з усіх знайдених зв'язків незалежно від повноти аналізу; результат без
+аналізу (`NOT_ANALYZED`) зв'язків не має, тож і ребер. Чи повний аналіз — каже
+`GraphCompleteness.derive`, не граф (принцип V).
 
 Перевірки входу (порушення контракту 001 — дефект, а не дані мережі; гучно,
 до побудови будь-якої частини графа): самопереказ, дубль
@@ -32,9 +40,14 @@
 
 Вершини: `Node` не існує без ролей, глибини, типу адреси, `unexpanded` і вимірів,
 тож граф без них побудувати не можна. Побудова за R-6 (T-028; тести — T-029, T-030):
-покупці ∪ відправники ∪ отримувачі переказів; ролі `buyer`/`funder`; глибина —
+покупці ∪ відправники ∪ отримувачі переказів ∪ платники й отримувачі делегованих
+зв'язків; ролі `buyer`/`funder`/`delegated_payer`/`delegated_receiver`; глибина —
 мінімум за правилами (покупець 0; отримувач переказу <= `depth - 1`; відправник
-<= `depth`); `buyer_rank` з `Buyer.rank`; тип адреси покупця — з 001, решти —
+<= `depth`; отримувач делегованої купівлі <= 0, платник <= 1 — R-6, plan Q5).
+Перевірки контракту переказів 001 («отримувач переказу — покупець або відправник»,
+«не-покупець на рівні покупців») рахуються лише за переказами: делегована роль не
+легалізує порушений переказ, а отримувач делегованої купівлі на глибині 0 —
+законний стан, не суперечність; `buyer_rank` з `Buyer.rank`; тип адреси покупця — з 001, решти —
 `solders.Pubkey.is_on_curve` (без імпорту `unmask.ingest.addresses`, R-6);
 `unexpanded` — копія запису `result.unexpanded` (обидва види, `high_degree` і
 `signature_cap`; FR-002-06) або `None`. Виміри — `graph.measures.compute`
@@ -71,14 +84,14 @@ from unmask.graph.model import (
     UnexpandedMark,
     ref_sort_key,
 )
-from unmask.ingest.model import AddressType, Asset, Buyer, IngestResult, Transfer
+from unmask.ingest.model import AddressType, Asset, Buyer, DelegatedLink, IngestResult, Transfer
 
 
 def build_graph(result: IngestResult) -> FundingGraph:
     """Граф фінансування з результату збору; див. правила в шапці модуля."""
     if not isinstance(result, IngestResult):
         raise TypeError(f"build_graph: expected IngestResult, got {type(result).__name__}")
-    edges = _transfer_edges(result.transfers)
+    edges = _transfer_edges(result.transfers) + _delegated_edges(result.delegated.links)
     protos = _proto_nodes(result)
     measures = compute(protos, edges)
     nodes = tuple(
@@ -138,6 +151,43 @@ def _edge(key: tuple[str, str, Asset], items: list[Transfer]) -> Edge:
     )
 
 
+def _delegated_edges(links: tuple[DelegatedLink, ...]) -> tuple[Edge, ...]:
+    # `DelegatedAnalysis` це вже не пропускає; перевірка навмисно подвійна (R-6).
+    seen: set[str] = set()
+    groups: dict[tuple[str, str], list[DelegatedLink]] = {}
+    for link in links:
+        if link.payer == link.receiver:
+            raise GraphInputError(f"delegated self-link {link.payer} in {link.signature}")
+        if link.signature in seen:
+            raise GraphInputError(f"duplicate delegated link for signature {link.signature}")
+        seen.add(link.signature)
+        groups.setdefault((link.payer, link.receiver), []).append(link)
+    return tuple(_delegated_edge(pair, items) for pair, items in groups.items())
+
+
+def _delegated_edge(pair: tuple[str, str], items: list[DelegatedLink]) -> Edge:
+    payer, receiver = pair
+    ordered = sorted(
+        ((EdgeRef(link.signature, link.slot, None), link.block_time) for link in items),
+        key=lambda item: ref_sort_key(item[0]),
+    )
+    first, last = ordered[0], ordered[-1]
+    return Edge(
+        kind=EdgeKind.DELEGATED_BUY,
+        sender=payer,
+        receiver=receiver,
+        asset=None,
+        amount=None,
+        decimals=None,
+        count=len(ordered),
+        first_slot=first[0].slot,
+        last_slot=last[0].slot,
+        first_time=first[1],
+        last_time=last[1],
+        refs=tuple(ref for ref, _ in ordered),
+    )
+
+
 # --- Вершини (R-6; T-028…T-030) ---------------------------------------------------
 
 
@@ -163,11 +213,20 @@ def _proto_nodes(result: IngestResult) -> tuple[_ProtoNode, ...]:
         if isinstance(rank, bool) or not isinstance(rank, int) or rank < 1:
             raise GraphInputError(f"buyer {b.wallet} has no valid rank: {rank!r}")
         buyers[b.wallet] = b
+    # Глибина за переказами окремо: на ній перевіряється контракт переказів 001.
     depth: dict[str, int] = {wallet: 0 for wallet in buyers}
     funders: set[str] = set()
     for t in result.transfers:
         funders.add(t.sender)
         for address, bound in ((t.receiver, t.depth - 1), (t.sender, t.depth)):
+            depth[address] = min(depth.get(address, bound), bound)
+    transfer_depth = dict(depth)
+    payers: set[str] = set()
+    receivers: set[str] = set()
+    for link in result.delegated.links:
+        payers.add(link.payer)
+        receivers.add(link.receiver)
+        for address, bound in ((link.receiver, 0), (link.payer, 1)):
             depth[address] = min(depth.get(address, bound), bound)
 
     marks: dict[str, UnexpandedMark] = {}
@@ -189,16 +248,20 @@ def _proto_nodes(result: IngestResult) -> tuple[_ProtoNode, ...]:
             roles.add(NodeRole.BUYER)
         if address in funders:
             roles.add(NodeRole.FUNDER)
-        if not roles:
+        if address in transfer_depth and not roles:
             raise GraphInputError(
                 f"{address} receives a transfer but is neither a buyer nor a sender of any transfer: "
                 "node without a role"
             )
-        if buyer is None and depth[address] < 1:
+        if buyer is None and address in transfer_depth and transfer_depth[address] < 1:
             raise GraphInputError(
                 f"contradictory depth: {address} is not a buyer but its depth bound is "
-                f"{depth[address]} (buyer level)"
+                f"{transfer_depth[address]} (buyer level)"
             )
+        if address in payers:
+            roles.add(NodeRole.DELEGATED_PAYER)
+        if address in receivers:
+            roles.add(NodeRole.DELEGATED_RECEIVER)
         protos.append(_ProtoNode(
             address=address,
             roles=frozenset(roles),

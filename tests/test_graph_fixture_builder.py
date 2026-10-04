@@ -36,7 +36,7 @@ SCHEMA = json.loads((ROOT / "specs/001-onchain-data-ingest/contracts/ingest-resu
 VALIDATOR = Draft202012Validator(SCHEMA)
 
 SCENARIOS = ["g_basic", "g_hub", "g_known", "g_buyer_hub", "g_incomplete", "g_empty", "g_all_hubs", "g_unexpanded",
-             "g_dust", "g_financier", "g_dust_mixed"]
+             "g_dust", "g_financier", "g_dust_mixed", "g_delegated"]
 DUST_T = 1_000_000  # dust_amount_lamports у hubs.yaml v2
 THRESHOLD_KEYS = {"degree_threshold", "one_off_senders_share", "one_off_min_senders", "giant_component_warn_share",
                   "prune_off_curve", "prune_ingest_high_degree", "dust_amount_lamports", "dust_min_fanout"}
@@ -78,7 +78,7 @@ def test_build_is_deterministic_and_matches_committed_files(builder):
     assert on_disk == set(first), "на диску є файли, яких генератор не створює (або навпаки)"
 
 
-def test_scenario_list_is_exactly_the_eleven_after_t056(builder):
+def test_scenario_list_is_exactly_the_twelve_after_t047(builder):
     assert list(builder.SCENARIO_NAMES) == SCENARIOS
 
 
@@ -226,7 +226,7 @@ def test_generator_runs_without_unmask_on_the_import_path(tmp_path):
         "import sys, importlib.util;"
         f"spec = importlib.util.spec_from_file_location('g', {str(BUILDER)!r});"
         "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m);"
-        "assert 'unmask' not in sys.modules; assert len(m.build_all()) == 22"
+        "assert 'unmask' not in sys.modules; assert len(m.build_all()) == 24"
     )
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=tmp_path)
     assert done.returncode == 0, done.stderr
@@ -436,7 +436,20 @@ def _recompute(name):
             first_time=ts[0]["block_time"], last_time=ts[-1]["block_time"],
             decimals=ts[0]["decimals"], refs=[(t["signature"], t["slot"], t["instruction_path"]) for t in ts])
 
-    addresses = set(buyers) | {t["sender"] for t in doc["transfers"]} | {t["receiver"] for t in doc["transfers"]}
+    # делеговані купівлі (T-047, R-5): окреме ребро `delegated_buy` за парою (payer, receiver), без активу й суми
+    links = doc["delegated"]["links"]
+    dgroups = defaultdict(list)
+    for link in links:
+        dgroups[(link["payer"], link["receiver"])].append(link)
+    for (s, r), ls in dgroups.items():
+        ls = sorted(ls, key=lambda l: (l["slot"], l["signature"]))
+        edges[("delegated_buy", s, r, None)] = dict(
+            amount=None, count=len(ls), first_slot=ls[0]["slot"], last_slot=ls[-1]["slot"],
+            first_time=ls[0]["block_time"], last_time=ls[-1]["block_time"],
+            decimals=None, refs=[(l["signature"], l["slot"], None) for l in ls])
+
+    addresses = (set(buyers) | {t["sender"] for t in doc["transfers"]} | {t["receiver"] for t in doc["transfers"]}
+                 | {l["payer"] for l in links} | {l["receiver"] for l in links})
 
     # виміри
     measures, dust_sums = {}, {}
@@ -444,7 +457,7 @@ def _recompute(name):
         counterparties = {k[2] for k in edges if k[1] == v} | {k[1] for k in edges if k[2] == v}
         per_sender = Counter()
         for k, e in edges.items():
-            if k[2] == v:
+            if k[2] == v and k[0] == "transfer":  # delegated_buy відправника не робить (R-8)
                 per_sender[k[1]] += e["count"]
         one_off = sum(1 for c in per_sender.values() if c == 1)
         # пил: сума ребра на покупця; верхня медіана стандартною `statistics.median_high` (не `sorted[n // 2]`)
@@ -545,15 +558,25 @@ def test_expected_nodes_and_measures_equal_independent_recount(name):
         if address in r["buyers"]:
             assert n["buyer_rank"] == r["buyers"][address]["rank"] and n["depth"] == 0
         assert n["roles"] == sorted(n["roles"]) and n["roles"]
-    funders = {k[1] for k in r["edges"]}
+    funders = {k[1] for k in r["edges"] if k[0] == "transfer"}
     assert {a for a, n in nodes.items() if "funder" in n["roles"]} == funders
-    # depth: мінімум за правилами R-6, перераховано з переказів входу
+    payers = {k[1] for k in r["edges"] if k[0] == "delegated_buy"}
+    receivers = {k[2] for k in r["edges"] if k[0] == "delegated_buy"}
+    assert {a for a, n in nodes.items() if "delegated_payer" in n["roles"]} == payers
+    assert {a for a, n in nodes.items() if "delegated_receiver" in n["roles"]} == receivers
+    assert all(set(n["roles"]) <= {"buyer", "funder", "delegated_payer", "delegated_receiver"} for n in nodes.values())
+    # depth: мінімум за правилами R-6, перераховано з переказів і делегованих зв'язків входу
     doc = _ingest(name)
     best = {a: (0 if a in r["buyers"] else 99) for a in r["addresses"]}
     for t in doc["transfers"]:
         best[t["receiver"]] = min(best[t["receiver"]], t["depth"] - 1)
         best[t["sender"]] = min(best[t["sender"]], t["depth"])
+    for link in doc["delegated"]["links"]:
+        best[link["receiver"]] = min(best[link["receiver"]], 0)
+        best[link["payer"]] = min(best[link["payer"]], 1)
     assert {a: n["depth"] for a, n in nodes.items()} == best
+    # кандидати без пари вершинами не стають, якщо іншої підстави немає
+    assert not ({u["wallet"] for u in doc["delegated"]["unpaired"]} - r["addresses"]) & set(nodes)
 
 
 @pytest.mark.parametrize("name", SCENARIOS)
@@ -621,7 +644,8 @@ def test_expected_report_equals_independent_union_find(name):
     # граф після відсікання: усі покупці лишаються (SC-003)
     assert set(r["buyers"]) <= set(exp["prune"]["after"]["node_addresses"])
     assert set(exp["prune"]["after"]["node_addresses"]) == r["addresses"] - hubs
-    assert {tuple(k) for k in exp["prune"]["after"]["edge_keys"]} == set(after_edges)
+    # edge_keys у еталоні: [kind, sender, receiver, asset або ""] (у delegated_buy активу немає)
+    assert {tuple(k) for k in exp["prune"]["after"]["edge_keys"]} == {(k, s, r, a or "") for k, s, r, a in after_edges}
     # компоненти: розбиття збігається з union-find
     for side, alive, alive_edges in (("before", r["addresses"], all_edges), ("after", r["addresses"] - hubs, after_edges)):
         listed = exp["components"][side]

@@ -1,5 +1,6 @@
 # trace: ignore-file
-"""Генератор фікстур графа фінансування (фіча 002, T-026; розширено T-056: пил, `dust_fanout`, версія 2).
+"""Генератор фікстур графа фінансування (фіча 002, T-026; розширено T-056: пил, `dust_fanout`, версія 2;
+T-047: делеговані купівлі, сценарій `g_delegated`).
 
 Запуск: `uv run python tests/fixtures/build_graph_fixtures.py [--check]` (без аргументів перезаписує
 `tests/fixtures/graph/<scenario>/{ingest.json, expected.json}`; `--check` лише порівнює з диском і
@@ -52,6 +53,19 @@
   `delegated_incomplete` тут НЕ входить: поле `delegated` у результаті 001 з'явиться з T-044, і
   попередження залежить від нього, а не від графа чи відсікання; сценарій `g_delegated` — T-047.
 
+Делеговані купівлі (T-047; research R-2, R-5, R-6; FR-002-18)
+-------------------------------------------------------------
+* Сценарій оголошує зв'язки `delegated(tx, payer, receiver, slot)` і неоднозначні транзакції
+  `unpaired(tx, slot, payers, receivers)`; `ingest.json` несе їх у `delegated.links`/`delegated.unpaired`
+  (порядок і форма — контракт 001 1.1). Для решти сценаріїв обидва списки порожні — їхні файли не змінюються.
+* Ребро `delegated_buy` = `(payer, receiver)` словником ОКРЕМО від переказів (ніколи не зливається з
+  `transfer` тієї ж пари): `asset`/`amount`/`decimals` = `null`, `count` = кількість зв'язків,
+  `refs` = `(signature, slot, null)` за `(slot, signature)`, `first/last_slot|time` — з крайніх `refs`.
+* Вершини: + платники й отримувачі зв'язків (ролі `delegated_payer`/`delegated_receiver`); глибина —
+  мінімум і з правил делегованих: отримувач <= 0, платник <= 1. Кандидати без пари в граф не потрапляють.
+* Виміри: `delegated_buy` додає контрагента в `degree`, але не відправника в `unique_senders` і не
+  fan-out покупцям (ті самі `oracle_measures`: перевірки `kind == "transfer"`).
+
 Когерентність із збором 001 (research R-3 фічі 001): вершина `high_degree` має рівно
 `counterparty_threshold` зібраних відправників і `counterparties_seen = поріг + 1`; жодна вершина не має
 більше зібраних відправників, ніж поріг. Тому у сценаріях із малою нерозгорнутою вершиною
@@ -74,7 +88,7 @@ OUT_DIR = Path(__file__).parent / "graph"
 
 SCENARIO_NAMES = (
     "g_basic", "g_hub", "g_known", "g_buyer_hub", "g_incomplete", "g_empty", "g_all_hubs", "g_unexpanded",
-    "g_dust", "g_financier", "g_dust_mixed",
+    "g_dust", "g_financier", "g_dust_mixed", "g_delegated",
 )
 
 CONFIG_VERSION = 2  # версія hubs.yaml, за якою складено еталон (v2 = + dust_*; research R-22)
@@ -171,6 +185,8 @@ class Scenario:
         self.transfers: list[dict] = []
         self.unexpanded: list[dict] = []
         self.missing: list[dict] = []
+        self.links: list[dict] = []
+        self.unpaired: list[dict] = []
         self.buyers_complete: tuple[bool, str | None, str] = (True, None, "")
         self.vertices: dict[str, tuple[tuple[str, ...], int]] = {}
         self.hubs: dict[str, tuple[str, ...]] = {}
@@ -205,6 +221,15 @@ class Scenario:
                  asset: str = "sol", decimals: int | None = None) -> None:
         self.transfers.append(dict(tx=tx, path=path, sender=sender, receiver=receiver, slot=slot,
                                    amount=amount, depth=depth, asset=asset, decimals=decimals))
+
+    def delegated(self, tx: str, payer: str, receiver: str, slot: int, *, block_time: int | None | str = "auto") -> None:
+        """Делегована купівля (R-2): `payer` заплатив, `receiver` отримав токен; одна на транзакцію."""
+        self.links.append(dict(tx=tx, payer=payer, receiver=receiver, slot=slot, block_time=block_time))
+
+    def unpaired_tx(self, tx: str, slot: int, payers: tuple[str, ...], receivers: tuple[str, ...]) -> None:
+        """Неоднозначна транзакція (FR-002-16): не 1:1, тож кожен учасник — кандидат без пари."""
+        assert payers and receivers and (len(payers), len(receivers)) != (1, 1)
+        self.unpaired.append(dict(tx=tx, slot=slot, payers=payers, receivers=receivers))
 
     def declare(self, labels, roles: tuple[str, ...], depth: int) -> None:
         for label in labels:
@@ -255,6 +280,24 @@ def build_ingest(s: Scenario) -> dict:
         ({"wallet": s.a(m["wallet"]), "depth": m["depth"], "reason": m["reason"], "detail": m["detail"]}
          for m in s.missing),
         key=lambda r: (r["depth"], r["wallet"], r["reason"]))
+    link_rows = sorted(
+        ({"signature": _signature(s.name, l["tx"]), "slot": l["slot"],
+          "block_time": BASE_TIME + l["slot"] if l["block_time"] == "auto" else l["block_time"],
+          "payer": s.a(l["payer"]), "receiver": s.a(l["receiver"])} for l in s.links),
+        key=lambda r: (r["slot"], r["signature"], r["payer"], r["receiver"]))
+    unpaired_rows = []
+    for u in s.unpaired:
+        detail_u = f"payers={len(u['payers'])} receivers={len(u['receivers'])}"
+        for side, labels in (("payer", u["payers"]), ("receiver", u["receivers"])):
+            for label in labels:
+                unpaired_rows.append({"signature": _signature(s.name, u["tx"]), "slot": u["slot"],
+                                      "block_time": BASE_TIME + u["slot"], "wallet": s.a(label), "side": side,
+                                      "detail": detail_u})
+    unpaired_rows.sort(key=lambda r: (r["slot"], r["signature"], r["wallet"], r["side"]))
+    assert len({r["signature"] for r in link_rows}) == len(link_rows)
+    assert all(r["payer"] != r["receiver"] for r in link_rows)
+    assert not {r["signature"] for r in link_rows} & {r["signature"] for r in unpaired_rows}
+
     complete, reason, detail = s.buyers_complete
     status = "complete" if not missing_rows and complete else "incomplete"
     assert len({(r["signature"], r["instruction_path"]) for r in transfer_rows}) == len(transfer_rows)
@@ -277,8 +320,9 @@ def build_ingest(s: Scenario) -> dict:
         "transfers": transfer_rows,
         "unexpanded": unexpanded_rows,
         # схема 1.1 (T-044): аналіз swap-and-send виконано над тим самим вікном, що й перелічення покупців,
-        # тож його повнота дзеркалить buyers; делегованих зв'язків у цих сценаріях немає (g_delegated — T-047).
-        "delegated": {"links": [], "unpaired": [], "complete": complete, "reason": reason, "detail": detail},
+        # тож його повнота дзеркалить buyers; зв'язки й кандидати є лише там, де їх оголошено (g_delegated, T-047).
+        "delegated": {"links": link_rows, "unpaired": unpaired_rows, "complete": complete, "reason": reason,
+                      "detail": detail},
     }
 
 
@@ -308,6 +352,25 @@ def aggregate_edges(transfers: list[dict]) -> list[dict]:
             "first_time": items[0]["block_time"], "last_time": items[-1]["block_time"],
             "refs": [{"signature": t["signature"], "slot": t["slot"], "instruction_path": t["instruction_path"]}
                      for t in items],
+        })
+    edges.sort(key=edge_key)
+    return edges
+
+
+def aggregate_delegated(links: list[dict]) -> list[dict]:
+    """Делеговані зв'язки -> ребра `delegated_buy`: окремий словник за `(payer, receiver)` (R-5, FR-002-18)."""
+    groups: dict[tuple, list[dict]] = {}
+    for link in links:
+        groups.setdefault((link["payer"], link["receiver"]), []).append(link)
+    edges = []
+    for (payer, receiver), items in groups.items():
+        items = sorted(items, key=lambda l: (l["slot"], l["signature"]))
+        edges.append({
+            "kind": "delegated_buy", "sender": payer, "receiver": receiver, "asset": None,
+            "amount": None, "decimals": None,
+            "count": len(items), "first_slot": items[0]["slot"], "last_slot": items[-1]["slot"],
+            "first_time": items[0]["block_time"], "last_time": items[-1]["block_time"],
+            "refs": [{"signature": l["signature"], "slot": l["slot"], "instruction_path": None} for l in items],
         })
     edges.sort(key=edge_key)
     return edges
@@ -410,12 +473,17 @@ def _snapshot(addresses: list[str], edges: list[dict], buyer_set: set[str]) -> t
     return snap, listed
 
 
-def oracle_depths(addresses: list[str], buyer_set: set[str], transfers: list[dict]) -> dict[str, int]:
-    """Мінімальна глибина за правилами R-6: покупець 0; отримувач переказу <= depth - 1; відправник <= depth."""
+def oracle_depths(addresses: list[str], buyer_set: set[str], transfers: list[dict],
+                  links: list[dict] = ()) -> dict[str, int]:
+    """Мінімальна глибина за правилами R-6: покупець 0; отримувач переказу <= depth - 1; відправник <= depth;
+    отримувач делегованої купівлі <= 0, платник <= 1."""
     depth = {a: (0 if a in buyer_set else 99) for a in addresses}
     for t in transfers:
         depth[t["receiver"]] = min(depth[t["receiver"]], t["depth"] - 1)
         depth[t["sender"]] = min(depth[t["sender"]], t["depth"])
+    for link in links:
+        depth[link["receiver"]] = min(depth[link["receiver"]], 0)
+        depth[link["payer"]] = min(depth[link["payer"]], 1)
     return depth
 
 
@@ -439,16 +507,24 @@ def build_expected(s: Scenario, ingest: dict) -> dict:
     buyers = {b["wallet"]: b for b in ingest["buyers"]}
     unexpanded = {u["wallet"]: {k: u[k] for k in ("reason", "counterparties_seen", "signatures_seen",
                                                   "signatures_truncated")} for u in ingest["unexpanded"]}
-    edges = aggregate_edges(ingest["transfers"])
+    links = ingest["delegated"]["links"]
+    edges = sorted(aggregate_edges(ingest["transfers"]) + aggregate_delegated(links), key=edge_key)
+    payers, receivers = {l["payer"] for l in links}, {l["receiver"] for l in links}
     addresses = sorted(set(buyers) | {t["sender"] for t in ingest["transfers"]}
-                       | {t["receiver"] for t in ingest["transfers"]})
+                       | {t["receiver"] for t in ingest["transfers"]} | payers | receivers)
+    # кандидати без пари в граф не потрапляють (вершиною їх робить лише інша підстава)
+    candidates_only = {u["wallet"] for u in ingest["delegated"]["unpaired"]} - set(buyers) - payers - receivers \
+        - {t["sender"] for t in ingest["transfers"]} - {t["receiver"] for t in ingest["transfers"]}
+    assert not candidates_only & set(addresses)
 
     # --- вершини: ролі й глибина за правилами R-6 ---
     senders_of_any = {t["sender"] for t in ingest["transfers"]}
-    depth = oracle_depths(addresses, set(buyers), ingest["transfers"])
+    depth = oracle_depths(addresses, set(buyers), ingest["transfers"], links)
     nodes = []
     for a in addresses:
-        roles = sorted(({"buyer"} if a in buyers else set()) | ({"funder"} if a in senders_of_any else set()))
+        roles = sorted(({"buyer"} if a in buyers else set()) | ({"funder"} if a in senders_of_any else set())
+                       | ({"delegated_payer"} if a in payers else set())
+                       | ({"delegated_receiver"} if a in receivers else set()))
         if a in buyers:
             address_type = buyers[a]["address_type"]
         else:
@@ -512,6 +588,16 @@ def build_expected(s: Scenario, ingest: dict) -> dict:
         sources_after=sum(1 for a in after_nodes if a not in buyers))
 
     missing = ingest["completeness"]["missing"]
+    notes = {
+        "criteria_order": "хити впорядковано за (criterion, detail) як рядками: degree < dust_fanout < ingest_high_degree < known_list < one_off_senders",
+        "edge_asset_key": "ключ ребра в edge_keys: [kind, sender, receiver, asset або \"\"]",
+        "warnings": "без delegated_incomplete: поле delegated у результаті 001 з'явиться з T-044 (g_delegated — T-047)",
+        "graph_completeness": "лише частина з результату збору (ingest_status, missing, buyers_*); delegated_* — T-044",
+    }
+    if links or ingest["delegated"]["unpaired"]:
+        notes["delegated"] = ("ребра delegated_buy — з delegated.links словником за (payer, receiver), окремо від "
+                              "переказів; asset/amount/decimals = null, refs без instruction_path; кандидати без пари "
+                              "(delegated.unpaired) у граф не потрапляють; глибина: отримувач <= 0, платник <= 1")
     return {
         "scenario": s.name, "description": s.description, "mint": ingest["metadata"]["mint"],
         "wallets": dict(sorted(s.wallets.items())),
@@ -536,12 +622,7 @@ def build_expected(s: Scenario, ingest: dict) -> dict:
             "pruned_edges": len(edges) - len(after_edges), "warn_share": th["giant_component_warn_share"],
             "warnings": warnings,
         },
-        "notes": {
-            "criteria_order": "хити впорядковано за (criterion, detail) як рядками: degree < dust_fanout < ingest_high_degree < known_list < one_off_senders",
-            "edge_asset_key": "ключ ребра в edge_keys: [kind, sender, receiver, asset або \"\"]",
-            "warnings": "без delegated_incomplete: поле delegated у результаті 001 з'явиться з T-044 (g_delegated — T-047)",
-            "graph_completeness": "лише частина з результату збору (ingest_status, missing, buyers_*); delegated_* — T-044",
-        },
+        "notes": notes,
     }
 
 
@@ -833,10 +914,41 @@ def g_dust_mixed() -> Scenario:
     return s
 
 
+def g_delegated() -> Scenario:
+    s = Scenario("g_delegated", "Делеговані купівлі (swap-and-send, FR-002-18): A фінансує покупця R переказом І купує "
+                                "токен на R (одна пара — два ребра: transfer і delegated_buy); Q двічі купує на свіжий "
+                                "гаманець V (два зв'язки однієї пари -> одне ребро count=2; другий без block_time) і "
+                                "сам фінансує A на глибині 2 (глибина Q = min(2, 1) = 1); покупець P3 купує на W "
+                                "(роль buyer + delegated_payer, глибина 0); транзакція з двома платниками U1, U2 і одним "
+                                "отримувачем U3 — кандидати без пари, у граф не потрапляють.", first_buyers_n=4)
+    for label in ("A", "Q", "S", "V", "W", "P1", "P2", "R", "P3", "U1", "U2", "U3"):
+        s.wallet(label)
+    s.buy("P1", 200, spent=[("sol", 600_000_000)], received=4_000_000_000)
+    s.buy("P2", 210, spent=[("sol", 500_000_000)], received=3_000_000_000)
+    s.buy("R", 220, spent=[("sol", 400_000_000)], received=2_000_000_000)
+    s.buy("P3", 230, spent=[("sol", 300_000_000)], received=1_000_000_000)
+    s.transfer("q_a", "0", "Q", "A", 100, 3 * SOL, 2)
+    s.transfer("a_r", "0", "A", "R", 120, 1 * SOL, 1)
+    s.transfer("a_p1", "0", "A", "P1", 121, 1 * SOL, 1)
+    s.transfer("s_p2", "0", "S", "P2", 122, 1 * SOL, 1)
+    s.delegated("d_q_v_1", "Q", "V", 205)
+    s.unpaired_tx("d_u", 212, payers=("U1", "U2"), receivers=("U3",))
+    s.delegated("d_a_r", "A", "R", 215)
+    s.delegated("d_q_v_2", "Q", "V", 225, block_time=None)
+    s.delegated("d_p3_w", "P3", "W", 226)
+    s.declare(["A", "Q"], ("delegated_payer", "funder"), 1)
+    s.declare(["S"], ("funder",), 1)
+    s.declare(["V", "W"], ("delegated_receiver",), 0)
+    s.declare(["P1", "P2"], ("buyer",), 0)
+    s.declare(["R"], ("buyer", "delegated_receiver"), 0)
+    s.declare(["P3"], ("buyer", "delegated_payer"), 0)
+    return s
+
+
 SCENARIO_BUILDERS = {
     "g_basic": g_basic, "g_hub": g_hub, "g_known": g_known, "g_buyer_hub": g_buyer_hub,
     "g_incomplete": g_incomplete, "g_empty": g_empty, "g_all_hubs": g_all_hubs, "g_unexpanded": g_unexpanded,
-    "g_dust": g_dust, "g_financier": g_financier, "g_dust_mixed": g_dust_mixed,
+    "g_dust": g_dust, "g_financier": g_financier, "g_dust_mixed": g_dust_mixed, "g_delegated": g_delegated,
 }
 assert tuple(SCENARIO_BUILDERS) == SCENARIO_NAMES
 

@@ -136,8 +136,9 @@ def test_measures_equal_expected_on_every_scenario(name):
         assert got[address] == want[address], address
 
 
-def test_scenarios_cover_all_eleven_fixtures():
-    assert len(SCENARIOS) == 11
+def test_scenarios_cover_all_twelve_fixtures():
+    assert SCENARIOS == ["g_all_hubs", "g_basic", "g_buyer_hub", "g_delegated", "g_dust", "g_dust_mixed", "g_empty",
+                         "g_financier", "g_hub", "g_incomplete", "g_known", "g_unexpanded"]
 
 
 def test_g_hub_H_measures_equal_expected():

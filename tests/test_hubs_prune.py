@@ -5,7 +5,7 @@ contracts/graph-service.md §5; data-model «PruneRecord», «BuyerFlag», «Pru
 Критична задача: помилка тут не ламає збірку, а тихо змінює граф кластеризації — відсічений покупець зникає з
 аналізу, хаб без запису робить відсікання незворотним і непояснюваним. Тому, крім щасливого шляху:
 
-- еталон — незалежний оракул генератора фікстур (`expected.json` усіх 11 сценаріїв: `prune.records`,
+- еталон — незалежний оракул генератора фікстур (`expected.json` усіх 12 сценаріїв: `prune.records`,
   `prune.buyer_flags`, `prune.after`), а не вихід `prune_hubs`; порівняння — повна рівність поле за полем;
 - golden проти зафіксованих `config/hubs.yaml` (v2) і `config/hub_addresses.yaml` (v1) — принцип III: зміна
   порогу без перегенерації еталонів червона тут;
@@ -169,8 +169,8 @@ def _outcome_dict(o: PruneOutcome) -> dict:
 # --- Повна рівність з оракулом на всіх сценаріях ----------------------------------------
 
 
-def test_fixture_set_is_the_eleven_scenarios():
-    assert SCENARIOS == ["g_all_hubs", "g_basic", "g_buyer_hub", "g_dust", "g_dust_mixed", "g_empty",
+def test_fixture_set_is_the_twelve_scenarios():
+    assert SCENARIOS == ["g_all_hubs", "g_basic", "g_buyer_hub", "g_delegated", "g_dust", "g_dust_mixed", "g_empty",
                          "g_financier", "g_hub", "g_incomplete", "g_known", "g_unexpanded"]
 
 

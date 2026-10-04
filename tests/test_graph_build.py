@@ -118,7 +118,8 @@ def test_nodes_built_for_edges_match_expected_golden_for_every_fixture(name):
 
 
 def test_fixture_set_is_the_documented_one():
-    assert len(SCENARIOS) == 11 and "g_basic" in SCENARIOS and "g_empty" in SCENARIOS
+    assert SCENARIOS == ["g_all_hubs", "g_basic", "g_buyer_hub", "g_delegated", "g_dust", "g_dust_mixed", "g_empty",
+                         "g_financier", "g_hub", "g_incomplete", "g_known", "g_unexpanded"]
 
 
 def test_empty_result_gives_empty_graph():
@@ -209,22 +210,36 @@ def test_only_transfer_edges_are_built_from_transfers():
 
 @pytest.mark.parametrize("name", SCENARIOS)
 def test_edge_refs_lead_to_every_source_signature_and_slot(name):
-    """SC-006 001: кожен ref — рівно один переказ входу і навпаки, з тими самими кінцями й активом."""
+    """SC-006 001: кожен ref ребра `transfer` — рівно один переказ входу і навпаки, з тими самими кінцями й
+    активом; кожен ref ребра `delegated_buy` — рівно один зв'язок `delegated.links` і навпаки (T-047)."""
     result = load_ingest_fixture(name)
     graph = build_graph(result)
+    assert {e.kind for e in graph.edges} <= {EdgeKind.TRANSFER, EdgeKind.DELEGATED_BUY}
     from_refs = Counter(
         (r.signature, r.slot, r.instruction_path, e.sender, e.receiver, str(e.asset))
-        for e in graph.edges for r in e.refs
+        for e in graph.edges if e.kind is EdgeKind.TRANSFER for r in e.refs
     )
     from_input = Counter(
         (t.signature, t.slot, t.instruction_path, t.sender, t.receiver, str(t.asset))
         for t in result.transfers
     )
     assert from_refs == from_input
-    assert sum(e.count for e in graph.edges) == len(result.transfers)
-    for e in graph.edges:
+    transfer_edges = [e for e in graph.edges if e.kind is EdgeKind.TRANSFER]
+    assert sum(e.count for e in transfer_edges) == len(result.transfers)
+    for e in transfer_edges:
         mine = [t for t in result.transfers if (t.sender, t.receiver, t.asset) == (e.sender, e.receiver, e.asset)]
         assert e.amount == sum(t.amount for t in mine)
+    delegated_edges = [e for e in graph.edges if e.kind is EdgeKind.DELEGATED_BUY]
+    from_delegated_refs = Counter(
+        (r.signature, r.slot, r.instruction_path, e.sender, e.receiver, e.asset)
+        for e in delegated_edges for r in e.refs
+    )
+    from_links = Counter(
+        (l.signature, l.slot, None, l.payer, l.receiver, None) for l in result.delegated.links
+    )
+    assert from_delegated_refs == from_links
+    assert sum(e.count for e in delegated_edges) == len(result.delegated.links)
+    assert all(e.amount is None for e in delegated_edges)
 
 
 # --- block_time ------------------------------------------------------------------------

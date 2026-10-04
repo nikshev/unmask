@@ -1,0 +1,138 @@
+{
+  "scenario": "g_delegated",
+  "description": "Делеговані купівлі (swap-and-send, FR-002-18): A фінансує покупця R переказом І купує токен на R (одна пара — два ребра: transfer і delegated_buy); Q двічі купує на свіжий гаманець V (два зв'язки однієї пари -> одне ребро count=2; другий без block_time) і сам фінансує A на глибині 2 (глибина Q = min(2, 1) = 1); покупець P3 купує на W (роль buyer + delegated_payer, глибина 0); транзакція з двома платниками U1, U2 і одним отримувачем U3 — кандидати без пари, у граф не потрапляють.",
+  "mint": "6sCKxzXKEte7RqHGsSiKFQju3DiMxr3AdxExmDc9QKgX",
+  "wallets": {
+    "A": "5GDuAzosUgqJrNaiivuNZn1rFcTaQYqr4e654WgJNWjp",
+    "DEX": "8j7xohKQRndMqqL8Fz7ALW5ayG5CxK4wrtj75wxhQuEx",
+    "M": "6sCKxzXKEte7RqHGsSiKFQju3DiMxr3AdxExmDc9QKgX",
+    "P1": "64wjTbT3Zpw6aQZByqXK2PC3LHnGm1qyJr8yvLvmbPf4",
+    "P2": "JCxpETUQze55nH7gq8aWruzw4ZTCHBR4sRHnxSurHLCt",
+    "P3": "DYwq5EU1sSuvGY9MbPdcCDx2UGyGGKGLhet38pGxXShE",
+    "Q": "8ZR45vCNnwWzXr7PxubykVu8xbF2EijJnXETwWTnYVKG",
+    "R": "HjfN9paA2cYuRPKCjGmdfkzjsMT2KVut73yVYGQbdnoM",
+    "S": "4deASWciBXFTNJ6T7jewf3bhg3SpWVCSna1gwPyjBQWU",
+    "U1": "Fnchi4nY4bBTsdSdBo3bjW6viK6ZgAeUnMdkcTnCmt9Q",
+    "U2": "98LYN5ziR4PRoHj2mvpjXFD3Aj54SxgxiyjoGqFxuPnT",
+    "U3": "7vAvkVW6b1BcbzXKj5WUX9v3Hk6Uo3mKR8hS3PiDPZ23",
+    "V": "8vC5AHZsqahdbKqwFuPs7aXP3UMogeG6bwzXeHYQTqfz",
+    "W": "9JsQftWv84AQvzg2JagzSB9vM21FrFzfi6UJKkCLEsqn"
+  },
+  "config": {
+    "version": 2,
+    "thresholds": {
+      "degree_threshold": 100,
+      "one_off_senders_share": 0.8,
+      "one_off_min_senders": 10,
+      "giant_component_warn_share": 0.5,
+      "prune_off_curve": true,
+      "prune_ingest_high_degree": true,
+      "dust_amount_lamports": 1000000,
+      "dust_min_fanout": 5
+    },
+    "lists": {
+      "version": 1,
+      "categories": {
+        "system_programs": ["11111111111111111111111111111111","ComputeBudget111111111111111111111111111111","MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"],
+        "token_programs": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA","TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb","ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"],
+        "dex_routers": ["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"],
+        "amm_programs": ["675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8","whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"],
+        "launchpads": ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"],
+        "exchanges": [],
+        "market_makers": []
+      }
+    }
+  },
+  "ingest_counterparty_threshold": 200,
+  "completeness": {
+    "status": "complete",
+    "ingest_status": "complete",
+    "missing": [],
+    "buyers_complete": true,
+    "buyers_reason": null
+  },
+  "graph": {
+    "nodes": [
+      {"address":"4deASWciBXFTNJ6T7jewf3bhg3SpWVCSna1gwPyjBQWU","roles":["funder"],"depth":1,"buyer_rank":null,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":1,"median_to_buyers":1000000000}},
+      {"address":"5GDuAzosUgqJrNaiivuNZn1rFcTaQYqr4e654WgJNWjp","roles":["delegated_payer","funder"],"depth":1,"buyer_rank":null,"address_type":"wallet","unexpanded":null,"measures":{"degree":3,"unique_senders":1,"one_off_senders":1,"one_off_share":1.0,"buyer_fanout":2,"median_to_buyers":1000000000}},
+      {"address":"64wjTbT3Zpw6aQZByqXK2PC3LHnGm1qyJr8yvLvmbPf4","roles":["buyer"],"depth":0,"buyer_rank":1,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":1,"one_off_senders":1,"one_off_share":1.0,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"8ZR45vCNnwWzXr7PxubykVu8xbF2EijJnXETwWTnYVKG","roles":["delegated_payer","funder"],"depth":1,"buyer_rank":null,"address_type":"wallet","unexpanded":null,"measures":{"degree":2,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"8vC5AHZsqahdbKqwFuPs7aXP3UMogeG6bwzXeHYQTqfz","roles":["delegated_receiver"],"depth":0,"buyer_rank":null,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"9JsQftWv84AQvzg2JagzSB9vM21FrFzfi6UJKkCLEsqn","roles":["delegated_receiver"],"depth":0,"buyer_rank":null,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"DYwq5EU1sSuvGY9MbPdcCDx2UGyGGKGLhet38pGxXShE","roles":["buyer","delegated_payer"],"depth":0,"buyer_rank":4,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":0,"one_off_senders":0,"one_off_share":null,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"HjfN9paA2cYuRPKCjGmdfkzjsMT2KVut73yVYGQbdnoM","roles":["buyer","delegated_receiver"],"depth":0,"buyer_rank":3,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":1,"one_off_senders":1,"one_off_share":1.0,"buyer_fanout":0,"median_to_buyers":null}},
+      {"address":"JCxpETUQze55nH7gq8aWruzw4ZTCHBR4sRHnxSurHLCt","roles":["buyer"],"depth":0,"buyer_rank":2,"address_type":"wallet","unexpanded":null,"measures":{"degree":1,"unique_senders":1,"one_off_senders":1,"one_off_share":1.0,"buyer_fanout":0,"median_to_buyers":null}}
+    ],
+    "edges": [
+      {"kind":"delegated_buy","sender":"5GDuAzosUgqJrNaiivuNZn1rFcTaQYqr4e654WgJNWjp","receiver":"HjfN9paA2cYuRPKCjGmdfkzjsMT2KVut73yVYGQbdnoM","asset":null,"amount":null,"decimals":null,"count":1,"first_slot":215,"last_slot":215,"first_time":1759400215,"last_time":1759400215,"refs":[{"signature":"3SWqMmNkAqUoLRyF3Xo6MFxeQjHuuwwuAQPmBvn4WRC3WbrzMtMZCFYdy72QjXa3ifV8CwL9RMPr3oZm9qkkzQ3R","slot":215,"instruction_path":null}]},
+      {"kind":"delegated_buy","sender":"8ZR45vCNnwWzXr7PxubykVu8xbF2EijJnXETwWTnYVKG","receiver":"8vC5AHZsqahdbKqwFuPs7aXP3UMogeG6bwzXeHYQTqfz","asset":null,"amount":null,"decimals":null,"count":2,"first_slot":205,"last_slot":225,"first_time":1759400205,"last_time":null,"refs":[{"signature":"5bAM2QXv3PPPLRL7FZGihc2fEqLhCfrbeU7acdTpopUF6Ub9wPSPbv5dtkBWMg9gYu24moJv2zGWcz1T1stk6XwC","slot":205,"instruction_path":null},{"signature":"YUdbMmcMSySi6L8fMMQhFyz5enFAAHuMkpXANJ2ZhNYX4KXq2CT6G8gBdeiqn8QC4szQd8WgABVTU4t6W6YqBkF","slot":225,"instruction_path":null}]},
+      {"kind":"delegated_buy","sender":"DYwq5EU1sSuvGY9MbPdcCDx2UGyGGKGLhet38pGxXShE","receiver":"9JsQftWv84AQvzg2JagzSB9vM21FrFzfi6UJKkCLEsqn","asset":null,"amount":null,"decimals":null,"count":1,"first_slot":226,"last_slot":226,"first_time":1759400226,"last_time":1759400226,"refs":[{"signature":"2HaEtCfidEEr5yk6Ze9LyhJY9sBzr2zaFpNiLVaqMeV9XVMhypjZ3SnqWDjw7h9ioj4D223h12rbRAAwvRFLUDGc","slot":226,"instruction_path":null}]},
+      {"kind":"transfer","sender":"4deASWciBXFTNJ6T7jewf3bhg3SpWVCSna1gwPyjBQWU","receiver":"JCxpETUQze55nH7gq8aWruzw4ZTCHBR4sRHnxSurHLCt","asset":"sol","amount":1000000000,"decimals":null,"count":1,"first_slot":122,"last_slot":122,"first_time":1759400122,"last_time":1759400122,"refs":[{"signature":"5A8iKeSSpZyGQWEFLa3v16dF2LjeHv2GsY784WrzD9mCESRE3ShpNtMz9PZ9kddbDME3EfUcfcA4RuFptLrpfwnR","slot":122,"instruction_path":"0"}]},
+      {"kind":"transfer","sender":"5GDuAzosUgqJrNaiivuNZn1rFcTaQYqr4e654WgJNWjp","receiver":"64wjTbT3Zpw6aQZByqXK2PC3LHnGm1qyJr8yvLvmbPf4","asset":"sol","amount":1000000000,"decimals":null,"count":1,"first_slot":121,"last_slot":121,"first_time":1759400121,"last_time":1759400121,"refs":[{"signature":"2MspEcGCsnWm4QFJnb1wurnng2MFaCRzz3Mo7ZHuiVVyEQwrX4SNuJHZCDFQMwipid3TzAiwZg1n8zt6k91z2J9g","slot":121,"instruction_path":"0"}]},
+      {"kind":"transfer","sender":"5GDuAzosUgqJrNaiivuNZn1rFcTaQYqr4e654WgJNWjp","receiver":"HjfN9paA2cYuRPKCjGmdfkzjsMT2KVut73yVYGQbdnoM","asset":"sol","amount":1000000000,"decimals":null,"count":1,"first_slot":120,"last_slot":120,"first_time":1759400120,"last_time":1759400120,"refs":[{"signature":"3RhY2gKWnu5vRUB5NzJbu6T189AA7PQcbDTZcvjiTQHgsqHpg9L8bUrufQFVzMTVzzXvfM92gPNG2BJTvaoSEixA","slot":120,"instruction_path":"0"}]},
+      {"kind":"transfer","sender":"8ZR45vCNnwWzXr7PxubykVu8xbF2EijJnXETwWTnYVKG","receiver":"5GDuAzosUgqJrNaiivuNZn1rFcTaQYqr4e654WgJNWjp","asset":"sol","amount":3000000000,"decimals":null,"count":1,"first_slot":100,"last_slot":100,"first_time":1759400100,"last_time":1759400100,"refs":[{"signature":"aPnDZoUzK2tXEHSCHmwYWRUQegCG3WXksYV7rnoq4Vfke1n3S1mZQiYuxZ2ZXfaqcvR2eyVaa2FiWMqFWvtksYr","slot":100,"instruction_path":"0"}]}
+    ]
+  },
+  "prune": {
+    "lists_applied": true,
+    "config_version": 2,
+    "lists_version": 1,
+    "records": [],
+    "buyer_flags": [],
+    "after": {
+      "node_addresses": ["4deASWciBXFTNJ6T7jewf3bhg3SpWVCSna1gwPyjBQWU","5GDuAzosUgqJrNaiivuNZn1rFcTaQYqr4e654WgJNWjp","64wjTbT3Zpw6aQZByqXK2PC3LHnGm1qyJr8yvLvmbPf4","8ZR45vCNnwWzXr7PxubykVu8xbF2EijJnXETwWTnYVKG","8vC5AHZsqahdbKqwFuPs7aXP3UMogeG6bwzXeHYQTqfz","9JsQftWv84AQvzg2JagzSB9vM21FrFzfi6UJKkCLEsqn","DYwq5EU1sSuvGY9MbPdcCDx2UGyGGKGLhet38pGxXShE","HjfN9paA2cYuRPKCjGmdfkzjsMT2KVut73yVYGQbdnoM","JCxpETUQze55nH7gq8aWruzw4ZTCHBR4sRHnxSurHLCt"],
+      "edge_keys": [
+        ["delegated_buy","5GDuAzosUgqJrNaiivuNZn1rFcTaQYqr4e654WgJNWjp","HjfN9paA2cYuRPKCjGmdfkzjsMT2KVut73yVYGQbdnoM",""],
+        ["delegated_buy","8ZR45vCNnwWzXr7PxubykVu8xbF2EijJnXETwWTnYVKG","8vC5AHZsqahdbKqwFuPs7aXP3UMogeG6bwzXeHYQTqfz",""],
+        ["delegated_buy","DYwq5EU1sSuvGY9MbPdcCDx2UGyGGKGLhet38pGxXShE","9JsQftWv84AQvzg2JagzSB9vM21FrFzfi6UJKkCLEsqn",""],
+        ["transfer","4deASWciBXFTNJ6T7jewf3bhg3SpWVCSna1gwPyjBQWU","JCxpETUQze55nH7gq8aWruzw4ZTCHBR4sRHnxSurHLCt","sol"],
+        ["transfer","5GDuAzosUgqJrNaiivuNZn1rFcTaQYqr4e654WgJNWjp","64wjTbT3Zpw6aQZByqXK2PC3LHnGm1qyJr8yvLvmbPf4","sol"],
+        ["transfer","5GDuAzosUgqJrNaiivuNZn1rFcTaQYqr4e654WgJNWjp","HjfN9paA2cYuRPKCjGmdfkzjsMT2KVut73yVYGQbdnoM","sol"],
+        ["transfer","8ZR45vCNnwWzXr7PxubykVu8xbF2EijJnXETwWTnYVKG","5GDuAzosUgqJrNaiivuNZn1rFcTaQYqr4e654WgJNWjp","sol"]
+      ]
+    }
+  },
+  "components": {
+    "before": [
+      {"id":"4deASWciBXFTNJ6T7jewf3bhg3SpWVCSna1gwPyjBQWU","members":["4deASWciBXFTNJ6T7jewf3bhg3SpWVCSna1gwPyjBQWU","JCxpETUQze55nH7gq8aWruzw4ZTCHBR4sRHnxSurHLCt"],"buyers":1},
+      {"id":"5GDuAzosUgqJrNaiivuNZn1rFcTaQYqr4e654WgJNWjp","members":["5GDuAzosUgqJrNaiivuNZn1rFcTaQYqr4e654WgJNWjp","64wjTbT3Zpw6aQZByqXK2PC3LHnGm1qyJr8yvLvmbPf4","8ZR45vCNnwWzXr7PxubykVu8xbF2EijJnXETwWTnYVKG","8vC5AHZsqahdbKqwFuPs7aXP3UMogeG6bwzXeHYQTqfz","HjfN9paA2cYuRPKCjGmdfkzjsMT2KVut73yVYGQbdnoM"],"buyers":2},
+      {"id":"9JsQftWv84AQvzg2JagzSB9vM21FrFzfi6UJKkCLEsqn","members":["9JsQftWv84AQvzg2JagzSB9vM21FrFzfi6UJKkCLEsqn","DYwq5EU1sSuvGY9MbPdcCDx2UGyGGKGLhet38pGxXShE"],"buyers":1}
+    ],
+    "after": [
+      {"id":"4deASWciBXFTNJ6T7jewf3bhg3SpWVCSna1gwPyjBQWU","members":["4deASWciBXFTNJ6T7jewf3bhg3SpWVCSna1gwPyjBQWU","JCxpETUQze55nH7gq8aWruzw4ZTCHBR4sRHnxSurHLCt"],"buyers":1},
+      {"id":"5GDuAzosUgqJrNaiivuNZn1rFcTaQYqr4e654WgJNWjp","members":["5GDuAzosUgqJrNaiivuNZn1rFcTaQYqr4e654WgJNWjp","64wjTbT3Zpw6aQZByqXK2PC3LHnGm1qyJr8yvLvmbPf4","8ZR45vCNnwWzXr7PxubykVu8xbF2EijJnXETwWTnYVKG","8vC5AHZsqahdbKqwFuPs7aXP3UMogeG6bwzXeHYQTqfz","HjfN9paA2cYuRPKCjGmdfkzjsMT2KVut73yVYGQbdnoM"],"buyers":2},
+      {"id":"9JsQftWv84AQvzg2JagzSB9vM21FrFzfi6UJKkCLEsqn","members":["9JsQftWv84AQvzg2JagzSB9vM21FrFzfi6UJKkCLEsqn","DYwq5EU1sSuvGY9MbPdcCDx2UGyGGKGLhet38pGxXShE"],"buyers":1}
+    ]
+  },
+  "report": {
+    "before": {
+      "nodes": 9,
+      "edges": 7,
+      "components": 3,
+      "buyers_total": 4,
+      "buyers_in_largest_component": 2,
+      "largest_component_buyer_share": 0.5,
+      "isolated_buyers": 0
+    },
+    "after": {
+      "nodes": 9,
+      "edges": 7,
+      "components": 3,
+      "buyers_total": 4,
+      "buyers_in_largest_component": 2,
+      "largest_component_buyer_share": 0.5,
+      "isolated_buyers": 0
+    },
+    "pruned_nodes": 0,
+    "pruned_edges": 0,
+    "warn_share": 0.5,
+    "warnings": []
+  },
+  "notes": {
+    "criteria_order": "хити впорядковано за (criterion, detail) як рядками: degree < dust_fanout < ingest_high_degree < known_list < one_off_senders",
+    "edge_asset_key": "ключ ребра в edge_keys: [kind, sender, receiver, asset або \"\"]",
+    "warnings": "без delegated_incomplete: поле delegated у результаті 001 з'явиться з T-044 (g_delegated — T-047)",
+    "graph_completeness": "лише частина з результату збору (ingest_status, missing, buyers_*); delegated_* — T-044",
+    "delegated": "ребра delegated_buy — з delegated.links словником за (payer, receiver), окремо від переказів; asset/amount/decimals = null, refs без instruction_path; кандидати без пари (delegated.unpaired) у граф не потрапляють; глибина: отримувач <= 0, платник <= 1"
+  }
+}
