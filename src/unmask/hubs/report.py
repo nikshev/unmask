@@ -20,9 +20,13 @@
 - `giant_component` ⇔ `after.largest_component_buyer_share > config.thresholds.giant_component_warn_share`
   (СТРОГО більше, FR-002-14; поріг — з версіонованого конфігу, принцип III);
 - `delegated_incomplete` ⇔ `not delegated_complete` (аналіз делегованих купівель неповний — частка може бути
-  заниженою, бо частини ребер `delegated_buy` немає).
-`address_lists_not_applied` (з `lists_applied`, FR-002-12) додає T-037, `empty_graph`/`all_sources_pruned` — T-038
-(R-16); параметр `lists_applied` уже входить до сигнатури контракту.
+  заниженою, бо частини ребер `delegated_buy` немає);
+- `address_lists_not_applied` ⇔ `not lists_applied` (FR-002-12): списки адрес не застосовано (`config.lists is
+  None`), тож відсутність спрацювань `list:*` — не «хабів немає», і звіт каже це явно (принцип V). Порожні
+  категорії при завантаженому файлі — `lists_applied=True`, попередження немає. `lists_applied` — аргумент, а не
+  поле `EffectReport`, тож інваріант «`metadata.lists_applied == False` ⇒ попередження» перевіряє `GraphResult`
+  (T-039) і схема; тут його єдине джерело.
+`empty_graph`/`all_sources_pruned` додає T-038 (R-16).
 
 `after` має бути відсіканням `before`: ті самі покупці, вершини й ребра — підмножини. Інакше «до/після» не
 порівнювані й різниці (`pruned_*`) брешуть — гучна `ValueError`, а не тихий звіт.
@@ -217,6 +221,8 @@ def effect_report(before: FundingGraph, after: FundingGraph, config: HubConfig, 
     warn_share = config.thresholds.giant_component_warn_share
 
     warnings: list[GraphWarning] = []
+    if not lists_applied:  # FR-002-12: відсутність списків видима, а не схожа на «хабів немає»
+        warnings.append(GraphWarning.ADDRESS_LISTS_NOT_APPLIED)
     if snap_after.largest_component_buyer_share > warn_share:  # строго більше (FR-002-14)
         warnings.append(GraphWarning.GIANT_COMPONENT)
     if not delegated_complete:
