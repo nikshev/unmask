@@ -59,7 +59,7 @@
 | `ingest/cache.py` | рядок у `_FIELD_COPY` (`dict`; значення — frozen); тест повноти таблиці стане червоним до правки — бажано; маркер `+FR-002-17` |
 | `ingest/service.py` | `_unverified` → `DelegatedAnalysis.derive((), (), failure)` |
 | `contracts/ingest-result.schema.json` | 1.1, `$defs/delegated` |
-| `tests/test_*` 001 | без змін, крім `test_cache` (таблиця `_FIELD_COPY` — автоматично вимагає новий рядок) |
+| `tests/test_*` 001 | без змін, крім `test_cache` (таблиця `_FIELD_COPY` — автоматично вимагає новий рядок) і **`test_serialize_contract::test_result_dict_validates_against_schema`** (точна множина ключів `to_dict` тепер містить `delegated` — правка одного рядка, виявлена при T-044). Також чіпаються тести фічі 002 (T-026): `test_ingest_from_dict` (відсутній `delegated` → `NOT_ANALYZED`, а не помилка) і `tests/fixtures/build_graph_fixtures.py` з 11 `ingest.json` (додано `delegated` з повнотою, похідною від `buyers`; `expected.json` графа без змін) |
 
 **Альтернатива (відкинуто)**: емітувати `delegated` лише коли непорожнє — зберігає байти `to_json` для старих сценаріїв, але робить «аналіз не виконано» нерозрізненним від «зв'язків немає» (принцип V) і дає умовну форму документа. Якщо власник наполягає на буквальному «жоден байт `to_json`», міняється лише `_delegated()` у `serialize.py` і тест T-044 — одна задача (`plan.md`, Q1).
 

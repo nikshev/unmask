@@ -28,5 +28,12 @@
   },
   "buyers": [],
   "transfers": [],
-  "unexpanded": []
+  "unexpanded": [],
+  "delegated": {
+    "links": [],
+    "unpaired": [],
+    "complete": true,
+    "reason": null,
+    "detail": ""
+  }
 }

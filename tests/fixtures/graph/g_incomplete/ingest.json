@@ -37,5 +37,12 @@
     {"signature":"3HeQvjprffvpnaHbLav5fDijgzRRednqDWeB3WL5u7WPHk1qPpxAaGMscE12Xh4QsTZNZ53TmY3b5hzw3i8RLTAz","slot":100,"block_time":1759400100,"instruction_path":"0","sender":"Gdr6X3bV6Xsnbcj9NyPoDBoN2NX798FmdwEMf2HT76iw","receiver":"6RiqNVb7bBEFgPB5XsgSenF33B9Ru1RDSptjJX3tWiRV","asset":"sol","amount":1000000000,"decimals":null,"depth":1},
     {"signature":"5cw18wdEw1NYWqxEc1jCjciE93tWfkadvvSziuQRypamCc6vzRL3gurC55zutEryxnJMUV9B35bn7kWMVtqeTiqb","slot":101,"block_time":1759400101,"instruction_path":"0","sender":"HzyvDcLWCNFtGSkh7f2DGzN2uGM4XQ8keaohMhPocYs1","receiver":"HsHH5VmtWkUrY2FoRXXwADMYoFKkso28ESLywgSWtAdM","asset":"sol","amount":1000000000,"decimals":null,"depth":1}
   ],
-  "unexpanded": []
+  "unexpanded": [],
+  "delegated": {
+    "links": [],
+    "unpaired": [],
+    "complete": true,
+    "reason": null,
+    "detail": ""
+  }
 }

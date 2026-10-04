@@ -1,4 +1,4 @@
-# impl: FR-001-06, FR-001-09, FR-001-10, FR-001-14
+# impl: FR-001-06, FR-001-09, FR-001-10, FR-001-14, FR-002-19, FR-002-21
 """Типи результату збору (data-model.md) та інваріант повноти.
 
 Усі сутності незмінні (`frozen=True`) і перевіряють себе при побудові: некоректний
@@ -8,6 +8,13 @@
 зберігається, а обчислюється з даних — `complete` тоді й лише тоді, коли
 `missing` порожній і `buyers.complete`. `Completeness` будується лише через
 `Completeness.derive`; поле `status`, яке можна було б виставити вручну, не існує.
+
+Розширення фічі 002 для swap-and-send (T-044, FR-002-19, FR-002-21; research R-2…R-4):
+`DelegatedLink`, `UnpairedCandidate`, `DelegatedAnalysis` і поле `IngestResult.delegated`.
+Повнота аналізу теж ПОХІДНА: `DelegatedAnalysis.derive(links, unpaired, buyers)` копіює
+`complete`/`reason`/`detail` з `BuyersCompleteness` (те саме вікно транзакцій, той самий розбір),
+тож другого джерела істини немає. Результат, побудований без аналізу, несе чесне умовчання
+`DelegatedAnalysis.NOT_ANALYZED` (`complete=False`, `reason="not_analyzed"`), а не «зв'язків немає».
 """
 
 from __future__ import annotations
@@ -15,7 +22,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Iterable
+from typing import Any, ClassVar, Iterable
 
 
 # --- Перелічення -----------------------------------------------------------------
@@ -47,6 +54,15 @@ class UnexpandedReason(StrEnum):
 class RejectKind(StrEnum):
     INVALID_ADDRESS = "invalid_address"
     TOKEN_NOT_FOUND = "token_not_found"
+
+
+class DelegatedSide(StrEnum):
+    PAYER = "payer"
+    RECEIVER = "receiver"
+
+
+NOT_ANALYZED_REASON = "not_analyzed"
+"""`DelegatedAnalysis.reason` результату, побудованого без аналізу swap-and-send (не `MissingReason`)."""
 
 
 class Asset(str):
@@ -302,6 +318,178 @@ class Completeness:
         return CompletenessStatus.INCOMPLETE
 
 
+# --- Розширення 002: swap-and-send (T-044; data-model «Розширення фічі 001») -------
+
+_UNPAIRED_DETAIL_RE = re.compile(r"payers=([0-9]+) receivers=([0-9]+)")  # лише через fullmatch: `$` приймає "\n"
+
+
+def _unpaired_counts(detail: str) -> tuple[int, int]:
+    match = _UNPAIRED_DETAIL_RE.fullmatch(detail)
+    if match is None:
+        raise ValueError(f"unpaired.detail: {detail!r} is not 'payers=<p> receivers=<r>'")
+    return int(match.group(1)), int(match.group(2))
+
+
+@dataclass(frozen=True)
+class DelegatedLink:
+    """Делегована купівля (FR-002-15): платник витратив, отримувач отримав токен. Одна на транзакцію."""
+
+    signature: str
+    slot: int
+    block_time: int | None
+    payer: str
+    receiver: str
+
+    def __post_init__(self) -> None:
+        _str("delegated.link.signature", self.signature, nonempty=True)
+        _int("delegated.link.slot", self.slot, lo=0)
+        _opt_int("delegated.link.block_time", self.block_time, lo=0)
+        _str("delegated.link.payer", self.payer, nonempty=True)
+        _str("delegated.link.receiver", self.receiver, nonempty=True)
+        if self.payer == self.receiver:
+            raise ValueError(f"delegated.link: payer == receiver ({self.payer})")
+
+
+@dataclass(frozen=True)
+class UnpairedCandidate:
+    """Учасник неоднозначної транзакції (FR-002-16): не 1:1, тож пару не вгадано.
+
+    `detail == "payers=<p> receivers=<r>"` з p ≥ 1, r ≥ 1 і (p, r) != (1, 1) — інакше це або
+    зв'язок (1:1), або взагалі не кандидат (одна сторона порожня; research R-2).
+    """
+
+    signature: str
+    slot: int
+    block_time: int | None
+    wallet: str
+    side: DelegatedSide
+    detail: str
+
+    def __post_init__(self) -> None:
+        _str("delegated.unpaired.signature", self.signature, nonempty=True)
+        _int("delegated.unpaired.slot", self.slot, lo=0)
+        _opt_int("delegated.unpaired.block_time", self.block_time, lo=0)
+        _str("delegated.unpaired.wallet", self.wallet, nonempty=True)
+        _enum(self, "side", DelegatedSide)
+        _str("delegated.unpaired.detail", self.detail, nonempty=True)
+        payers, receivers = _unpaired_counts(self.detail)
+        if payers < 1 or receivers < 1:
+            raise ValueError(f"unpaired.detail: {self.detail!r} — both sides must be non-empty")
+        if (payers, receivers) == (1, 1):
+            raise ValueError(f"unpaired.detail: {self.detail!r} — a 1:1 transaction is a link, not a candidate")
+
+
+def link_sort_key(link: DelegatedLink) -> tuple[int, str, str, str]:
+    return (link.slot, link.signature, link.payer, link.receiver)
+
+
+def unpaired_sort_key(cand: UnpairedCandidate) -> tuple[int, str, str, str]:
+    return (cand.slot, cand.signature, cand.wallet, cand.side.value)
+
+
+def _check_links(links: tuple[DelegatedLink, ...]) -> None:
+    seen: set[str] = set()
+    for link in links:
+        if link.signature in seen:
+            raise ValueError(f"delegated.links: duplicate link for signature {link.signature}")
+        seen.add(link.signature)
+
+
+def _check_unpaired(unpaired: tuple[UnpairedCandidate, ...], link_signatures: set[str]) -> None:
+    """Без дублів за `(signature, wallet, side)`; кожна транзакція — повна група за своїм `detail`."""
+    keys: set[tuple[str, str, DelegatedSide]] = set()
+    groups: dict[str, list[UnpairedCandidate]] = {}
+    for cand in unpaired:
+        key = (cand.signature, cand.wallet, cand.side)
+        if key in keys:
+            raise ValueError(f"delegated.unpaired: duplicate candidate {key}")
+        keys.add(key)
+        groups.setdefault(cand.signature, []).append(cand)
+    for signature, group in groups.items():
+        if signature in link_signatures:
+            raise ValueError(f"delegated: signature {signature} is both a link and unpaired candidates")
+        wallets = [c.wallet for c in group]
+        if len(set(wallets)) != len(wallets):  # платник: Δ(M) == 0, отримувач: Δ(M) > 0 — сторони не перетинаються
+            raise ValueError(f"delegated.unpaired: a wallet of {signature} is on both sides")
+        first = group[0]
+        if any((c.slot, c.block_time, c.detail) != (first.slot, first.block_time, first.detail) for c in group):
+            raise ValueError(f"delegated.unpaired: candidates of {signature} disagree on slot/block_time/detail")
+        payers, receivers = _unpaired_counts(first.detail)
+        got_p = sum(1 for c in group if c.side is DelegatedSide.PAYER)
+        got_r = len(group) - got_p
+        if (got_p, got_r) != (payers, receivers):
+            raise ValueError(
+                f"delegated.unpaired: {signature} says {first.detail!r}, "
+                f"but has payers={got_p} receivers={got_r}"
+            )
+
+
+@dataclass(frozen=True)
+class DelegatedAnalysis:
+    """Аналіз swap-and-send (FR-002-19). Лише `derive(...)` або `NOT_ANALYZED`; повнота похідна."""
+
+    links: tuple[DelegatedLink, ...]
+    unpaired: tuple[UnpairedCandidate, ...]
+    complete: bool
+    reason: MissingReason | str | None
+    detail: str
+    _token: object = field(default=None, repr=False, compare=False)
+
+    NOT_ANALYZED: ClassVar[DelegatedAnalysis]
+
+    def __post_init__(self) -> None:
+        # Спершу інваріанти (найконкретніша помилка), потім — спосіб побудови.
+        _bool("delegated.complete", self.complete)
+        if self.reason is not None:
+            if self.reason == NOT_ANALYZED_REASON:
+                _set(self, "reason", NOT_ANALYZED_REASON)
+            else:
+                _enum(self, "reason", MissingReason)
+        if self.complete and self.reason is not None:
+            raise ValueError("delegated: complete=True must not carry a reason")
+        if not self.complete and self.reason is None:
+            raise ValueError("delegated: complete=False requires a reason")
+        _str("delegated.detail", self.detail, nonempty=False)
+        links = _tuple_of(self, "links", DelegatedLink)
+        unpaired = _tuple_of(self, "unpaired", UnpairedCandidate)
+        if self.reason == NOT_ANALYZED_REASON and (links or unpaired or self.detail != _NOT_ANALYZED_DETAIL):
+            raise ValueError("delegated: reason='not_analyzed' admits no links/unpaired and only its own detail")
+        _check_links(links)
+        _check_unpaired(unpaired, {link.signature for link in links})
+        _set(self, "links", tuple(sorted(links, key=link_sort_key)))
+        _set(self, "unpaired", tuple(sorted(unpaired, key=unpaired_sort_key)))
+        if self._token is not _DERIVE_TOKEN:
+            raise TypeError(
+                "DelegatedAnalysis is built only via DelegatedAnalysis.derive(links, unpaired, buyers) "
+                "or DelegatedAnalysis.NOT_ANALYZED"
+            )
+
+    @classmethod
+    def derive(
+        cls,
+        links: Iterable[DelegatedLink],
+        unpaired: Iterable[UnpairedCandidate],
+        buyers: BuyersCompleteness,
+    ) -> DelegatedAnalysis:
+        """Повнота = повнота перелічення покупців: той самий набір транзакцій mint, той самий розбір."""
+        if not isinstance(buyers, BuyersCompleteness):
+            raise TypeError(f"delegated.derive: expected BuyersCompleteness, got {buyers!r}")
+        for name, value in (("links", links), ("unpaired", unpaired)):
+            if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
+                raise TypeError(f"delegated.derive: {name} must be a sequence")
+        return cls(tuple(links), tuple(unpaired), buyers.complete, buyers.reason, buyers.detail, _DERIVE_TOKEN)
+
+    @property
+    def analyzed(self) -> bool:
+        return self.reason != NOT_ANALYZED_REASON
+
+
+_NOT_ANALYZED_DETAIL = "swap-and-send analysis was not performed for this result"
+DelegatedAnalysis.NOT_ANALYZED = DelegatedAnalysis(
+    (), (), False, NOT_ANALYZED_REASON, _NOT_ANALYZED_DETAIL, _DERIVE_TOKEN
+)
+
+
 @dataclass(frozen=True)
 class RunMetadata:
     mint: str
@@ -344,6 +532,7 @@ class IngestResult:
     buyers: tuple[Buyer, ...]
     transfers: tuple[Transfer, ...]
     unexpanded: tuple[UnexpandedNode, ...]
+    delegated: DelegatedAnalysis = DelegatedAnalysis.NOT_ANALYZED
 
     def __post_init__(self) -> None:
         if not isinstance(self.metadata, RunMetadata):
@@ -364,6 +553,15 @@ class IngestResult:
                 f"result: metadata.wallets_analyzed={self.metadata.wallets_analyzed} "
                 f"!= len(buyers)={len(buyers)}"
             )
+        if not isinstance(self.delegated, DelegatedAnalysis):
+            raise TypeError(f"result.delegated: expected DelegatedAnalysis, got {self.delegated!r}")
+        if self.delegated.analyzed:  # FR-002-19: повнота аналізу дзеркалить повноту перелічення
+            b, d = self.completeness.buyers, self.delegated
+            if (d.complete, d.reason, d.detail) != (b.complete, b.reason, b.detail):
+                raise ValueError(
+                    f"result.delegated: complete/reason/detail=({d.complete}, {d.reason!r}, {d.detail!r}) "
+                    f"!= completeness.buyers ({b.complete}, {b.reason!r}, {b.detail!r})"
+                )
 
 
 @dataclass(frozen=True)

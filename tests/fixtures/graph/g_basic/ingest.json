@@ -45,5 +45,12 @@
     {"signature":"5ja9KY2AzrCNLREH3Ki12Kwinwh3mv7AWwHAE8F3ixJGsJNkpQGDe366sTvwGsaRD4hfcq7B7f4WrV3GazYbiti5","slot":128,"block_time":1759400128,"instruction_path":"0","sender":"BUiabziZdvSErmRwGQyKbm3FwkAiPANUVFSCeYTzTJ1U","receiver":"B8PsQHw6YnorkuoEMbtiBFHvFofptZNQtsm1MRiEAfcf","asset":"sol","amount":2000000000,"decimals":null,"depth":1},
     {"signature":"3sffWpcbQybfaYjZ2aq3vTWZqcaTM8aKpmtttEsmJMdFQ43vaqLukdY6mjCoRKVMmG6GmABrC1tNmSbFs9nU6dMF","slot":130,"block_time":1759400130,"instruction_path":"0","sender":"9gmSKotFq2uNBxV4ApbGaPgWvhbto72R9f3toZBnnn9D","receiver":"9w4DXa8jLKgRNQpRtHXU6xDw2AGCdn4j1HCw9ECZAFST","asset":"sol","amount":2000000000,"decimals":null,"depth":1}
   ],
-  "unexpanded": []
+  "unexpanded": [],
+  "delegated": {
+    "links": [],
+    "unpaired": [],
+    "complete": true,
+    "reason": null,
+    "detail": ""
+  }
 }

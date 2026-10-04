@@ -78,5 +78,12 @@
     {"signature":"66Kh6HsmJEjax2fWKWpp4EdWN34mpvbGBMXauZhe6JabZ6vmZ7GvvKh61SMSsFzmFhYPMq8f9hExpqFP7L7yHR4M","slot":142,"block_time":1759400142,"instruction_path":"0","sender":"6SNPjqbfdbd6dQSXD9HkZtmn2nbMKHtGCbCHGjfL68Qk","receiver":"APn7gLnfy7bHLZ1ymVw2CBZ7eMTJXw2XNZA254BVaF1x","asset":"sol","amount":2000000000,"decimals":null,"depth":1},
     {"signature":"2N4Dz3HPELXoppPsscEdbXZHqU9QDNRQkbSRRJAJSQb8inRCtH5Dn6RMMp57qKLp4wZokZiyTfbYJnNmWBQFPES3","slot":143,"block_time":1759400143,"instruction_path":"0","sender":"6SNPjqbfdbd6dQSXD9HkZtmn2nbMKHtGCbCHGjfL68Qk","receiver":"J2gCdQRrDnN2qMhjEyimbqdFXtgvQRdcCNKtjaYQcgrr","asset":"sol","amount":2000000000,"decimals":null,"depth":1}
   ],
-  "unexpanded": []
+  "unexpanded": [],
+  "delegated": {
+    "links": [],
+    "unpaired": [],
+    "complete": true,
+    "reason": null,
+    "detail": ""
+  }
 }

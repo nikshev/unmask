@@ -92,5 +92,12 @@
     {"signature":"Eu6VeU1Durwmcrst8hsFH6ivTYXEQ4VcUosdRtAoQ3dLXVzYj3bkp5NnMjoAj16HKFGmgyXKagFPxVLkvkquWM1","slot":129,"block_time":1759400129,"instruction_path":"0","sender":"CK7R11wTosqAwj7qwDB6SuYJCHaPk5gWJ2FHWUwtNW4x","receiver":"Bk2qAKgwEpoHLws1fAjhW2Pmb6wyWcKPPttAKGSUnKKY","asset":"sol","amount":700000000,"decimals":null,"depth":1},
     {"signature":"5W3evAMv1tDScQHGreuXXq5k31oCJQZrXcCjX6a8tkDcofoYkQ6hfyR3v5zqjXcUobfsjV4aEsbCFdTtsJChQ768","slot":130,"block_time":1759400130,"instruction_path":"0","sender":"CK7R11wTosqAwj7qwDB6SuYJCHaPk5gWJ2FHWUwtNW4x","receiver":"9nx1be6jWMB8C7CvPqTmgBK9ptHFXGGuVMJSbmWGJJaK","asset":"sol","amount":400000,"decimals":null,"depth":1}
   ],
-  "unexpanded": []
+  "unexpanded": [],
+  "delegated": {
+    "links": [],
+    "unpaired": [],
+    "complete": true,
+    "reason": null,
+    "detail": ""
+  }
 }

@@ -171,7 +171,8 @@ def test_result_dict_validates_against_schema():
     assert isinstance(result, IngestResult) and result.buyers and result.transfers
     data = to_dict(result)
     _assert_valid(data)
-    assert set(data) == {"metadata", "completeness", "buyers", "transfers", "unexpanded"}
+    # схема 1.1 (фіча 002, T-044): to_dict завжди додає ключ delegated; решта ключів незмінна
+    assert set(data) == {"metadata", "completeness", "buyers", "transfers", "unexpanded", "delegated"}
     assert data["completeness"]["status"] == "complete"
     assert len(data["buyers"]) == len(result.buyers) == 5
     assert len(data["transfers"]) == len(result.transfers) > 0

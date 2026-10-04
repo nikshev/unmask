@@ -9,7 +9,7 @@
   значення — свого JSON-типу (чужий тип — виняток, а не мовчазне прийняття); перелічення поза
   значеннями — `ValueError`; інваріанти моделі 001 (порожній `spent`, дубль покупця, `amount < 1`,
   `wallets_analyzed != len(buyers)`, розбіжний `status`) спрацьовують;
-- поле `delegated` на цьому етапі НЕ існує: документ із ним — невідоме поле (його додасть T-044);
+- `delegated` (схема 1.1, T-044) необов'язковий; суперечність із повнотою покупців — `ValueError`;
 - вхід не змінюється, результат не ділить із ним змінних структур.
 
 Перевірки типів/ключів породжуються автоматично з форми базового документа (кожен ключ кожного
@@ -306,7 +306,9 @@ def test_unknown_key_in_any_object_is_rejected(path):
         from_dict(doc)
 
 
-MISSING_KEY_CASES = [(p, k) for p in OBJECT_PATHS for k in _get(RICH_DOC, p)]
+# `delegated` — єдиний необов'язковий ключ схеми 1.1: його відсутність дає NOT_ANALYZED (T-044,
+# tests/test_ingest_delegated_model.py::test_from_dict_without_delegated_key_gives_not_analyzed).
+MISSING_KEY_CASES = [(p, k) for p in OBJECT_PATHS for k in _get(RICH_DOC, p) if (p, k) != ((), "delegated")]
 
 
 @pytest.mark.parametrize(("path", "key"), MISSING_KEY_CASES, ids=[f"{_id(p)}:{k}" for p, k in MISSING_KEY_CASES])
@@ -317,8 +319,8 @@ def test_missing_key_in_any_object_is_rejected(path, key):
         from_dict(doc)
 
 
-def test_delegated_field_does_not_exist_yet_so_it_is_an_unknown_field():
-    """Поле `delegated` додасть T-044 (схема 1.1); до того воно — невідоме, а не мовчки прийняте."""
+def test_delegated_that_contradicts_buyers_completeness_is_rejected():
+    """Схема 1.1 (T-044): `delegated.complete` не береться на віру — RICH має неповних покупців."""
     doc = _doc()
     doc["delegated"] = {"links": [], "unpaired": [], "complete": True, "reason": None, "detail": ""}
     with pytest.raises(ValueError, match="delegated"):

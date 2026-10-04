@@ -276,6 +276,9 @@ def build_ingest(s: Scenario) -> dict:
         "buyers": buyer_rows,
         "transfers": transfer_rows,
         "unexpanded": unexpanded_rows,
+        # схема 1.1 (T-044): аналіз swap-and-send виконано над тим самим вікном, що й перелічення покупців,
+        # тож його повнота дзеркалить buyers; делегованих зв'язків у цих сценаріях немає (g_delegated — T-047).
+        "delegated": {"links": [], "unpaired": [], "complete": complete, "reason": reason, "detail": detail},
     }
 
 

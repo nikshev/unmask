@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://unmask.local/schemas/001/ingest-result.json",
-  "title": "unmask ingest outcome (feature 001)",
+  "$id": "https://unmask.local/schemas/001/ingest-result-1.1.json",
+  "title": "unmask ingest outcome (feature 001, schema 1.1)",
   "description": "Serialized IngestOutcome: either a collection result with explicit completeness, or an explicit rejection. Amounts are integers in base units; addresses are base58 strings.",
   "oneOf": [
     { "$ref": "#/$defs/result" },
@@ -34,8 +34,23 @@
         "completeness": { "$ref": "#/$defs/completeness" },
         "buyers": { "type": "array", "items": { "$ref": "#/$defs/buyer" } },
         "transfers": { "type": "array", "items": { "$ref": "#/$defs/transfer" } },
-        "unexpanded": { "type": "array", "items": { "$ref": "#/$defs/unexpanded" } }
-      }
+        "unexpanded": { "type": "array", "items": { "$ref": "#/$defs/unexpanded" } },
+        "delegated": { "$ref": "#/$defs/delegated" }
+      },
+      "allOf": [
+        {
+          "description": "delegated.complete mirrors completeness.buyers.complete when the analysis ran",
+          "if": { "required": ["delegated"], "properties": { "delegated": { "properties": { "reason": { "not": { "const": "not_analyzed" } } } } } },
+          "then": {
+            "anyOf": [
+              { "properties": { "completeness": { "properties": { "buyers": { "properties": { "complete": { "const": true } } } } },
+                                "delegated": { "properties": { "complete": { "const": true } } } } },
+              { "properties": { "completeness": { "properties": { "buyers": { "properties": { "complete": { "const": false } } } } },
+                                "delegated": { "properties": { "complete": { "const": false } } } } }
+            ]
+          }
+        }
+      ]
     },
 
     "metadata": {
@@ -188,6 +203,56 @@
         "signatures_seen": { "$ref": "#/$defs/nonNegInt" },
         "signatures_truncated": { "type": "boolean" }
       }
+    },
+
+    "delegatedSide": { "enum": ["payer", "receiver"] },
+
+    "delegatedLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signature", "slot", "block_time", "payer", "receiver"],
+      "properties": {
+        "signature": { "$ref": "#/$defs/signature" },
+        "slot": { "$ref": "#/$defs/nonNegInt" },
+        "block_time": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/nonNegInt" } ] },
+        "payer": { "$ref": "#/$defs/address" },
+        "receiver": { "$ref": "#/$defs/address" }
+      }
+    },
+
+    "unpairedCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signature", "slot", "block_time", "wallet", "side", "detail"],
+      "properties": {
+        "signature": { "$ref": "#/$defs/signature" },
+        "slot": { "$ref": "#/$defs/nonNegInt" },
+        "block_time": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/nonNegInt" } ] },
+        "wallet": { "$ref": "#/$defs/address" },
+        "side": { "$ref": "#/$defs/delegatedSide" },
+        "detail": { "type": "string", "pattern": "^payers=[0-9]+ receivers=[0-9]+$" }
+      }
+    },
+
+    "delegated": {
+      "description": "Swap-and-send analysis over the same mint transactions the purchase rule scanned (feature 002, FR-002-15..19). complete mirrors completeness.buyers.complete; not_analyzed marks a result built without the analysis and is never emitted by the collector.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["links", "unpaired", "complete", "reason", "detail"],
+      "properties": {
+        "links": { "type": "array", "items": { "$ref": "#/$defs/delegatedLink" } },
+        "unpaired": { "type": "array", "items": { "$ref": "#/$defs/unpairedCandidate" } },
+        "complete": { "type": "boolean" },
+        "reason": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/missingReason" }, { "const": "not_analyzed" } ] },
+        "detail": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "complete": { "const": true } } },
+          "then": { "properties": { "reason": { "type": "null" } } },
+          "else": { "properties": { "reason": { "type": "string" } } }
+        }
+      ]
     }
   }
 }

@@ -44,5 +44,12 @@
   "unexpanded": [
     {"wallet":"9NSCNHRYDw8Dn2MyP7hq5Ztw8dEGKKComecgVsD54euA","depth":1,"reason":"signature_cap","counterparties_seen":2,"signatures_seen":300,"signatures_truncated":true},
     {"wallet":"ZdPxpjy8uGgK8eLAZntxy7norSZBqDK1ZvDVT5UkZAU","depth":1,"reason":"high_degree","counterparties_seen":4,"signatures_seen":4,"signatures_truncated":false}
-  ]
+  ],
+  "delegated": {
+    "links": [],
+    "unpaired": [],
+    "complete": true,
+    "reason": null,
+    "detail": ""
+  }
 }

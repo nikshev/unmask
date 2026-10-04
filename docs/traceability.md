@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **38** · задач: **57** (виконано 38) · вимог у роботі: **20** · порушень: **0**
+Вимог: **38** · задач: **57** (виконано 39) · вимог у роботі: **20** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -35,14 +35,14 @@
 | `FR-002-04` | Побудова графа MUST бути детермінованою: той самий вхід дає побітово той самий граф і порядок. | `T-028`, `T-031`, `T-039`, `T-040` | `src/unmask/graph/build.py` | — |
 | `FR-002-05` | Граф MUST успадковувати статус повноти результату збору й перелік причин неповноти; граф над неповним збором M | `T-025`, `T-028`, `T-030` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_model.py` |
 | `FR-002-06` | Граф MUST зберігати нерозгорнуті вершини з результату збору з причиною (висока зв'язність, ліміт підписів) як  | `T-025`, `T-028`, `T-030` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_model.py` |
-| `FR-002-07` | Система MUST позначати вершину хабом за кожним із незалежних критеріїв: (а) належність до відомих списків адре | `T-032`, `T-033`, `T-034`, `T-035`, `T-055`, `T-057` | `src/unmask/graph/measures.py` | `tests/test_hubs_measures.py` |
+| `FR-002-07` | Система MUST позначати вершину хабом за кожним із незалежних критеріїв: (а) належність до відомих списків адре | `T-032`, `T-033`, `T-034`, `T-035`, `T-055`, `T-057` | `src/unmask/graph/measures.py`, `src/unmask/hubs/criteria.py` | `tests/test_hubs_measures.py`, `tests/test_hubs_threshold_rule.py` |
 | `FR-002-08` | Пороги, списки адрес і версія MUST зберігатися у версіонованому YAML із журналом змін; зміна без запису в журн | `T-023`, `T-024`, `T-054` | `src/unmask/hubs/config.py` | `tests/test_hubs_config_robustness.py`, `tests/test_hubs_changelog_guard.py`, `tests/test_hubs_config.py` |
 | `FR-002-09` | Відсікання MUST виключати хаб і всі ребра, інцидентні йому, з графа для кластеризації й MUST зберігати їх у ок | `T-035`, `T-038` | — | — |
 | `FR-002-10` | Покупці MUST NOT відсікатися; покупець, що відповідає критерію хаба, отримує пояснювальну позначку. | `T-035` | — | — |
 | `FR-002-11` | Система MUST формувати звіт ефекту відсікання: кількість вершин і ребер, кількість компонент, частка найбільшо | `T-027`, `T-036`, `T-038`, `T-042` | `src/unmask/graph/components.py` | `tests/test_graph_components.py` |
 | `FR-002-12` | Якщо список відомих адрес не застосовано (порожній чи недоступний), результат MUST це явно показувати; відсутн | `T-023`, `T-035`, `T-036`, `T-037` | `src/unmask/hubs/config.py` | `tests/test_hubs_config_robustness.py` |
 | `FR-002-13` | Результат MUST містити версію конфігу відсікання й версію списків адрес, щоб два результати з різними версіями | `T-023`, `T-039`, `T-040`, `T-054`, `T-055` | `src/unmask/hubs/config.py` | `tests/test_hubs_config.py` |
-| `FR-002-14` | Правило порогу (рівно поріг) MUST бути визначене однозначно й однаково для всіх критеріїв. | `T-023`, `T-033`, `T-057` | `src/unmask/hubs/config.py` | `tests/test_hubs_config.py` |
+| `FR-002-14` | Правило порогу (рівно поріг) MUST бути визначене однозначно й однаково для всіх критеріїв. | `T-023`, `T-033`, `T-057` | `src/unmask/hubs/criteria.py`, `src/unmask/hubs/config.py` | `tests/test_hubs_config.py`, `tests/test_hubs_threshold_rule.py` |
 | `FR-002-15` | Система MUST розпізнавати в транзакціях mint «делеговану купівлю»: платник витратив кошти й не отримав токен,  | `T-043`, `T-045` | — | `tests/test_delegated_fixtures.py` |
 | `FR-002-16` | Неоднозначні випадки (кілька платників чи отримувачів без однозначної відповідності) MUST фіксуватися як «канд | `T-043`, `T-045` | — | `tests/test_delegated_fixtures.py` |
 | `FR-002-17` | Розпізнавання swap-and-send MUST NOT змінювати склад, порядок і порядкові номери перших N покупців із фічі 001 | `T-046` | — | — |
@@ -87,7 +87,7 @@
 - `T-035` (002-funding-graph-hub-pruning) — у роботі
 - `T-036` (002-funding-graph-hub-pruning) — у роботі
 - `T-039` (002-funding-graph-hub-pruning) — у роботі
-- `T-044` (002-funding-graph-hub-pruning) — у роботі
+- `T-044` (002-funding-graph-hub-pruning) — виконано
 - `T-045` (002-funding-graph-hub-pruning) — у роботі
 - `T-046` (002-funding-graph-hub-pruning) — у роботі
 - `T-047` (002-funding-graph-hub-pruning) — у роботі

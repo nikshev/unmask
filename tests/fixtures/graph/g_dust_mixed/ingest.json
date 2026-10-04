@@ -73,5 +73,12 @@
     {"signature":"5epfNUShzcc9rRLAj6kfao6xwcE6NBVvESnPB7gkQyNf68C3KYd7qJwmmJroEdR5bATBi7oak4qjNbygnbBmqNuW","slot":131,"block_time":1759400131,"instruction_path":"0","sender":"7GhQ9Nuk4Bua858gzkDR5mXbBFWqvas4DXFk99Jvfi5D","receiver":"2rDJFtDgnwvrQe6iP3FyEbwLPkFu9HSdK2pGmWBF1Bs8","asset":"spl:AtQLFPLZNpxc2BpnuwfKpTyQLzpSS72yEnTjeHiC7zPk","amount":10000000,"decimals":6,"depth":1},
     {"signature":"oVap7gMEuUeCeKReQhv6rFySNBLg48DY5STLypHyJG8WnvUYhbojVoPPXMYv3FaxhCbJHRQh1rTcmDFBL8tzpub","slot":132,"block_time":1759400132,"instruction_path":"0","sender":"7GhQ9Nuk4Bua858gzkDR5mXbBFWqvas4DXFk99Jvfi5D","receiver":"5jGLwQaGXdSuPrZ3ZPoMK2jh8GcpxRQbS3pr4bQe5SnY","asset":"spl:AtQLFPLZNpxc2BpnuwfKpTyQLzpSS72yEnTjeHiC7zPk","amount":10000000,"decimals":6,"depth":1}
   ],
-  "unexpanded": []
+  "unexpanded": [],
+  "delegated": {
+    "links": [],
+    "unpaired": [],
+    "complete": true,
+    "reason": null,
+    "detail": ""
+  }
 }

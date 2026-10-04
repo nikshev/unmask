@@ -223,5 +223,12 @@
   ],
   "unexpanded": [
     {"wallet":"B6Fo1xZFKfmK4U2rEV4QBLnPJSXWCJ55K6B1vH4QxYFp","depth":0,"reason":"high_degree","counterparties_seen":13,"signatures_seen":13,"signatures_truncated":false}
-  ]
+  ],
+  "delegated": {
+    "links": [],
+    "unpaired": [],
+    "complete": true,
+    "reason": null,
+    "detail": ""
+  }
 }
