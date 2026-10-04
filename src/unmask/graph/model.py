@@ -34,6 +34,7 @@ from unmask.ingest.model import (
     Asset,
     CompletenessStatus,
     IngestResult,
+    NOT_ANALYZED_REASON,
     MissingReason,
     UnexpandedReason,
 )
@@ -77,7 +78,7 @@ class GraphCompletenessStatus(StrEnum):
     INCOMPLETE = "incomplete"
 
 
-NOT_ANALYZED = "not_analyzed"
+NOT_ANALYZED = NOT_ANALYZED_REASON  # одне джерело з 001: "not_analyzed"
 _MISSING_REASONS = frozenset(r.value for r in MissingReason)
 
 
@@ -473,15 +474,16 @@ class GraphCompleteness:
             raise TypeError(f"derive: expected IngestResult, got {type(ingest).__name__}")
         completeness = ingest.completeness
         buyers = completeness.buyers
-        # До T-044 у IngestResult немає `delegated`; відсутній аналіз — чесне
-        # «not_analyzed» (те саме умовчання, що `DelegatedAnalysis.NOT_ANALYZED`), а не «повний».
-        delegated = getattr(ingest, "delegated", None)
+        # З T-044 `IngestResult.delegated` обов'язковий; чесне умовчання «не аналізували» —
+        # `DelegatedAnalysis.NOT_ANALYZED` у самому 001 (єдине джерело). Граф його не вгадує:
+        # зламане поле — порушення контракту 001, гучно. Значення `complete`/`reason`
+        # перевіряє `_reason` у конструкторі (суперечлива пара — ValueError).
+        delegated = ingest.delegated
         if delegated is None:
-            delegated_complete, delegated_reason = False, NOT_ANALYZED
-        else:
-            delegated_complete = delegated.complete
-            reason = delegated.reason
-            delegated_reason = None if reason is None else str(reason)
+            raise TypeError("derive: IngestResult.delegated is None; expected DelegatedAnalysis (contract 001 1.1)")
+        delegated_complete = delegated.complete
+        reason = delegated.reason
+        delegated_reason = None if reason is None else str(reason)
         result = cls(
             tuple(MissingRef(m.wallet, m.depth, m.reason, m.detail) for m in completeness.missing),
             buyers.complete,
