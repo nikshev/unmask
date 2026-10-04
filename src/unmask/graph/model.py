@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field, fields
 from enum import StrEnum
@@ -116,10 +117,11 @@ def _opt_int(name: str, value: Any, lo: int | None = None, hi: int | None = None
 
 
 def _share(name: str, value: Any, *, lo_open: bool) -> None:
-    """Частка з конфігу: число в [0, 1] (або (0, 1], якщо `lo_open`)."""
+    """Частка з конфігу: число в [0, 1] (або (0, 1], якщо `lo_open`). NaN відхиляється: порівняння з ним завжди
+    хибні, тож без явної перевірки поріг-NaN мовчки вимкнув би критерій (FR-002-14)."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"{name}: expected number, got {value!r}")
-    if value > 1 or value < 0 or (lo_open and value == 0):
+    if math.isnan(value) or value > 1 or value < 0 or (lo_open and value == 0):
         raise ValueError(f"{name}: {value} out of range")
 
 

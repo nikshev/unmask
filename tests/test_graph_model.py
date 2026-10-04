@@ -1232,3 +1232,11 @@ def test_graph_result_type_checks():
         _result(g, pruned=[H], metadata=_metadata(nodes_total=5))
     r = _result(g, pruned=[_Pruned(H)])
     assert isinstance(r.pruned, tuple) and isinstance(r.buyer_flags, tuple)
+
+
+@pytest.mark.parametrize("field", ["one_off_senders_share", "giant_component_warn_share"])
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_thresholds_snapshot_rejects_non_finite_shares(field, bad):
+    """NaN порівнюється хибно з усім: поріг-NaN мовчки вимкнув би критерій, тож знімок його не приймає (T-040)."""
+    with pytest.raises(ValueError):
+        _thresholds(**{field: bad})

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://unmask.local/schemas/002/graph-result-1.json",
   "title": "unmask graph result (feature 002, schema 002.1)",
-  "description": "Serialized GraphResult: funding graph for clustering (hubs removed, all buyers kept), prune records with explanations, effect report, inherited completeness. Versioned independently from feature 001 (FR-002-21). Amounts are integers in base units; shares are ratios of the integers stored beside them. 2026-10-04: dust_fanout criterion, buyer_fanout/median_to_buyers measures and dust_* thresholds added after calibration (FR-002-22, research R-22) before any result was ever serialized, so the schema version stays 002.1.",
+  "description": "Serialized GraphResult: funding graph for clustering (hubs removed, all buyers kept), prune records with explanations, effect report, inherited completeness. Versioned independently from feature 001 (FR-002-21). Amounts are integers in base units; shares are ratios of the integers stored beside them. 2026-10-04: dust_fanout criterion, buyer_fanout/median_to_buyers measures and dust_* thresholds added after calibration (FR-002-22, research R-22) before any result was ever serialized, so the schema version stays 002.1. T-040 (2026-10-04, still before any serialized result): top-level allOf gained the warning parities lists_applied=true => no address_lists_not_applied, delegated_incomplete iff delegated_complete=false, and all_sources_pruned iff pruned is non-empty and every graph node is a buyer; the schema version stays 002.1.",
   "type": "object",
   "additionalProperties": false,
   "required": ["metadata", "completeness", "graph", "pruned", "buyer_flags", "report"],
@@ -52,6 +52,28 @@
           "delegated_complete": { "const": true }
         } } }
       }
+    },
+    {
+      "description": "FR-002-12, converse of the first condition: lists applied means no address_lists_not_applied warning",
+      "if": { "properties": { "metadata": { "properties": { "lists_applied": { "const": true } } } } },
+      "then": { "properties": { "report": { "properties": { "warnings": { "not": { "contains": { "const": "address_lists_not_applied" } } } } } } }
+    },
+    {
+      "description": "FR-002-19: delegated_incomplete warning iff the delegated analysis is incomplete",
+      "if": { "properties": { "completeness": { "properties": { "delegated_complete": { "const": false } } } } },
+      "then": { "properties": { "report": { "properties": { "warnings": { "contains": { "const": "delegated_incomplete" } } } } } },
+      "else": { "properties": { "report": { "properties": { "warnings": { "not": { "contains": { "const": "delegated_incomplete" } } } } } } }
+    },
+    {
+      "description": "FR-002-11 (research R-16): all_sources_pruned iff some source was pruned and no non-buyer node is left. Equivalent to report.before non-buyers >= 1 and report.after non-buyers == 0 by the result invariants (pruned records are non-buyers only; graph is the 'after' graph), so it is expressed over pruned and graph.nodes roles instead of comparing report fields. An empty graph.nodes satisfies 'every node is a buyer'",
+      "if": {
+        "properties": {
+          "pruned": { "minItems": 1 },
+          "graph": { "properties": { "nodes": { "items": { "properties": { "roles": { "contains": { "const": "buyer" } } } } } } }
+        }
+      },
+      "then": { "properties": { "report": { "properties": { "warnings": { "contains": { "const": "all_sources_pruned" } } } } } },
+      "else": { "properties": { "report": { "properties": { "warnings": { "not": { "contains": { "const": "all_sources_pruned" } } } } } } }
     }
   ],
   "$defs": {
