@@ -49,7 +49,9 @@
     "ingest_status": "complete",
     "missing": [],
     "buyers_complete": true,
-    "buyers_reason": null
+    "buyers_reason": null,
+    "delegated_complete": true,
+    "delegated_reason": null
   },
   "graph": {
     "nodes": [
@@ -131,8 +133,8 @@
   "notes": {
     "criteria_order": "хити впорядковано за (criterion, detail) як рядками: degree < dust_fanout < ingest_high_degree < known_list < one_off_senders",
     "edge_asset_key": "ключ ребра в edge_keys: [kind, sender, receiver, asset або \"\"]",
-    "warnings": "без delegated_incomplete: поле delegated у результаті 001 з'явиться з T-044 (g_delegated — T-047)",
-    "graph_completeness": "лише частина з результату збору (ingest_status, missing, buyers_*); delegated_* — T-044",
+    "warnings": "delegated_incomplete лише при delegated.complete=false в ingest.json (у сценаріях — дзеркало buyers)",
+    "graph_completeness": "з результату збору: ingest_status, missing, buyers_*; delegated_* — копія delegated.complete/reason; status=complete лише коли повні обидва",
     "delegated": "ребра delegated_buy — з delegated.links словником за (payer, receiver), окремо від переказів; asset/amount/decimals = null, refs без instruction_path; кандидати без пари (delegated.unpaired) у граф не потрапляють; глибина: отримувач <= 0, платник <= 1"
   }
 }

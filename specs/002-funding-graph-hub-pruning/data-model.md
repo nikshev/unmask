@@ -267,6 +267,10 @@ GraphResult(
 
 Інваріанти: `len(graph.buyers()) == metadata.wallets_analyzed` (SC-003); адреси `pruned` не перетинаються з `graph.nodes`; `metadata.nodes_total == len(graph.nodes) + len(pruned)`; `metadata.lists_applied == False` ⇒ `address_lists_not_applied ∈ report.warnings`.
 
+Додаткові інваріанти типу (реалізовані в T-039, `GraphResult.__post_init__`; тип суворіший за наведені вище): `lists_applied ⇔ address_lists_not_applied ∉ warnings` та `completeness.delegated_complete ⇔ delegated_incomplete ∉ warnings` — **в обидва боки**; `report.before.buyers_total == report.after.buyers_total == metadata.wallets_analyzed`; `report.before == (nodes_total, edges_total)`; `report.after` відповідає `graph`; `report.pruned_nodes == len(pruned)`; `config_version`/`lists_version` кожного запису відсікання дорівнюють версіям у метаданих; `graph ∪ pruned.incident_edges` дають рівно `edges_total` різних ребер; адреси `pruned` без дублів; кожне інцидентне ребро запису має адресу запису одним з кінців; кожен кінець ребра — вершина графа або відсічена адреса; `buyer_flags` вказують на покупців графа з тим самим `buyer_rank`.
+
+Межі глибини: `Node.depth` і `MissingRef.depth` — `0 ≤ depth ≤ 3` (`MAX_FUNDING_DEPTH`, `funding_depth` у 001 — 1…3, див. `config-ingest.md`). `GraphService.analyze` додатково відхиляє `GraphInputError` вхід, де `metadata.funding_depth` поза 1…3, або `transfer.depth`/`missing.depth`/`unexpanded.depth` перевищують `metadata.funding_depth` (контракт 001 фактично дає `missing`/`unexpanded` ≤ `funding_depth − 1`; перевірка свідомо м'якша, щоб не відхиляти валідний вихід), а `signature_cap` без `signatures_truncated` або з `counterparties_seen > metadata.counterparty_threshold` — теж `GraphInputError`.
+
 Серіалізація — `graph/serialize.py::to_dict/to_json` за `contracts/graph-result.schema.json`.
 
 ## Зв'язки

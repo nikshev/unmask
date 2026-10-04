@@ -1,6 +1,6 @@
 # trace: ignore-file
 """Генератор фікстур графа фінансування (фіча 002, T-026; розширено T-056: пил, `dust_fanout`, версія 2;
-T-047: делеговані купівлі, сценарій `g_delegated`).
+T-047: делеговані купівлі, сценарій `g_delegated`; T-039: `delegated_*` у повноті й `delegated_incomplete`).
 
 Запуск: `uv run python tests/fixtures/build_graph_fixtures.py [--check]` (без аргументів перезаписує
 `tests/fixtures/graph/<scenario>/{ingest.json, expected.json}`; `--check` лише порівнює з диском і
@@ -49,9 +49,12 @@ T-047: делеговані купівлі, сценарій `g_delegated`).
 * Не-покупець із >= 1 хітом -> запис відсікання; покупець із >= 1 хітом -> позначка (лишається).
 * Звіт: знімки до/після (слабка зв'язність; частка = покупці найбільшої за покупцями компоненти /
   усі покупці), попередження `giant_component` (частка після `>` порогу), `empty_graph` (0 покупців),
-  `all_sources_pruned` (були не-покупці й жодного не лишилось), `address_lists_not_applied`.
-  `delegated_incomplete` тут НЕ входить: поле `delegated` у результаті 001 з'явиться з T-044, і
-  попередження залежить від нього, а не від графа чи відсікання; сценарій `g_delegated` — T-047.
+  `all_sources_pruned` (були не-покупці й жодного не лишилось), `address_lists_not_applied`,
+  `delegated_incomplete` (аналіз делегованих купівель у `ingest.json` неповний — `delegated.complete` false;
+  у сценаріях він дзеркалить `completeness.buyers`, тож поки всі вони повні, попередження немає).
+* Повнота графа (T-039): `status` = `complete` лише коли повний збір **і** `delegated.complete`;
+  `delegated_complete`/`delegated_reason` — копія `delegated.complete`/`delegated.reason` з `ingest.json`
+  (дзеркало `buyers`: делегована частина в сценаріях не аналізується окремо).
 
 Делеговані купівлі (T-047; research R-2, R-5, R-6; FR-002-18)
 -------------------------------------------------------------
@@ -488,7 +491,7 @@ def oracle_depths(addresses: list[str], buyer_set: set[str], transfers: list[dic
 
 
 def oracle_warnings(before: dict, after: dict, thresholds: dict, *, lists_applied: bool,
-                    sources_before: int, sources_after: int) -> list[str]:
+                    sources_before: int, sources_after: int, delegated_complete: bool = True) -> list[str]:
     """Попередження звіту (R-10, R-16): гігантська компонента лише при частці СТРОГО більше порогу."""
     warnings = []
     if after["largest_component_buyer_share"] > thresholds["giant_component_warn_share"]:
@@ -499,6 +502,8 @@ def oracle_warnings(before: dict, after: dict, thresholds: dict, *, lists_applie
         warnings.append("address_lists_not_applied")
     if sources_before > 0 and sources_after == 0:
         warnings.append("all_sources_pruned")
+    if not delegated_complete:
+        warnings.append("delegated_incomplete")
     return sorted(warnings)
 
 
@@ -585,14 +590,15 @@ def build_expected(s: Scenario, ingest: dict) -> dict:
     warnings = oracle_warnings(
         before, after, th, lists_applied=lists is not None,
         sources_before=sum(1 for n in nodes if "buyer" not in n["roles"]),
-        sources_after=sum(1 for a in after_nodes if a not in buyers))
+        sources_after=sum(1 for a in after_nodes if a not in buyers),
+        delegated_complete=ingest["delegated"]["complete"])
 
     missing = ingest["completeness"]["missing"]
     notes = {
         "criteria_order": "хити впорядковано за (criterion, detail) як рядками: degree < dust_fanout < ingest_high_degree < known_list < one_off_senders",
         "edge_asset_key": "ключ ребра в edge_keys: [kind, sender, receiver, asset або \"\"]",
-        "warnings": "без delegated_incomplete: поле delegated у результаті 001 з'явиться з T-044 (g_delegated — T-047)",
-        "graph_completeness": "лише частина з результату збору (ingest_status, missing, buyers_*); delegated_* — T-044",
+        "warnings": "delegated_incomplete лише при delegated.complete=false в ingest.json (у сценаріях — дзеркало buyers)",
+        "graph_completeness": "з результату збору: ingest_status, missing, buyers_*; delegated_* — копія delegated.complete/reason; status=complete лише коли повні обидва",
     }
     if links or ingest["delegated"]["unpaired"]:
         notes["delegated"] = ("ребра delegated_buy — з delegated.links словником за (payer, receiver), окремо від "
@@ -604,10 +610,13 @@ def build_expected(s: Scenario, ingest: dict) -> dict:
         "config": {"version": CONFIG_VERSION, "thresholds": th, "lists": lists},
         "ingest_counterparty_threshold": ct,
         "completeness": {
-            "status": "complete" if ingest["completeness"]["status"] == "complete" else "incomplete",
+            "status": ("complete" if ingest["completeness"]["status"] == "complete" and ingest["delegated"]["complete"]
+                       else "incomplete"),
             "ingest_status": ingest["completeness"]["status"], "missing": missing,
             "buyers_complete": ingest["completeness"]["buyers"]["complete"],
             "buyers_reason": ingest["completeness"]["buyers"]["reason"],
+            "delegated_complete": ingest["delegated"]["complete"],
+            "delegated_reason": ingest["delegated"]["reason"],
         },
         "graph": {"nodes": nodes, "edges": edges},
         "prune": {

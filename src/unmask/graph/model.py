@@ -41,6 +41,12 @@ from unmask.ingest.model import (
 
 GRAPH_SCHEMA_VERSION = "002.1"
 
+# Межа глибини з контракту 001, не налаштування: `funding_depth` — 1..3 (`config-ingest.md`, `ingest/config.py`,
+# `ingest-result.schema.json` — `metadata.funding_depth`, `transfer.depth`, `missing.depth`, `unexpanded.depth`
+# ≤ 3). Ту саму межу має `graph-result.schema.json` (`node.depth`, `missingRef.depth`); модель її дзеркалить, щоб
+# схема не відкидала те, що тип пропустив. Вхід, що її порушує, сервіс відхиляє як `GraphInputError` (T-039).
+MAX_FUNDING_DEPTH = 3
+
 
 # --- Перелічення -----------------------------------------------------------------
 
@@ -250,7 +256,7 @@ class Node:
         if not roles:
             raise ValueError("node.roles: must not be empty")
         _set(self, "roles", roles)
-        _int("node.depth", self.depth, lo=0)
+        _int("node.depth", self.depth, lo=0, hi=MAX_FUNDING_DEPTH)
         _opt_int("node.buyer_rank", self.buyer_rank, lo=1)
         is_buyer = NodeRole.BUYER in roles
         if is_buyer != (self.buyer_rank is not None):
@@ -434,7 +440,7 @@ class MissingRef:
 
     def __post_init__(self) -> None:
         _str("missing.wallet", self.wallet, nonempty=True)
-        _int("missing.depth", self.depth, lo=0)
+        _int("missing.depth", self.depth, lo=0, hi=MAX_FUNDING_DEPTH)
         _enum(self, "reason", MissingReason)
         _str("missing.detail", self.detail, nonempty=False)
 
@@ -583,9 +589,37 @@ class GraphMetadata:
         _int("metadata.edges_total", self.edges_total, lo=0)
 
 
+def _attr(name: str, obj: Any, attr: str) -> Any:
+    """Поле обʼєкта `unmask.hubs` (модель їх не імпортує — принцип VI); відсутнє поле — TypeError."""
+    if not hasattr(obj, attr):
+        raise TypeError(f"{name}: expected an object with {attr!r}, got {obj!r}")
+    return getattr(obj, attr)
+
+
+def _count(name: str, obj: Any, attr: str) -> int:
+    value = _attr(name, obj, attr)
+    _int(f"{name}.{attr}", value, lo=0)
+    return value
+
+
 @dataclass(frozen=True)
 class GraphResult:
-    """Результат фічі 002. `pruned`/`buyer_flags`/`report` — типи `unmask.hubs` (T-035, T-036)."""
+    """Результат фічі 002 (data-model «GraphResult»). `pruned`/`buyer_flags`/`report` — типи `unmask.hubs`
+    (`PruneRecord`, `BuyerFlag`, `EffectReport`; T-035, T-036), перевірені тут за полями, яких потребують
+    інваріанти результату (модель не імпортує `hubs`).
+
+    Інваріанти (гучно, `ValueError`; відсутнє поле — `TypeError`):
+    - SC-003: `len(graph.buyers()) == metadata.wallets_analyzed == report.before/after.buyers_total`;
+    - адреси `pruned` не перетинаються з `graph.nodes`; `metadata.nodes_total == len(graph.nodes) + len(pruned)`;
+    - `graph ∪ pruned` відтворює всі ребра повного графа: різних ребер у `graph.edges` та `incident_edges`
+      записів рівно `metadata.edges_total`, і жодне ребро графа результату не торкається відсіченої вершини;
+    - звіт — про ці самі графи: `report.before.(nodes, edges) == metadata.(nodes_total, edges_total)`,
+      `report.after.(nodes, edges) == (len(graph.nodes), len(graph.edges))`, `report.pruned_nodes == len(pruned)`;
+    - FR-002-12 в обидва боки: `metadata.lists_applied == False` ⇔ `address_lists_not_applied ∈ report.warnings`;
+    - FR-002-19 в обидва боки: `completeness.delegated_complete == False` ⇔ `delegated_incomplete ∈ warnings`;
+    - FR-002-13: кожен запис відсікання несе ті самі версії, що й метадані (`config_version`, `lists_version`);
+    - FR-002-10: кожна позначка покупця вказує на вершину-покупця графа результату з тим самим рангом.
+    """
 
     metadata: GraphMetadata
     completeness: GraphCompleteness
@@ -598,29 +632,108 @@ class GraphResult:
         _instance("result.metadata", self.metadata, GraphMetadata)
         _instance("result.completeness", self.completeness, GraphCompleteness)
         _instance("result.graph", self.graph, FundingGraph)
+        md = self.metadata
         pruned = _items("result.pruned", self.pruned)
         for record in pruned:
             if not isinstance(getattr(record, "address", None), str):
                 raise TypeError(f"result.pruned: expected a prune record with address, got {record!r}")
         _set(self, "pruned", pruned)
-        _set(self, "buyer_flags", _items("result.buyer_flags", self.buyer_flags))
-        warnings = _items("result.report.warnings", getattr(self.report, "warnings", None))
+        flags = _items("result.buyer_flags", self.buyer_flags)
+        _set(self, "buyer_flags", flags)
+        warnings = _items("result.report.warnings", _attr("result.report", self.report, "warnings"))
 
-        buyers = len(self.graph.buyers())
-        if buyers != self.metadata.wallets_analyzed:
+        buyers = self.graph.buyers()
+        if len(buyers) != md.wallets_analyzed:
             raise ValueError(
-                f"result: graph has {buyers} buyers != metadata.wallets_analyzed={self.metadata.wallets_analyzed}"
+                f"result: graph has {len(buyers)} buyers != metadata.wallets_analyzed={md.wallets_analyzed}"
             )
-        overlap = sorted({r.address for r in pruned} & {n.address for n in self.graph.nodes})
+        node_addresses = {n.address for n in self.graph.nodes}
+        pruned_addresses = {r.address for r in pruned}
+        if len(pruned_addresses) != len(pruned):
+            raise ValueError("result.pruned: duplicate address")
+        overlap = sorted(pruned_addresses & node_addresses)
         if overlap:
             raise ValueError(f"result: pruned addresses still in graph: {overlap}")
-        if self.metadata.nodes_total != len(self.graph.nodes) + len(pruned):
+        if md.nodes_total != len(self.graph.nodes) + len(pruned):
             raise ValueError(
-                f"result: metadata.nodes_total={self.metadata.nodes_total} != "
+                f"result: metadata.nodes_total={md.nodes_total} != "
                 f"len(graph.nodes)={len(self.graph.nodes)} + len(pruned)={len(pruned)}"
             )
-        if not self.metadata.lists_applied and GraphWarning.ADDRESS_LISTS_NOT_APPLIED not in warnings:
-            raise ValueError("result: lists not applied requires warning address_lists_not_applied")
+
+        # FR-002-12 / FR-002-19: відсутність списків і неповнота делегованих видимі, і лише тоді.
+        lists_warned = GraphWarning.ADDRESS_LISTS_NOT_APPLIED in warnings
+        if lists_warned == md.lists_applied:
+            raise ValueError(
+                f"result: metadata.lists_applied={md.lists_applied} requires warning address_lists_not_applied "
+                f"iff lists are not applied (warning present: {lists_warned})"
+            )
+        delegated_warned = GraphWarning.DELEGATED_INCOMPLETE in warnings
+        if delegated_warned == self.completeness.delegated_complete:
+            raise ValueError(
+                f"result: completeness.delegated_complete={self.completeness.delegated_complete} requires warning "
+                f"delegated_incomplete iff the delegated analysis is incomplete (warning present: {delegated_warned})"
+            )
+
+        # Звіт — про повний граф метаданих і про граф результату.
+        before = _attr("result.report", self.report, "before")
+        after = _attr("result.report", self.report, "after")
+        for label, snapshot in (("before", before), ("after", after)):
+            total = _count(f"result.report.{label}", snapshot, "buyers_total")
+            if total != md.wallets_analyzed:
+                raise ValueError(
+                    f"result: report.{label}.buyers_total={total} != metadata.wallets_analyzed={md.wallets_analyzed}"
+                )
+        observed = (_count("result.report.before", before, "nodes"), _count("result.report.before", before, "edges"))
+        if observed != (md.nodes_total, md.edges_total):
+            raise ValueError(
+                f"result: report.before (nodes, edges)={observed} != metadata (nodes_total, edges_total)="
+                f"{(md.nodes_total, md.edges_total)}"
+            )
+        observed = (_count("result.report.after", after, "nodes"), _count("result.report.after", after, "edges"))
+        if observed != (len(self.graph.nodes), len(self.graph.edges)):
+            raise ValueError(
+                f"result: report.after (nodes, edges)={observed} != graph "
+                f"{(len(self.graph.nodes), len(self.graph.edges))}"
+            )
+        pruned_nodes = _count("result.report", self.report, "pruned_nodes")
+        if pruned_nodes != len(pruned):
+            raise ValueError(f"result: report.pruned_nodes={pruned_nodes} != len(pruned)={len(pruned)}")
+
+        # FR-002-09/13: записи несуть версії метаданих і разом із графом відтворюють усі ребра.
+        removed: set = set()
+        known = node_addresses | pruned_addresses
+        for record in pruned:
+            versions = (_attr("result.pruned", record, "config_version"),
+                        _attr("result.pruned", record, "lists_version"))
+            if versions != (md.hub_config_version, md.address_lists_version):
+                raise ValueError(
+                    f"result: pruned {record.address} versions (config, lists)={versions} != metadata "
+                    f"{(md.hub_config_version, md.address_lists_version)}"
+                )
+            for edge in _items("result.pruned.incident_edges", _attr("result.pruned", record, "incident_edges")):
+                _instance("result.pruned.incident_edges", edge, Edge)
+                if record.address not in (edge.sender, edge.receiver):
+                    raise ValueError(f"result: pruned {record.address} carries a foreign edge "
+                                     f"{edge.sender} -> {edge.receiver}")
+                if edge.sender not in known or edge.receiver not in known:
+                    raise ValueError(f"result: pruned edge endpoint is neither a node nor pruned: "
+                                     f"{edge.sender} -> {edge.receiver}")
+                removed.add(edge.key)
+        # `kept ∩ removed = ∅` окремо не перевіряється: кожне ребро в `removed` торкається відсіченої адреси
+        # (перевірка «чужого» ребра вище), а кінці ребер графа — його вершини, що не перетинаються з `pruned`.
+        kept = {e.key for e in self.graph.edges}
+        if len(kept) + len(removed) != md.edges_total:
+            raise ValueError(
+                f"result: graph edges {len(kept)} + pruned incident edges {len(removed)} != "
+                f"metadata.edges_total={md.edges_total} (graph ∪ pruned must reproduce every edge)"
+            )
+
+        # FR-002-10: позначка — лише на покупці графа результату.
+        ranks = {n.address: n.buyer_rank for n in buyers}
+        for flag in flags:
+            address = _attr("result.buyer_flags", flag, "address")
+            if address not in ranks or ranks[address] != _attr("result.buyer_flags", flag, "buyer_rank"):
+                raise ValueError(f"result: buyer_flags entry {address!r} is not a buyer of the graph with that rank")
 
 
 # --- Ключі порядку: лише з даних -------------------------------------------------

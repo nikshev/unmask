@@ -277,27 +277,56 @@ def _metadata(wallets_analyzed=2, nodes_total=4, lists_version=1, lists_applied=
 
 @dataclass(frozen=True)
 class _Pruned:
-    """Заглушка `PruneRecord` (hubs, T-035): GraphResult бачить лише `address`."""
+    """Заглушка `PruneRecord` (hubs, T-035): GraphResult бачить `address`, `incident_edges` і версії (T-039)."""
 
     address: str
+    incident_edges: tuple = ()
+    config_version: int = 1  # == _metadata().hub_config_version
+    lists_version: int | None = 1  # == _metadata().address_lists_version
+
+
+@dataclass(frozen=True)
+class _Snap:
+    """Заглушка `EffectSnapshot`: GraphResult звіряє `nodes`, `edges`, `buyers_total` (T-039)."""
+
+    nodes: int
+    edges: int
+    buyers_total: int
 
 
 @dataclass(frozen=True)
 class _Report:
-    """Заглушка `EffectReport` (hubs, T-036): GraphResult бачить лише `warnings`."""
+    """Заглушка `EffectReport` (hubs, T-036): GraphResult бачить `warnings`, а з T-039 — і знімки та `pruned_nodes`.
+
+    Знімки, не задані явно, `_result` заповнює узгоджено з метаданими й графом: ці тести перевіряють інші інваріанти.
+    """
 
     warnings: tuple
+    before: _Snap | None = None
+    after: _Snap | None = None
+    pruned_nodes: int | None = None
 
 
 def _result(graph=None, pruned=(), metadata=None, report=None, completeness=None):
     graph = graph if graph is not None else _basic_graph()
+    metadata = metadata if metadata is not None else _metadata(nodes_total=len(graph.nodes) + len(pruned))
+    report = report if report is not None else _Report(warnings=())
+    if report.before is None:
+        report = dataclasses.replace(
+            report,
+            before=_Snap(metadata.nodes_total, metadata.edges_total, metadata.wallets_analyzed),
+            after=_Snap(len(graph.nodes), len(graph.edges), metadata.wallets_analyzed),
+            pruned_nodes=len(pruned),
+        )
     return GraphResult(
-        metadata=metadata if metadata is not None else _metadata(nodes_total=len(graph.nodes) + len(pruned)),
-        completeness=completeness if completeness is not None else GraphCompleteness.derive(_ingest()),
+        metadata=metadata,
+        # Аналіз делегованих повний: інакше GraphResult (T-039) вимагає попередження `delegated_incomplete`.
+        completeness=(completeness if completeness is not None
+                      else GraphCompleteness.derive(_ingest(delegated=DELEGATED_OK))),
         graph=graph,
         pruned=tuple(pruned),
         buyer_flags=(),
-        report=report if report is not None else _Report(warnings=()),
+        report=report,
     )
 
 
@@ -1173,7 +1202,7 @@ def test_graph_result_requires_all_buyers_present_and_disjoint_pruned():
         dataclasses.replace(r, graph=g.without(frozenset({A})))
     # Порожній граф без покупців — валідний результат.
     empty = FundingGraph(nodes=(), edges=())
-    assert _result(empty, metadata=_metadata(wallets_analyzed=0, nodes_total=0)).graph == empty
+    assert _result(empty, metadata=_metadata(wallets_analyzed=0, nodes_total=0, edges_total=0)).graph == empty
 
 
 def test_graph_result_lists_not_applied_requires_warning():
