@@ -1,0 +1,409 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unmask.local/schemas/003/cluster-result-1.json",
+  "title": "unmask cluster result (feature 003, schema 003.1)",
+  "description": "Serialized ClusterResult: clusters of early buyers with evidence, token risk score and band, inherited completeness, diagnostics. Versioned independently from feature 001 (ingest 1.1) and feature 002 (graph 002.1) (FR-003-20). Amounts are integers in base units; shares and confidences are ratios rounded to 4 decimals with the integers they derive from stored beside them. Parities that JSON Schema can express live in allOf (FR-003-09, FR-003-14, FR-003-15, FR-003-16, FR-003-17); numeric relations between fields (risk_score formula, band thresholds, confidence formula) are enforced by the model and checked by tests.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["metadata", "completeness", "clusters", "diagnostics", "risk_score", "computed_band", "band", "band_reasons"],
+  "properties": {
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "completeness": { "$ref": "#/$defs/completeness" },
+    "clusters": { "type": "array", "items": { "$ref": "#/$defs/cluster" } },
+    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } },
+    "risk_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "computed_band": { "enum": ["clean", "suspicious", "high_concentration"] },
+    "band": { "$ref": "#/$defs/band" },
+    "band_reasons": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/bandReason" }
+    }
+  },
+  "allOf": [
+    {
+      "description": "FR-003-15: a clean band is impossible over an incomplete graph",
+      "if": { "properties": { "completeness": { "properties": { "graph_status": { "const": "incomplete" } } } } },
+      "then": { "properties": { "band": { "not": { "const": "clean" } } } }
+    },
+    {
+      "description": "FR-003-15: clean band requires a complete graph, at least one buyer and a clean computed band",
+      "if": { "properties": { "band": { "const": "clean" } } },
+      "then": {
+        "properties": {
+          "computed_band": { "const": "clean" },
+          "completeness": { "properties": { "graph_status": { "const": "complete" } } },
+          "metadata": { "properties": { "wallets_analyzed": { "minimum": 1 } } },
+          "band_reasons": {
+            "contains": { "enum": ["no_clusters_on_complete_data", "clusters_within_clean_threshold"] },
+            "not": { "contains": { "enum": ["empty_input", "ingest_incomplete", "delegated_incomplete"] } }
+          }
+        }
+      }
+    },
+    {
+      "description": "FR-003-15: a computed suspicious/high band stays as the lower bound regardless of completeness",
+      "if": { "properties": { "computed_band": { "enum": ["suspicious", "high_concentration"] } } },
+      "then": {
+        "properties": {
+          "band_reasons": { "contains": { "const": "clusters_share_weighted" } }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "computed_band": { "const": "suspicious" } } },
+            "then": { "properties": { "band": { "const": "suspicious" } } },
+            "else": { "properties": { "band": { "const": "high_concentration" } } }
+          }
+        ]
+      }
+    },
+    {
+      "description": "FR-003-16: empty input is explicit 'no data', never clean: insufficient_data with reason empty_input, no clusters, score 0",
+      "if": { "properties": { "metadata": { "properties": { "wallets_analyzed": { "const": 0 } } } } },
+      "then": {
+        "properties": {
+          "band": { "const": "insufficient_data" },
+          "computed_band": { "const": "clean" },
+          "clusters": { "maxItems": 0 },
+          "risk_score": { "const": 0 },
+          "band_reasons": { "contains": { "const": "empty_input" } },
+          "metadata": { "properties": { "share_denominator": { "const": 0 } } }
+        }
+      }
+    },
+    {
+      "description": "insufficient_data always names a completeness reason",
+      "if": { "properties": { "band": { "const": "insufficient_data" } } },
+      "then": {
+        "properties": {
+          "computed_band": { "const": "clean" },
+          "band_reasons": {
+            "contains": { "anyOf": [
+              { "const": "empty_input" },
+              { "const": "ingest_incomplete" },
+              { "const": "delegated_incomplete" },
+              { "pattern": "^missing_histories:[1-9][0-9]*$" }
+            ] }
+          }
+        }
+      }
+    },
+    {
+      "description": "FR-003-14: a non-zero score is never returned without clusters that explain it",
+      "if": { "properties": { "risk_score": { "minimum": 1 } } },
+      "then": { "properties": { "clusters": { "minItems": 1 } } }
+    },
+    {
+      "description": "clean band explanation: no clusters <=> reason no_clusters_on_complete_data",
+      "if": { "properties": { "band": { "const": "clean" }, "clusters": { "maxItems": 0 } } },
+      "then": { "properties": { "band_reasons": { "contains": { "const": "no_clusters_on_complete_data" } } } }
+    },
+    {
+      "description": "FR-003-15 (inheritance): delegated analysis incomplete <=> delegated_incomplete among inherited graph warnings",
+      "if": { "properties": { "completeness": { "properties": { "delegated_complete": { "const": false } } } } },
+      "then": { "properties": { "completeness": { "properties": { "graph_warnings": { "contains": { "const": "delegated_incomplete" } } } } } },
+      "else": { "properties": { "completeness": { "properties": { "graph_warnings": { "not": { "contains": { "const": "delegated_incomplete" } } } } } } }
+    },
+    {
+      "description": "FR-003-18: lists_applied iff a lists version is present (mirrors 002)",
+      "if": { "properties": { "metadata": { "properties": { "lists_applied": { "const": true } } } } },
+      "then": { "properties": { "metadata": { "properties": { "address_lists_version": { "type": "integer" } } } } },
+      "else": { "properties": { "metadata": { "properties": { "address_lists_version": { "type": "null" } } } } }
+    }
+  ],
+  "$defs": {
+    "address": { "type": "string", "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$" },
+    "signature": { "type": "string", "pattern": "^[1-9A-HJ-NP-Za-km-z]{64,88}$" },
+    "nonNegInt": { "type": "integer", "minimum": 0 },
+    "posInt": { "type": "integer", "minimum": 1 },
+    "share": { "type": "number", "minimum": 0, "maximum": 1 },
+    "openUnit": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+    "halfOpenUnit": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+
+    "band": { "enum": ["clean", "suspicious", "high_concentration", "insufficient_data"] },
+
+    "bandReason": {
+      "anyOf": [
+        { "enum": ["no_clusters_on_complete_data", "clusters_within_clean_threshold", "clusters_share_weighted", "empty_input", "ingest_incomplete", "delegated_incomplete"] },
+        { "type": "string", "pattern": "^missing_histories:[1-9][0-9]*$" }
+      ]
+    },
+
+    "evidenceType": { "enum": ["shared_funder", "direct_transfer", "delegated_buy", "recovered_edge", "indirect_link", "same_amounts", "same_slot"] },
+    "linkType": { "enum": ["shared_funder", "direct_transfer", "delegated_buy", "recovered_edge", "indirect_link"] },
+    "behavioralType": { "enum": ["same_amounts", "same_slot"] },
+    "timeBasis": { "enum": ["block_time", "slot"] },
+
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mint", "schema_version", "cluster_config_version", "thresholds", "graph_schema_version",
+        "hub_config_version", "address_lists_version", "lists_applied", "ingest_config_version",
+        "ingest_analyzed_at", "ingest_source", "wallets_analyzed", "share_denominator", "share_denominator_kind"
+      ],
+      "properties": {
+        "mint": { "$ref": "#/$defs/address" },
+        "schema_version": { "const": "003.1" },
+        "cluster_config_version": { "$ref": "#/$defs/posInt" },
+        "thresholds": { "$ref": "#/$defs/thresholds" },
+        "graph_schema_version": { "const": "002.1" },
+        "hub_config_version": { "$ref": "#/$defs/posInt" },
+        "address_lists_version": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/posInt" } ] },
+        "lists_applied": { "type": "boolean" },
+        "ingest_config_version": { "$ref": "#/$defs/posInt" },
+        "ingest_analyzed_at": { "$ref": "#/$defs/nonNegInt" },
+        "ingest_source": { "type": "string", "pattern": "^(fixture:[A-Za-z0-9_-]+|http)$" },
+        "wallets_analyzed": { "$ref": "#/$defs/nonNegInt" },
+        "share_denominator": {
+          "description": "FR-003-11: sum of received_amount over all analyzed buyers; the denominator of every cluster share. 0 iff wallets_analyzed == 0",
+          "$ref": "#/$defs/nonNegInt"
+        },
+        "share_denominator_kind": {
+          "description": "FR-003-11: the denominator is named explicitly - tokens bought by the analyzed early buyers, not total supply",
+          "const": "analyzed_buyers_received_amount"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "wallets_analyzed": { "const": 0 } } },
+          "then": { "properties": { "share_denominator": { "const": 0 } } },
+          "else": { "properties": { "share_denominator": { "minimum": 1 } } }
+        }
+      ]
+    },
+
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Snapshot of every config/clusters.yaml value except version (FR-003-18; contracts/config-clusters.md)",
+      "required": [
+        "link_min_amount_lamports", "funding_window_seconds", "seconds_per_slot", "link_through_flagged_buyers",
+        "link_assets", "indirect_enabled", "same_amount_natural_max", "same_slot_natural_max", "same_slot_window_slots",
+        "evidence_weights", "slot_fallback_multiplier", "artifact_buyer_share", "artifact_confidence_multiplier",
+        "band_clean_max", "band_suspicious_max"
+      ],
+      "properties": {
+        "link_min_amount_lamports": { "$ref": "#/$defs/posInt" },
+        "funding_window_seconds": { "$ref": "#/$defs/posInt" },
+        "seconds_per_slot": { "type": "number", "exclusiveMinimum": 0 },
+        "link_through_flagged_buyers": { "type": "boolean" },
+        "link_assets": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^(sol|spl:[1-9A-HJ-NP-Za-km-z]{32,44})$" }
+        },
+        "indirect_enabled": { "type": "boolean" },
+        "same_amount_natural_max": { "$ref": "#/$defs/posInt" },
+        "same_slot_natural_max": { "$ref": "#/$defs/posInt" },
+        "same_slot_window_slots": { "$ref": "#/$defs/nonNegInt" },
+        "evidence_weights": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["shared_funder", "direct_transfer", "delegated_buy", "recovered_edge", "indirect_link", "same_amounts", "same_slot"],
+          "properties": {
+            "shared_funder": { "$ref": "#/$defs/openUnit" },
+            "direct_transfer": { "$ref": "#/$defs/openUnit" },
+            "delegated_buy": { "$ref": "#/$defs/openUnit" },
+            "recovered_edge": { "$ref": "#/$defs/openUnit" },
+            "indirect_link": { "$ref": "#/$defs/openUnit" },
+            "same_amounts": { "$ref": "#/$defs/openUnit" },
+            "same_slot": { "$ref": "#/$defs/openUnit" }
+          }
+        },
+        "slot_fallback_multiplier": { "$ref": "#/$defs/halfOpenUnit" },
+        "artifact_buyer_share": { "$ref": "#/$defs/halfOpenUnit" },
+        "artifact_confidence_multiplier": { "$ref": "#/$defs/halfOpenUnit" },
+        "band_clean_max": { "type": "integer", "minimum": 0, "maximum": 99 },
+        "band_suspicious_max": { "type": "integer", "minimum": 1, "maximum": 100 }
+      }
+    },
+
+    "completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["graph_status", "ingest_status", "missing_count", "delegated_complete", "delegated_reason", "graph_warnings", "can_be_clean"],
+      "properties": {
+        "graph_status": { "enum": ["complete", "incomplete"] },
+        "ingest_status": { "enum": ["complete", "incomplete"] },
+        "missing_count": { "$ref": "#/$defs/nonNegInt" },
+        "delegated_complete": { "type": "boolean" },
+        "delegated_reason": { "oneOf": [ { "type": "null" }, { "enum": ["rate_limited", "timeout", "unavailable", "corrupt_data", "budget_exhausted", "not_analyzed"] } ] },
+        "graph_warnings": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["address_lists_not_applied", "giant_component", "empty_graph", "all_sources_pruned", "delegated_incomplete"] }
+        },
+        "can_be_clean": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "description": "FR-003-15: graph status mirrors 002 - complete requires complete ingest and complete delegated analysis",
+          "if": { "properties": { "graph_status": { "const": "complete" } } },
+          "then": { "properties": { "ingest_status": { "const": "complete" }, "missing_count": { "const": 0 }, "delegated_complete": { "const": true }, "delegated_reason": { "type": "null" } } },
+          "else": { "properties": { "can_be_clean": { "const": false } } }
+        },
+        {
+          "if": { "properties": { "delegated_complete": { "const": true } } },
+          "then": { "properties": { "delegated_reason": { "type": "null" } } },
+          "else": { "properties": { "delegated_reason": { "type": "string" } } }
+        },
+        {
+          "if": { "properties": { "ingest_status": { "const": "incomplete" } } },
+          "then": { "properties": { "graph_status": { "const": "incomplete" } } }
+        }
+      ]
+    },
+
+    "edgeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signature", "slot", "instruction_path"],
+      "properties": {
+        "signature": { "$ref": "#/$defs/signature" },
+        "slot": { "$ref": "#/$defs/nonNegInt" },
+        "instruction_path": { "oneOf": [ { "type": "null" }, { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" } ] }
+      }
+    },
+
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["basis", "start", "end"],
+      "properties": {
+        "basis": { "$ref": "#/$defs/timeBasis" },
+        "start": { "$ref": "#/$defs/nonNegInt" },
+        "end": { "$ref": "#/$defs/nonNegInt" }
+      }
+    },
+
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "wallets", "via", "refs", "window", "basis", "value", "detail", "weight"],
+      "properties": {
+        "type": { "$ref": "#/$defs/evidenceType" },
+        "wallets": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "$ref": "#/$defs/address" } },
+        "via": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/address" } },
+        "refs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/edgeRef" } },
+        "window": { "$ref": "#/$defs/window" },
+        "basis": { "$ref": "#/$defs/timeBasis" },
+        "value": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/nonNegInt" } ] },
+        "detail": { "oneOf": [ { "type": "null" }, { "enum": ["funding", "first_buy_spent"] } ] },
+        "weight": { "description": "FR-003-11, principle V: the evidence's effective contribution to the noisy-OR confidence after multipliers", "$ref": "#/$defs/openUnit" }
+      },
+      "allOf": [
+        {
+          "description": "FR-003-04: an indirect link names every intermediate vertex; shared_funder/recovered_edge name the source",
+          "if": { "properties": { "type": { "enum": ["indirect_link", "shared_funder", "recovered_edge"] } } },
+          "then": { "properties": { "via": { "minItems": 1 } } }
+        },
+        {
+          "description": "direct transfers and behavioral evidence have no intermediate vertices",
+          "if": { "properties": { "type": { "enum": ["direct_transfer", "same_amounts", "same_slot"] } } },
+          "then": { "properties": { "via": { "maxItems": 0 } } }
+        },
+        {
+          "description": "FR-003-08: behavioral evidence carries the matched value; link evidence carries none. same_amounts names which amount matched",
+          "if": { "properties": { "type": { "$ref": "#/$defs/behavioralType" } } },
+          "then": {
+            "properties": { "value": { "type": "integer" }, "window": { "properties": { "basis": { "const": "slot" } } }, "basis": { "const": "slot" } },
+            "allOf": [
+              {
+                "if": { "properties": { "type": { "const": "same_amounts" } } },
+                "then": { "properties": { "detail": { "type": "string" } } },
+                "else": { "properties": { "detail": { "type": "null" } } }
+              }
+            ]
+          },
+          "else": { "properties": { "value": { "type": "null" }, "detail": { "type": "null" } } }
+        },
+        {
+          "description": "FR-003-03: delegated_buy refs are transaction-level (no instruction path); transfer-based links carry instruction paths",
+          "if": { "properties": { "type": { "const": "delegated_buy" } } },
+          "then": { "properties": { "refs": { "items": { "properties": { "instruction_path": { "type": "null" } } } } } }
+        },
+        {
+          "if": { "properties": { "type": { "enum": ["shared_funder", "direct_transfer", "recovered_edge", "indirect_link"] } } },
+          "then": { "properties": { "refs": { "items": { "properties": { "instruction_path": { "type": "string" } } } } } }
+        }
+      ]
+    },
+
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wallet", "buyer_rank", "received_amount"],
+      "properties": {
+        "wallet": { "$ref": "#/$defs/address" },
+        "buyer_rank": { "$ref": "#/$defs/posInt" },
+        "received_amount": { "$ref": "#/$defs/posInt" }
+      }
+    },
+
+    "cluster": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cluster_id", "members", "share_numerator", "share_denominator", "share", "confidence", "evidence", "warnings"],
+      "properties": {
+        "cluster_id": { "type": "string", "pattern": "^c-[0-9a-f]{16}$" },
+        "members": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/member" } },
+        "share_numerator": { "$ref": "#/$defs/posInt" },
+        "share_denominator": { "$ref": "#/$defs/posInt" },
+        "share": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "confidence": { "$ref": "#/$defs/openUnit" },
+        "evidence": {
+          "description": "FR-003-07, SC-002: never empty. FR-003-09: at least one link-type evidence - behavioral evidence alone never forms a cluster",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evidence" },
+          "contains": { "properties": { "type": { "$ref": "#/$defs/linkType" } } }
+        },
+        "warnings": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["possible_pruning_artifact", "slot_time_fallback"] }
+        }
+      },
+      "allOf": [
+        {
+          "description": "slot_time_fallback iff some link evidence was measured in slots",
+          "if": { "properties": { "evidence": { "contains": { "properties": { "type": { "$ref": "#/$defs/linkType" }, "basis": { "const": "slot" } } } } } },
+          "then": { "properties": { "warnings": { "contains": { "const": "slot_time_fallback" } } } },
+          "else": { "properties": { "warnings": { "not": { "contains": { "const": "slot_time_fallback" } } } } }
+        }
+      ]
+    },
+
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "wallets", "value", "count", "detail"],
+      "properties": {
+        "kind": { "enum": ["same_amounts_unlinked", "same_slot_unlinked", "flagged_buyers_excluded"] },
+        "wallets": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/address" } },
+        "value": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/nonNegInt" } ] },
+        "count": { "$ref": "#/$defs/posInt" },
+        "detail": { "type": "array", "items": { "type": "string" } }
+      },
+      "allOf": [
+        {
+          "description": "FR-003-09: behavioral coincidences carry the matched value; the flagged-buyers signal carries the 002 criteria per address instead",
+          "if": { "properties": { "kind": { "const": "flagged_buyers_excluded" } } },
+          "then": { "properties": { "value": { "type": "null" }, "detail": { "minItems": 1, "items": { "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}:(known_list|degree|one_off_senders|ingest_high_degree|dust_fanout)$" } } } },
+          "else": { "properties": { "value": { "type": "integer" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "same_amounts_unlinked" } } },
+          "then": { "properties": { "detail": { "minItems": 1, "maxItems": 1, "items": { "enum": ["funding", "first_buy_spent"] } } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "same_slot_unlinked" } } },
+          "then": { "properties": { "detail": { "maxItems": 0 } } }
+        }
+      ]
+    }
+  }
+}
