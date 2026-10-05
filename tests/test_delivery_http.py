@@ -105,3 +105,14 @@ def test_wrong_method_returns_405() -> None:
         assert getattr(handler, method) is handler._method_not_allowed
     assert "405" in ast.dump(ast.parse(
         (ROOT / "src" / "unmask" / "delivery" / "http.py").read_text(encoding="utf-8")))
+
+
+def test_unexpected_pipeline_exception_returns_500_without_stacktrace() -> None:
+    class Exploding:
+        def analyze(self, mint: str):
+            raise RuntimeError("defect")
+
+    status, doc = handle_token_request("11111111111111111111111111111111", Exploding())
+    assert status == 500
+    assert doc["error"] == {"kind": "internal", "detail": "RuntimeError"}
+    assert "Traceback" not in json.dumps(doc)

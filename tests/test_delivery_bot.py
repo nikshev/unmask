@@ -71,7 +71,7 @@ def test_evidence_callback_sends_full_proof_text() -> None:
     requests: dict[str, str] = {}
     handle_check(f"/check {mint}", service, transport, 123, requests, render=_render())
     callback_id = _check_id(transport)
-    handle_evidence(callback_id, "q1", service, transport, 123, requests)
+    handle_evidence(callback_id, "q1", service, transport, 123, requests, limit=4000)
     kinds = [c[0] for c in transport.calls]
     assert kinds[0] == "send_photo" and kinds[1] == "answer_callback"
     texts = [c[1][1] for c in transport.calls if c[0] == "send_message"]
@@ -116,7 +116,7 @@ def test_invalid_mint_replies_error_and_stays_alive() -> None:
         {"update_id": 1, "message": {"message_id": 1, "chat": {"id": 7}, "text": "/check !!!"}},
         {"update_id": 2, "message": {"message_id": 2, "chat": {"id": 7}, "text": "/check ???"}},
     ])
-    requests = run_polling(transport, service, stop_after=2)
+    requests = run_polling(transport, service, evidence_limit=4000, stop_after=2)
     assert requests == {}
     texts = [c[1][1] for c in transport.calls if c[0] == "send_message"]
     assert len(texts) == 2 and all("адресу" in t for t in texts)
@@ -127,14 +127,96 @@ def test_unknown_command_is_ignored_silently() -> None:
     transport = JournalTransport([
         {"update_id": 1, "message": {"message_id": 1, "chat": {"id": 7}, "text": "привіт"}},
     ])
-    assert run_polling(transport, service, stop_after=1) == {}
+    assert run_polling(transport, service, evidence_limit=4000, stop_after=1) == {}
     assert transport.calls == []
 
 
 def test_stale_callback_answers_expired_rerun_check() -> None:
     service, _ = _service(["ins4"])
     transport = JournalTransport()
-    handle_evidence("evidence:dead:0", "q9", service, transport, 123, {})
+    handle_evidence("evidence:dead:0", "q9", service, transport, 123, {}, limit=4000)
     kinds = [c[0] for c in transport.calls]
     assert kinds == ["answer_callback", "send_message"]
     assert "застарів" in transport.calls[1][1][1]
+
+
+class FlakyTransport(JournalTransport):
+    """Перший get_updates кидає мережевий виняток, далі віддає чергу."""
+
+    def __init__(self, updates):
+        super().__init__(updates)
+        self.failures = 1
+
+    def get_updates(self, offset: int, timeout: int):
+        if self.failures > 0:
+            self.failures -= 1
+            raise ConnectionError("network down")
+        return super().get_updates(offset, timeout)
+
+
+def test_polling_survives_get_updates_failure_with_backoff() -> None:
+    service, _ = _service(["ins4"])
+    mint, _ = _mint_of("ins4")
+    transport = FlakyTransport([
+        {"update_id": 1, "message": {"message_id": 1, "chat": {"id": 7}, "text": f"/check {mint}"}},
+    ])
+    sleeps = []
+    requests = run_polling(transport, service, evidence_limit=4000, stop_after=1,
+                           render=_render(), sleep=sleeps.append)
+    assert sleeps == [1.0]
+    assert len(requests) == 1
+    assert any(c[0] == "send_photo" for c in transport.calls)
+
+
+def test_evidence_limit_comes_from_config_not_code_default() -> None:
+    service, _ = _service(["ins4"])
+    mint, _ = _mint_of("ins4")
+    doc = service.analyze(mint)
+    from unmask.delivery.bot import format_evidence
+    assert format_evidence(doc, 4000) == format_evidence(doc, 4000)
+    assert format_evidence(doc, 50) != format_evidence(doc, 4000)
+    transport = JournalTransport()
+    requests: dict[str, str] = {}
+    handle_check(f"/check {mint}", service, transport, 123, requests, render=_render())
+    callback_id = _check_id(transport)
+    handle_evidence(callback_id, "q1", service, transport, 123, requests, limit=50)
+    texts = [c[1][1] for c in transport.calls if c[0] == "send_message"]
+    assert len(texts) > 1 and "і ще" in texts[0]
+
+
+def test_insufficient_data_caption_names_band_and_never_clean() -> None:
+    service, _ = _service(["cln2"])
+    mint, _ = _mint_of("cln2")
+    doc = service.analyze(mint)
+    assert doc["band"] == "insufficient_data"
+    transport = JournalTransport()
+    handle_check(f"/check {mint}", service, transport, 123, {}, render=_render())
+    caption = next(c[1][2] for c in transport.calls if c[0] == "send_photo")
+    assert "недостатньо даних" in caption
+    assert "чисто" not in caption
+
+
+def test_long_source_lists_show_remainder_count() -> None:
+    from unmask.delivery.bot import format_evidence
+    doc = {"clusters": [{"supply_share": 0.5, "confidence": 0.6,
+                         "evidence": [{"type": "shared_funder",
+                                       "source": [f"A{i}" + "1" * 31 for i in range(7)],
+                                       "window": {"basis": "block_time", "start": 1, "end": 2}}]}]}
+    (text,) = format_evidence(doc, 4000)
+    assert "+3 ще" in text
+
+
+def test_request_registry_is_bounded() -> None:
+    from unmask.delivery import bot as bot_module
+
+    class Canned:
+        def analyze(self, mint: str):
+            return {"mint": mint, "analyzed_at": 1, "wallets_analyzed": 1, "clusters": [],
+                    "risk_score": 0, "band": "insufficient_data", "band_reasons": ["empty_input"],
+                    "provenance": {}, "error": None}
+
+    updates = [{"update_id": i, "message": {"message_id": i, "chat": {"id": 7},
+                                            "text": f"/check MINT{i:04d}"}} for i in range(1010)]
+    transport = JournalTransport(updates)
+    requests = run_polling(transport, Canned(), evidence_limit=4000, stop_after=1010)
+    assert len(requests) == bot_module._MAX_REQUESTS == 1000

@@ -7,8 +7,9 @@
 
 from __future__ import annotations
 
+import copy
 import threading
-from typing import Any, Callable, Hashable
+from typing import Any, Callable
 
 __all__ = ["DeliveryCache"]
 
@@ -22,9 +23,11 @@ class DeliveryCache:
         self._inflight: dict[str, tuple[threading.Event, list]] = {}
 
     def get(self, mint: str) -> Any | None:
-        """Збережений документ або `None` (промах — не виняток)."""
+        """Збережений документ або `None` (промах — не виняток). Повертає копію:
+        викликачі не можуть зіпсувати кеш мутацією (SC-002 тримається побайтово)."""
         with self._lock:
-            return self._docs.get(mint)
+            doc = self._docs.get(mint)
+            return copy.deepcopy(doc) if doc is not None else None
 
     def store(self, mint: str, doc: Any) -> None:
         """Покласти документ; перезаписує мовчки (той самий вміст — та сама відповідь)."""
@@ -51,7 +54,7 @@ class DeliveryCache:
             event.wait()
             with self._lock:
                 if mint in self._docs:
-                    return self._docs[mint]
+                    return copy.deepcopy(self._docs[mint])
             raise errors[0]
         try:
             doc = build()
@@ -65,4 +68,4 @@ class DeliveryCache:
             self._docs[mint] = doc
             self._inflight.pop(mint, None)
             event.set()
-        return doc
+        return copy.deepcopy(doc)

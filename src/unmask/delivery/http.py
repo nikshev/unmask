@@ -42,8 +42,15 @@ def handle_health() -> tuple[int, dict[str, Any]]:
 
 
 def handle_token_request(mint: str, service) -> tuple[int, dict[str, Any]]:
-    """`(статус, документ)`: 200 з відповіддю 004.1 або 4xx з документом-помилкою."""
-    doc = service.analyze(unquote(mint))
+    """`(статус, документ)`: 200 з відповіддю 004.1, 4xx з документом-помилкою, 5xx при дефекті.
+
+    Непередбачений виняток конвеєра дає 500 з типом винятку (без стеку й без значень);
+    процес і зʼєднання лишаються живими.
+    """
+    try:
+        doc = service.analyze(unquote(mint))
+    except Exception as exc:
+        return 500, {"mint": mint, "error": {"kind": "internal", "detail": type(exc).__name__}}
     error = doc.get("error")
     if error is None:
         return 200, doc

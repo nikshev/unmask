@@ -75,8 +75,10 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
 
     if not args.no_bot:
         transport = HttpxBotTransport(bot_token or "")
-        thread = threading.Thread(target=run_polling, args=(transport, service),
-                                  kwargs={"render": render}, daemon=True)
+        thread = threading.Thread(
+            target=run_polling, args=(transport, service),
+            kwargs={"render": render, "evidence_limit": delivery_cfg.evidence_preview_limit},
+            daemon=True)
         thread.start()
     serve(service, args.port or delivery_cfg.http_port)
     return 0

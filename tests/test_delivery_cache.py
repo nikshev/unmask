@@ -85,3 +85,11 @@ def test_rejection_is_never_cached() -> None:
     assert cache.get("M") is None
     cache.store("M", {"ok": True})
     assert cache.get("M") == {"ok": True}
+
+
+def test_returned_documents_are_copies_mutation_does_not_poison_cache() -> None:
+    cache = DeliveryCache()
+    first = cache.single_flight("M", lambda: {"clusters": [{"n": 1}]})
+    first["clusters"].append({"n": 2})
+    assert cache.get("M") == {"clusters": [{"n": 1}]}
+    assert cache.single_flight("M", lambda: {"other": True}) == {"clusters": [{"n": 1}]}

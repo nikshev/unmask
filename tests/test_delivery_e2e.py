@@ -67,8 +67,12 @@ def test_three_insider_three_clean_end_to_end_matches_003_baseline() -> None:
         assert (doc["risk_score"], doc["band"]) == baseline[label], label
         if label.startswith("ins"):
             assert len(doc["clusters"]) >= 1 and all(len(c["evidence"]) >= 1 for c in doc["clusters"]), label
+        elif label == "cln1":
+            assert doc["clusters"] == [] and doc["risk_score"] == 0, label
         else:
-            assert doc["risk_score"] <= 20 or doc["band"] != "clean", label
+            # cln2/cln3 мають малі кластери, але смуга — завжди insufficient_data, ніколи clean:
+            assert doc["band"] == "insufficient_data", label
+            assert doc["risk_score"] <= 20, label
 
 
 def test_bot_and_http_agree_byte_for_byte_on_same_mint() -> None:

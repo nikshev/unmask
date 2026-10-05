@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Protocol
 
 import httpx
@@ -48,9 +49,11 @@ class HttpxBotTransport:
     """Живий транспорт: сирі POST до `https://api.telegram.org/bot<token>/<method>`."""
 
     def __init__(self, token: str, *, base_url: str = "https://api.telegram.org",
-                 timeout: float = 35.0) -> None:
+                 timeout: float = 70.0) -> None:
         if not token or not isinstance(token, str):
             raise ValueError("token: expected non-empty string")
+        if timeout <= 60.0:
+            raise ValueError("timeout: must exceed the 60s long-poll window")
         self._token = token
         self._client = httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout)
 
@@ -156,9 +159,11 @@ def format_evidence(doc: dict[str, Any], limit: int) -> list[str]:
         rows = [f"Кластер #{i + 1} (частка {cluster['supply_share']}, "
                 f"впевненість {cluster['confidence']})"]
         for ev in cluster["evidence"]:
-            sources = ", ".join(_short(s) for s in ev["source"][:4])
+            shown = [_short(s) for s in ev["source"][:4]]
+            if len(ev["source"]) > 4:
+                shown.append(f"+{len(ev['source']) - 4} ще")
             window = ev["window"]
-            rows.append(f"• {ev['type']}: {sources}, вікно {window['start']}–{window['end']} ({window['basis']})")
+            rows.append(f"• {ev['type']}: {', '.join(shown)}, вікно {window['start']}–{window['end']} ({window['basis']})")
         blocks.append("\n".join(rows))
     full = "\n\n".join(blocks)
     if len(full) <= limit:
@@ -214,8 +219,12 @@ def handle_check(text: str, service, transport: BotTransport, chat_id: Any,
 
 
 def handle_evidence(callback_data: str, callback_id: str, service, transport: BotTransport,
-                    chat_id: Any, requests: dict[str, str], *, limit: int = 4000) -> None:
-    """Callback кнопки «докази»: повний текст або відповідь про застарілий запит."""
+                    chat_id: Any, requests: dict[str, str], *, limit: int) -> None:
+    """Callback кнопки «докази»: повний текст або відповідь про застарілий запит.
+
+    `limit` — завжди з `delivery.yaml` (FR-004-11); без умовчання, щоб зашите число
+    не могло мовчки підмінити версіоновану сталу.
+    """
     transport.answer_callback(callback_id)
     kind, _, request_id = callback_data.partition(":")
     mint = requests.get(request_id) if kind == "evidence" else None
@@ -234,14 +243,34 @@ def handle_evidence(callback_data: str, callback_id: str, service, transport: Bo
         transport.send_message(chat_id, chunk)
 
 
-def run_polling(transport: BotTransport, service, *, render=None,
-                stop_after: int | None = None) -> dict[str, str]:
-    """Цикл опитування. `stop_after=N` — обробити N апдейтів і повернути реєстр (для тестів)."""
+_MAX_REQUESTS = 1000  # межа реєстру callback-запитів; старі витісняються (шлях «застарів»)
+
+
+def run_polling(transport: BotTransport, service, *, render=None, evidence_limit: int,
+                stop_after: int | None = None,
+                sleep=None) -> dict[str, str]:
+    """Цикл опитування. `stop_after=N` — обробити N апдейтів і повернути реєстр (для тестів).
+
+    `evidence_limit` — з `delivery.yaml` (без умовчання, FR-004-11). Збій `get_updates`
+    (таймаут long-poll, мережа, 5xx) не вбиває цикл: пауза з нарощуванням і повтор.
+    """
+    if sleep is None:
+        sleep = time.sleep
     requests: dict[str, str] = {}
     offset = 0
     processed = 0
+    backoff = 1.0
     while True:
-        for update in transport.get_updates(offset, 60):
+        try:
+            updates = transport.get_updates(offset, 60)
+        except Exception:
+            sleep(backoff)
+            backoff = min(backoff * 2.0, 60.0)
+            if stop_after is not None and not transport_has_more(transport):
+                return requests
+            continue
+        backoff = 1.0
+        for update in updates:
             offset = max(offset, update.get("update_id", 0) + 1)
             try:
                 if "callback_query" in update:
@@ -250,13 +279,16 @@ def run_polling(transport: BotTransport, service, *, render=None,
                                     query.get("id", ""),
                                     service, transport,
                                     query.get("message", {}).get("chat", {}).get("id"),
-                                    requests)
+                                    requests, limit=evidence_limit)
                 elif "message" in update:
                     message = update["message"]
                     text = message.get("text", "")
                     chat_id = message.get("chat", {}).get("id")
                     if text.startswith("/check"):
-                        handle_check(text, service, transport, chat_id, requests, render=render)
+                        if handle_check(text, service, transport, chat_id, requests,
+                                        render=render) is not None:
+                            while len(requests) > _MAX_REQUESTS:
+                                requests.pop(next(iter(requests)))
                     elif text.startswith("/start"):
                         transport.send_message(chat_id, _START_HINT)
             except Exception as exc:

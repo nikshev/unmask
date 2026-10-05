@@ -106,3 +106,19 @@ def test_missing_env_key_fails_fast_with_var_name() -> None:
     service = DeliveryService(NoKey(), graph, clusters, DeliveryCache())
     with pytest.raises(RuntimeError, match="UNMASK_RPC_URL"):
         service.analyze("11111111111111111111111111111111")
+
+
+def test_two_rejections_mean_two_collect_calls_nothing_cached() -> None:
+    calls = []
+
+    class Rejecting:
+        def collect(self, mint: str):
+            calls.append(mint)
+            return Rejection(kind=RejectKind.INVALID_ADDRESS, mint=mint, detail="bad base58")
+
+    graph, clusters = _real_services()
+    service = DeliveryService(Rejecting(), graph, clusters, DeliveryCache())
+    first = service.analyze("!!!")
+    second = service.analyze("!!!")
+    assert first == second
+    assert calls == ["!!!", "!!!"]

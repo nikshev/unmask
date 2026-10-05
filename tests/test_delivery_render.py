@@ -98,3 +98,59 @@ def test_long_addresses_are_truncated_with_config_lengths() -> None:
     assert render_module._short("ABC", 6) == "ABC"
     with pytest.raises(TypeError):
         render_png(object(), _cfg())
+
+
+def _synthetic_doc(n_clusters: int, per_cluster: int = 3) -> dict:
+    clusters = []
+    for i in range(n_clusters):
+        wallets = [f"{i + 1}" * 31 + str(j) for j in range(per_cluster)]
+        clusters.append({
+            "cluster_id": f"c-{i:016d}", "wallets": wallets, "supply_share": round(0.5 / (i + 1), 4),
+            "supply_share_denominator": "analyzed_buyers_received_amount", "confidence": 0.6,
+            "evidence": [{"type": "shared_funder", "source": sorted(set(wallets[:2] + [f"S{i}" + "2" * 31])),
+                          "window": {"basis": "block_time", "start": 1, "end": 2}}],
+        })
+    return {"mint": "1" * 32, "analyzed_at": 1, "wallets_analyzed": n_clusters * per_cluster,
+            "clusters": clusters, "risk_score": 10, "band": "suspicious",
+            "band_reasons": ["clusters_share_weighted"],
+            "provenance": {"ingest_config_version": 2, "hub_config_version": 3,
+                           "address_lists_version": 1, "cluster_config_version": 1,
+                           "analyzed_at": 1, "graph_status": "complete",
+                           "completeness_reasons": ["complete_data"]},
+            "error": None}
+
+
+def test_empty_caption_carries_risk_and_band_without_ocr() -> None:
+    from unmask.delivery.render import empty_caption
+    doc = _doc("cln1")
+    lines = empty_caption(doc)
+    assert any("insufficient_data" in line for line in lines)
+    assert any(str(doc["risk_score"]) in line for line in lines)
+    assert not any(line.strip() == "clean" for line in lines)
+
+
+def test_legend_wraps_and_nodes_report_overflow_honestly() -> None:
+    from dataclasses import replace
+    doc = _synthetic_doc(6, 2)
+    img = render_png(doc, _cfg())
+    assert img.clusters_shown == 6
+    assert img.wallets_shown <= img.wallets_total
+    tiny = replace(_cfg(), png_width=300, png_height=200)
+    small = render_png(doc, tiny)
+    assert small.wallets_shown < small.wallets_total
+    assert small.wallets_shown >= 0
+
+
+def test_ninth_cluster_color_differs_from_first() -> None:
+    from unmask.delivery.render import _extended_palette
+    palette = [(231, 76, 60), (52, 152, 219)]
+    assert _extended_palette(palette, 0) == (231, 76, 60)
+    assert _extended_palette(palette, 8) != _extended_palette(palette, 0)
+    assert _extended_palette(palette, 8) == _extended_palette(palette, 8)
+
+
+def test_funder_sources_come_from_evidence_source_not_via() -> None:
+    doc = _synthetic_doc(1, 2)
+    img = render_png(doc, _cfg())
+    members = len(doc["clusters"][0]["wallets"])
+    assert img.wallets_total == members + 1  # +1 funder from evidence source
