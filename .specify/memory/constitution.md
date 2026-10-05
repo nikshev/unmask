@@ -93,9 +93,9 @@ Telegram-бот не починається. Подається те, що є, �
 
 | Агент | Claude Code | Codex | Мандат |
 |---|---|---|---|
-| `architect` | fable | gpt-6-astra / ultra | план, data-model, contracts, задачі. Не пише імплементацію |
-| `implementer` | sonnet | gpt-5.5 / medium | одна задача за раз, TDD. Не змінює `spec.md` |
-| `implementer-senior` | opus | gpt-5.6-sol / xhigh | те саме + лог невдалих спроб |
+| `architect` | opus | gpt-6-astra / ultra | план, data-model, contracts, задачі. Не пише імплементацію |
+| `implementer` | haiku | gpt-5.5 / medium | одна задача за раз, TDD. Не змінює `spec.md` |
+| `implementer-senior` | sonnet | gpt-5.6-sol / xhigh | те саме + лог невдалих спроб |
 | `reviewer` | opus | gpt-5.6-sol / xhigh, read-only | вердикт проти FR-ID і цієї конституції. Не править код |
 
 Задача ескалюється `implementer` -> `implementer-senior`, якщо: дві підряд
@@ -119,4 +119,4 @@ Telegram-бот не починається. Подається те, що є, �
 Claude Code і `AGENTS.md` для Codex; вони деталізують конституцію, але не можуть
 їй суперечити.
 
-**Version**: 1.1.0 | **Ratified**: 2026-10-03 | **Last Amended**: 2026-10-03
+**Version**: 1.1.1 | **Ratified**: 2026-10-03 | **Last Amended**: 2026-10-05
