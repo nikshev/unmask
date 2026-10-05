@@ -97,5 +97,5 @@ class _Handler(BaseHTTPRequestHandler):
 def serve(service, port: int) -> None:
     """Блокувальний HTTP-сервер (викликає точка входу; у тестах не викликається)."""
     _Handler.service = service
-    with ThreadingHTTPServer(("127.0.0.1", port), _Handler) as server:
+    with ThreadingHTTPServer(("0.0.0.0", port), _Handler) as server:
         server.serve_forever()

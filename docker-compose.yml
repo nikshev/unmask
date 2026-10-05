@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  unmask:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: unmask
+    ports:
+      - "8080:8080"
+    environment:
+      - UNMASK_RPC_URL=${UNMASK_RPC_URL}
+      - UNMASK_BOT_TOKEN=${UNMASK_BOT_TOKEN}
+    env_file:
+      - .env
+    volumes:
+      - ./tests/fixtures/real:/app/tests/fixtures/real:ro
+    restart: unless-stopped
+    command: uv run python scripts/serve_unmask.py --port 8080
+
+  # Optional: for development with hot reload
+  unmask-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: unmask-dev
+    ports:
+      - "8080:8080"
+    environment:
+      - UNMASK_RPC_URL=${UNMASK_RPC_URL}
+      - UNMASK_BOT_TOKEN=${UNMASK_BOT_TOKEN}
+    env_file:
+      - .env
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./config:/app/config
+      - ./specs:/app/specs
+      - ./scripts:/app/scripts
+      - ./pyproject.toml:/app/pyproject.toml
+      - ./uv.lock:/app/uv.lock
+    restart: unless-stopped
+    command: uv run python scripts/serve_unmask.py --port 8080
