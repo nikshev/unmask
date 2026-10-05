@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unmask.local/schemas/004/api-response-1.json",
+  "title": "unmask API response (feature 004, schema 004.1)",
+  "description": "GET /api/token/{mint} response: token risk assessment with clusters, evidence and provenance. Cluster shares, confidences, scores and bands are the 003 values verbatim; this layer never recomputes or remaps them (FR-004-02, FR-004-12). Versioned independently from 001/002/003 result schemas.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mint", "analyzed_at", "wallets_analyzed", "clusters", "risk_score", "band", "band_reasons", "provenance"],
+  "properties": {
+    "mint": { "$ref": "#/$defs/address" },
+    "analyzed_at": { "type": "integer", "minimum": 0 },
+    "wallets_analyzed": { "type": "integer", "minimum": 0 },
+    "clusters": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/cluster" }
+    },
+    "risk_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "band": { "enum": ["clean", "suspicious", "high_concentration", "insufficient_data"] },
+    "band_reasons": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+    "provenance": { "$ref": "#/$defs/provenance" },
+    "error": { "type": "null" }
+  },
+  "allOf": [
+    {
+      "description": "FR-004-12: the delivery layer never remaps insufficient_data to clean",
+      "if": { "properties": { "band": { "const": "insufficient_data" } } },
+      "then": { "properties": { "clusters": { "type": "array" } } }
+    },
+    {
+      "description": "every cluster carries at least one evidence with source and window",
+      "if": { "properties": { "clusters": { "minItems": 1 } } },
+      "then": {
+        "properties": {
+          "clusters": {
+            "items": { "required": ["wallets", "supply_share", "confidence", "evidence"] }
+          }
+        }
+      }
+    },
+    {
+      "description": "a non-zero score is never returned without clusters",
+      "if": { "properties": { "risk_score": { "minimum": 1 } } },
+      "then": { "properties": { "clusters": { "minItems": 1 } } }
+    }
+  ],
+  "$defs": {
+    "address": { "type": "string", "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$" },
+    "nonNegInt": { "type": "integer", "minimum": 0 },
+    "cluster": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cluster_id", "wallets", "supply_share", "supply_share_denominator", "confidence", "evidence"],
+      "properties": {
+        "cluster_id": { "type": "string" },
+        "wallets": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/address" }
+        },
+        "supply_share": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "supply_share_denominator": {
+          "description": "What the share is a fraction of: tokens bought by the analyzed early buyers, not total supply (assumption 003)",
+          "const": "analyzed_buyers_received_amount"
+        },
+        "confidence": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evidence" }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "source", "window"],
+      "properties": {
+        "type": {
+          "enum": ["shared_funder", "direct_transfer", "delegated_buy", "recovered_edge", "indirect_link", "same_amounts", "same_slot"]
+        },
+        "source": {
+          "description": "Funding addresses behind the evidence (via + involved wallets, deduplicated)",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/address" }
+        },
+        "window": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["basis", "start", "end"],
+          "properties": {
+            "basis": { "enum": ["block_time", "slot"] },
+            "start": { "$ref": "#/$defs/nonNegInt" },
+            "end": { "$ref": "#/$defs/nonNegInt" }
+          }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ingest_config_version", "hub_config_version", "address_lists_version", "cluster_config_version", "analyzed_at", "graph_status", "completeness_reasons"],
+      "properties": {
+        "ingest_config_version": { "type": "integer", "minimum": 1 },
+        "hub_config_version": { "type": "integer", "minimum": 1 },
+        "address_lists_version": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }] },
+        "cluster_config_version": { "type": "integer", "minimum": 1 },
+        "analyzed_at": { "type": "integer", "minimum": 0 },
+        "graph_status": { "enum": ["complete", "incomplete"] },
+        "completeness_reasons": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

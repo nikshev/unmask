@@ -261,8 +261,8 @@ def test_shipped_changelog_has_hubs_sections_with_matching_sha256_and_keeps_inge
     # tests/test_tx_batch_size.py (001) бере «хвіст» запису 2 до кінця файла і вимагає, щоб його останнім
     # непорожнім рядком був `sha256:`; будь-який розділ після ingest зламав би цей тест.
     assert sorted(headings) == sorted(["# config/ingest.yaml", "# config/hubs.yaml", "# config/hub_addresses.yaml",
-                                         "# config/clusters.yaml"])
-    assert len(headings) == 4
+                                         "# config/clusters.yaml", "# config/delivery.yaml"])
+    assert len(headings) == 5
 
     def section(name: str) -> str:
         start = lines.index(f"# config/{name}")

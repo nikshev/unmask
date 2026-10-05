@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **61** · задач: **87** (виконано 87) · вимог у роботі: **0** · порушень: **0**
+Вимог: **73** · задач: **98** (виконано 98) · вимог у роботі: **0** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -80,6 +80,23 @@
 | `FR-003-22` | Система MUST надавати оцінювальну команду, що на наборі збережених результатів збору без мережі виводить для к | `T-073`, `T-074`, `T-087` | `src/unmask/clusters/evaluate.py` | `tests/test_clusters_evaluate.py` |
 | `FR-003-23` | Набір збережених результатів збору для оцінювання MUST зберігатися в репозиторії як фікстури (публічні ончейн- | `T-072`, `T-073`, `T-074`, `T-087` | `src/unmask/clusters/evaluate.py` | `tests/test_clusters_evaluate.py`, `tests/test_clusters_real_fixtures.py` |
 
+## 004-api-bot-delivery
+
+| Вимога | Опис | Задачі | Імплементація | Тести |
+|---|---|---|---|---|
+| `FR-004-01` | Система MUST надавати `GET /api/token/{mint}`, що повертає `mint`, `analyzed_at`, `wallets_analyzed`, `cluster | `T-089`, `T-092` | `src/unmask/delivery/http.py`, `src/unmask/delivery/report.py` | `tests/test_delivery_http.py`, `tests/test_delivery_report.py` |
+| `FR-004-02` | Запит MUST проганяти живий конвеєр 001→002→003 тими самими версіями конфігів і порогів, що й бібліотека; жодни | `T-090` | `src/unmask/delivery/service.py` | `tests/test_delivery_service.py` |
+| `FR-004-03` | Telegram-бот MUST відповідати на `/check <mint>` одним повідомленням: смуга й число ризику, частки найбільших  | `T-094` | `src/unmask/delivery/bot.py` | `tests/test_delivery_bot.py` |
+| `FR-004-04` | Кнопка «докази» MUST показувати перелік доказів по кластерах, на яких побудовано число (тип, джерело, вікно);  | `T-094` | `src/unmask/delivery/bot.py` | `tests/test_delivery_bot.py` |
+| `FR-004-05` | PNG MUST рендеритися на сервері зі результату аналізу (статичне зображення, без інтерактивності); кластери MUS | `T-093` | `src/unmask/delivery/render.py` | `tests/test_delivery_render.py` |
+| `FR-004-06` | Результат MUST кешуватися за адресою токена: повторний запит повертає збережений документ без повторного збору | `T-090`, `T-091`, `T-098` | `src/unmask/delivery/service.py`, `src/unmask/delivery/cache.py` | `tests/test_delivery_cache.py`, `tests/test_delivery_perf.py` |
+| `FR-004-07` | Невалідний або неіснуючий `mint` MUST давати явну помилку (API — статус 4xx з поясненням; бот — зрозуміле пові | `T-090`, `T-092`, `T-094` | `src/unmask/delivery/service.py`, `src/unmask/delivery/http.py`, `src/unmask/delivery/bot.py` | `tests/test_delivery_http.py`, `tests/test_delivery_service.py` |
+| `FR-004-08` | API і бот MUST працювати без авторизації (PRD: «жодної авторизації»). | `T-092` | `src/unmask/delivery/http.py` | `tests/test_delivery_http.py` |
+| `FR-004-09` | Тести MUST працювати без мережі: живий RPC і Telegram — лише записані фікстури/несправжній транспорт (принцип  | `T-096` | `src/unmask/delivery/bot.py` | `tests/test_delivery_e2e.py` |
+| `FR-004-10` | Секрети (токен бота, RPC-ключ) MUST надходити лише з оточення й MUST NOT потрапляти в репозиторій. | `T-095` | `src/unmask/delivery/main.py` | `tests/test_delivery_main.py` |
+| `FR-004-11` | Жодна нова константа API/бота, що змінює кластери, впевненість, `risk_score` чи смугу, MUST NOT з'являтися поз | `T-088`, `T-093`, `T-097` | `src/unmask/delivery/config.py` | `tests/test_delivery_config.py`, `tests/test_delivery_boundaries.py` |
+| `FR-004-12` | Відповідь MUST нести походження висновку: версії конфігів 001/002/003, `analyzed_at`, статус повноти з причина | `T-089` | `src/unmask/delivery/report.py` | `tests/test_delivery_report.py` |
+
 ## Критичні задачі
 
 - `T-003` (001-onchain-data-ingest) — виконано
@@ -141,3 +158,9 @@
 - `T-081` (003-wallet-clusters-risk) — виконано
 - `T-084` (003-wallet-clusters-risk) — виконано
 - `T-087` (003-wallet-clusters-risk) — виконано
+- `T-088` (004-api-bot-delivery) — виконано
+- `T-089` (004-api-bot-delivery) — виконано
+- `T-090` (004-api-bot-delivery) — виконано
+- `T-091` (004-api-bot-delivery) — виконано
+- `T-093` (004-api-bot-delivery) — виконано
+- `T-094` (004-api-bot-delivery) — виконано
