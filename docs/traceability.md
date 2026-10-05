@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **38** · задач: **57** (виконано 57) · вимог у роботі: **0** · порушень: **0**
+Вимог: **61** · задач: **58** (виконано 57) · вимог у роботі: **26** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -35,13 +35,13 @@
 | `FR-002-04` | Побудова графа MUST бути детермінованою: той самий вхід дає побітово той самий граф і порядок. | `T-028`, `T-031`, `T-039`, `T-040` | `src/unmask/graph/serialize.py`, `src/unmask/graph/service.py`, `src/unmask/graph/build.py` | `tests/test_graph_service.py`, `tests/test_graph_determinism.py`, `tests/test_graph_serialize_contract.py` |
 | `FR-002-05` | Граф MUST успадковувати статус повноти результату збору й перелік причин неповноти; граф над неповним збором M | `T-025`, `T-028`, `T-030` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_model.py`, `tests/test_graph_completeness.py` |
 | `FR-002-06` | Граф MUST зберігати нерозгорнуті вершини з результату збору з причиною (висока зв'язність, ліміт підписів) як  | `T-025`, `T-028`, `T-030` | `src/unmask/graph/build.py`, `src/unmask/graph/model.py` | `tests/test_graph_model.py`, `tests/test_graph_completeness.py` |
-| `FR-002-07` | Система MUST позначати вершину хабом за кожним із незалежних критеріїв: (а) належність до відомих списків адре | `T-032`, `T-033`, `T-034`, `T-035`, `T-055`, `T-057` | `src/unmask/graph/measures.py`, `src/unmask/hubs/prune.py`, `src/unmask/hubs/criteria.py` | `tests/test_hubs_dust_fanout.py`, `tests/test_hubs_criteria_lists.py`, `tests/test_hubs_measures.py`, `tests/test_hubs_threshold_rule.py` |
-| `FR-002-08` | Пороги, списки адрес і версія MUST зберігатися у версіонованому YAML із журналом змін; зміна без запису в журн | `T-023`, `T-024`, `T-054` | `src/unmask/hubs/config.py` | `tests/test_hubs_config_robustness.py`, `tests/test_hubs_changelog_guard.py`, `tests/test_hubs_config.py` |
+| `FR-002-07` | Система MUST позначати вершину хабом за кожним із незалежних критеріїв: (а) належність до відомих списків адре | `T-032`, `T-033`, `T-034`, `T-035`, `T-055`, `T-057`, `T-058` | `src/unmask/graph/measures.py`, `src/unmask/hubs/prune.py`, `src/unmask/hubs/criteria.py` | `tests/test_hubs_dust_fanout.py`, `tests/test_hubs_criteria_lists.py`, `tests/test_hubs_measures.py`, `tests/test_hubs_threshold_rule.py` |
+| `FR-002-08` | Пороги, списки адрес і версія MUST зберігатися у версіонованому YAML із журналом змін; зміна без запису в журн | `T-023`, `T-024`, `T-054`, `T-058` | `src/unmask/hubs/config.py` | `tests/test_hubs_config_robustness.py`, `tests/test_hubs_changelog_guard.py`, `tests/test_hubs_config.py` |
 | `FR-002-09` | Відсікання MUST виключати хаб і всі ребра, інцидентні йому, з графа для кластеризації й MUST зберігати їх у ок | `T-035`, `T-038` | `src/unmask/hubs/prune.py`, `src/unmask/hubs/report.py` | `tests/test_hubs_edge_cases.py`, `tests/test_hubs_prune.py` |
 | `FR-002-10` | Покупці MUST NOT відсікатися; покупець, що відповідає критерію хаба, отримує пояснювальну позначку. | `T-035` | `src/unmask/hubs/prune.py` | `tests/test_hubs_prune.py` |
 | `FR-002-11` | Система MUST формувати звіт ефекту відсікання: кількість вершин і ребер, кількість компонент, частка найбільшо | `T-027`, `T-036`, `T-038`, `T-042` | `src/unmask/graph/components.py`, `src/unmask/hubs/report.py` | `tests/test_hubs_edge_cases.py`, `tests/test_graph_components.py`, `tests/test_graph_performance.py`, `tests/test_hubs_report.py` |
 | `FR-002-12` | Якщо список відомих адрес не застосовано (порожній чи недоступний), результат MUST це явно показувати; відсутн | `T-023`, `T-035`, `T-036`, `T-037` | `src/unmask/hubs/prune.py`, `src/unmask/hubs/report.py`, `src/unmask/hubs/config.py` | `tests/test_hubs_config_robustness.py`, `tests/test_hubs_lists_unavailable.py` |
-| `FR-002-13` | Результат MUST містити версію конфігу відсікання й версію списків адрес, щоб два результати з різними версіями | `T-023`, `T-039`, `T-040`, `T-054`, `T-055` | `src/unmask/graph/serialize.py`, `src/unmask/graph/service.py`, `src/unmask/hubs/config.py` | `tests/test_graph_service.py`, `tests/test_graph_serialize_contract.py`, `tests/test_hubs_config.py` |
+| `FR-002-13` | Результат MUST містити версію конфігу відсікання й версію списків адрес, щоб два результати з різними версіями | `T-023`, `T-039`, `T-040`, `T-054`, `T-055`, `T-058` | `src/unmask/graph/serialize.py`, `src/unmask/graph/service.py`, `src/unmask/hubs/config.py` | `tests/test_graph_service.py`, `tests/test_graph_serialize_contract.py`, `tests/test_hubs_config.py` |
 | `FR-002-14` | Правило порогу (рівно поріг) MUST бути визначене однозначно й однаково для всіх критеріїв. | `T-023`, `T-033`, `T-057` | `src/unmask/hubs/criteria.py`, `src/unmask/hubs/config.py` | `tests/test_hubs_dust_fanout.py`, `tests/test_hubs_config.py`, `tests/test_hubs_threshold_rule.py` |
 | `FR-002-15` | Система MUST розпізнавати в транзакціях mint «делеговану купівлю»: платник витратив кошти й не отримав токен,  | `T-043`, `T-045` | `src/unmask/ingest/delegated.py` | `tests/test_delegated_fixtures.py`, `tests/test_delegated_rule.py` |
 | `FR-002-16` | Неоднозначні випадки (кілька платників чи отримувачів без однозначної відповідності) MUST фіксуватися як «канд | `T-043`, `T-045` | `src/unmask/ingest/delegated.py` | `tests/test_delegated_fixtures.py`, `tests/test_delegated_rule.py` |
@@ -51,6 +51,34 @@
 | `FR-002-20` | Усі зовнішні дані MUST надходити лише з результату збору (фіча 001); фіча не звертається до мережі напряму, те | `T-026`, `T-039`, `T-041`, `T-056` | `src/unmask/graph/service.py`, `src/unmask/ingest/serialize.py` | `tests/test_ingest_from_dict.py`, `tests/test_graph_integration_001.py`, `tests/test_graph_service.py` |
 | `FR-002-21` | Результат MUST серіалізуватися у JSON за контрактом, версіонованим окремо від контракту фічі 001; зміни контра | `T-039`, `T-040`, `T-044`, `T-048` | `src/unmask/graph/serialize.py`, `src/unmask/graph/service.py`, `src/unmask/ingest/serialize.py`, `src/unmask/ingest/model.py` | `tests/test_graph_serialize_contract.py`, `tests/test_ingest_delegated_model.py`, `tests/test_graph_delegated_contract.py` |
 | `FR-002-22` | Система MUST позначати вершину хабом за п'ятим незалежним критерієм «пилове роздавання» (`dust_fanout`): верши | `T-032`, `T-033`, `T-035`, `T-040`, `T-054`, `T-055`, `T-056`, `T-057` | `src/unmask/graph/measures.py`, `src/unmask/graph/model.py`, `src/unmask/hubs/criteria.py`, `src/unmask/hubs/config.py` | `tests/test_hubs_dust_fanout.py`, `tests/test_graph_model.py`, `tests/test_graph_serialize_contract.py`, `tests/test_hubs_config.py`, `tests/test_hubs_measures.py` |
+
+## 003-wallet-clusters-risk
+
+| Вимога | Опис | Задачі | Імплементація | Тести |
+|---|---|---|---|---|
+| `FR-003-01` | Система MUST будувати кластери ранніх покупців із графа фічі 002: гаманці, між якими є зв'язок за фінансування | — | — | — |
+| `FR-003-02` | Прохід 1 MUST об'єднувати покупців, яких одна й та сама вершина графа 002 (джерело, що не є відсіченим хабом;  | — | — | — |
+| `FR-003-03` | Прямий переказ між покупцями і зв'язок «делегована купівля» (фіча 002, ребро `delegated_buy`) MUST бути окреми | — | — | — |
+| `FR-003-04` | Прохід 2 MUST знаходити непрямі зв'язки через спільне джерело на більшій глибині графа й додавати їх окремим т | — | — | — |
+| `FR-003-05` | Перекази нижче мінімальної суми зв'язку MUST NOT утворювати кластер і MUST NOT бути доказом; поріг MUST зберіг | — | — | — |
+| `FR-003-06` | Вершини, відсічені фічею 002, MUST NOT з'єднувати покупців, за винятком US6 (відновлені ребра з сумою не нижче | — | — | — |
+| `FR-003-07` | Кожен кластер MUST містити непорожній перелік доказів; кожен доказ MUST мати тип, перелік первинних посилань ( | — | — | — |
+| `FR-003-08` | Система MUST розпізнавати поведінкові докази: «однакові суми» (покупці зі збігом суми фінансування чи першої к | — | — | — |
+| `FR-003-09` | Поведінкові докази MUST підвищувати впевненість кластера, але MUST NOT самостійно утворювати кластер; поведінк | — | — | — |
+| `FR-003-10` | Збіг, нижчий за поріг «природного збігу» (кілька купівель в одному слоті — норма на жвавому запуску), MUST NOT | — | — | — |
+| `FR-003-11` | Кожен кластер MUST мати частку: частку токенів, куплених його покупцями, серед токенів, куплених усіма проанал | — | — | — |
+| `FR-003-12` | Кластери MUST бути відсортовані за часткою спадно з детермінованим тай-брейком; ідентифікатор кластера MUST бу | — | — | — |
+| `FR-003-13` | Система MUST обчислювати `risk_score` 0–100 на рівні токена за формулою з контракту з часток і впевненостей кл | — | — | — |
+| `FR-003-14` | Результат MUST супроводжувати `risk_score` переліком кластерів і їхніх доказів, на яких число побудоване; числ | — | — | — |
+| `FR-003-15` | Результат MUST успадковувати повноту графа 002 (статус, причини, попередження `giant_component`, `delegated_in | — | — | — |
+| `FR-003-16` | Порожній вхід (0 покупців) MUST давати явний результат «немає даних», а не «чисто». | — | — | — |
+| `FR-003-17` | Кластер, що охоплює понад поріг частки покупців при попередженні `giant_component` або при переважно непрямих  | — | — | — |
+| `FR-003-18` | Усі пороги (вікно, мінімальна сума зв'язку, пороги поведінкових доказів, ваги впевненості, межі смуг, поріг ар | — | — | — |
+| `FR-003-19` | Усі зовнішні дані MUST надходити лише з результату фічі 002 і результату збору 001; фіча не звертається до мер | — | — | — |
+| `FR-003-20` | Результат MUST серіалізуватися у JSON за контрактом, версіонованим окремо від контрактів 001 і 002; серіалізац | — | — | — |
+| `FR-003-21` | Модуль кластеризації MUST NOT змінювати граф чи відсікання 002 і MUST залежати лише від публічного результату  | — | — | — |
+| `FR-003-22` | Система MUST надавати оцінювальну команду, що на наборі збережених результатів збору без мережі виводить для к | — | — | — |
+| `FR-003-23` | Набір збережених результатів збору для оцінювання MUST зберігатися в репозиторії як фікстури (публічні ончейн- | — | — | — |
 
 ## Критичні задачі
 
@@ -91,3 +119,4 @@
 - `T-045` (002-funding-graph-hub-pruning) — виконано
 - `T-046` (002-funding-graph-hub-pruning) — виконано
 - `T-047` (002-funding-graph-hub-pruning) — виконано
+- `T-058` (002-funding-graph-hub-pruning) — у роботі
