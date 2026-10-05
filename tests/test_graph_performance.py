@@ -148,7 +148,7 @@ def _shipped() -> HubConfig:
 
 
 def _dust_only_config() -> HubConfig:
-    """Пороги `hubs.yaml` v2, але ступінь і збірна позначка не можуть відсікти: лишається лише `dust_fanout`."""
+    """Поставлені пороги `hubs.yaml` (v3), але ступінь і збірна позначка не можуть відсікти: лишається лише `dust_fanout`."""
     base = _shipped().thresholds
     thresholds = HubThresholds(
         version=base.version, degree_threshold=10**6, one_off_senders_share=base.one_off_senders_share,

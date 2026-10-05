@@ -62,10 +62,11 @@ CORRUPT_CAST = json.loads((SCENARIOS / "corrupt" / "rpc.json").read_text(encodin
 HUB_CASES = {c["name"]: c for c in HUB_EXPECTED["cases"]}
 H = HUB_EXPECTED["wallets"]["H"]
 
-# Golden: зафіксовані версії й пороги поставлених конфігів (принцип III; `## 2` у config/CHANGELOG.md).
-SHIPPED_HUB_VERSION, SHIPPED_LISTS_VERSION, SHIPPED_INGEST_VERSION = 2, 1, 2
+# Golden: зафіксовані версії й пороги поставлених конфігів (принцип III; hubs.yaml — `## 3` у config/CHANGELOG.md,
+# T-058: one_off_min_senders 10 → 50; ingest.yaml — `## 2`).
+SHIPPED_HUB_VERSION, SHIPPED_LISTS_VERSION, SHIPPED_INGEST_VERSION = 3, 1, 2
 SHIPPED_SNAPSHOT = {
-    "degree_threshold": 100, "one_off_senders_share": 0.8, "one_off_min_senders": 10,
+    "degree_threshold": 100, "one_off_senders_share": 0.8, "one_off_min_senders": 50,
     "giant_component_warn_share": 0.5, "prune_off_curve": True, "prune_ingest_high_degree": True,
     "dust_amount_lamports": 1_000_000, "dust_min_fanout": 5,
 }
@@ -273,6 +274,7 @@ def test_hub_control_case_without_high_degree_keeps_H_unless_other_criteria():
     thresholds = SHIPPED_SNAPSHOT
     assert degree == 7 <= thresholds["degree_threshold"]                       # degree: не більше порога
     assert len(senders) == 6 < thresholds["one_off_min_senders"]               # one_off_senders: передумова не виконана
+    assert len(senders) < 10  # …і не виконана б навіть за історичної v2 (10): висновок не залежить від T-058
     assert one_off / len(senders) <= thresholds["one_off_senders_share"]       # і частка все одно під порогом
     assert len(receivers & {b["wallet"] for b in HUB_EXPECTED["buyers"]}) < thresholds["dust_min_fanout"]  # dust
     assert HUB_EXPECTED["wallets"]["H"] not in ingest.unexpanded and not ingest.unexpanded

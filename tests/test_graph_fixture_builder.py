@@ -37,7 +37,7 @@ VALIDATOR = Draft202012Validator(SCHEMA)
 
 SCENARIOS = ["g_basic", "g_hub", "g_known", "g_buyer_hub", "g_incomplete", "g_empty", "g_all_hubs", "g_unexpanded",
              "g_dust", "g_financier", "g_dust_mixed", "g_delegated"]
-DUST_T = 1_000_000  # dust_amount_lamports у hubs.yaml v2
+DUST_T = 1_000_000  # dust_amount_lamports у hubs.yaml v2 (у v3 без змін)
 THRESHOLD_KEYS = {"degree_threshold", "one_off_senders_share", "one_off_min_senders", "giant_component_warn_share",
                   "prune_off_curve", "prune_ingest_high_degree", "dust_amount_lamports", "dust_min_fanout"}
 FILES = ["ingest.json", "expected.json"]

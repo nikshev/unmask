@@ -5,7 +5,7 @@ contracts/graph-service.md §7; data-model «GraphMetadata», «GraphResult»; r
 Критична задача: помилка тут не ламає збірку, а тихо робить два результати «порівнянними», хоча їх отримано з різних
 версій порогів чи списків (принцип III), або ховає неповноту (принцип V). Тому, крім щасливого шляху:
 
-- golden: знімок порогів і версії звіряються з ЛІТЕРАЛАМИ зафіксованого `config/hubs.yaml` v2 і
+- golden: знімок порогів і версії звіряються з ЛІТЕРАЛАМИ зафіксованого `config/hubs.yaml` v3 (T-058) і
   `config/hub_addresses.yaml` v1, а не лише з тим самим обʼєктом конфігу;
 - незалежні еталони: метадані — з `ingest.json` і розділу `config` у `expected.json` (оракул генератора), повнота,
   звіт і відсікання — з `expected.json` усіх 12 сценаріїв поле за полем;
@@ -67,14 +67,20 @@ SCENARIOS = ["g_all_hubs", "g_basic", "g_buyer_hub", "g_delegated", "g_dust", "g
 
 NOT_APPLIED, DELEGATED_INCOMPLETE = GraphWarning.ADDRESS_LISTS_NOT_APPLIED, GraphWarning.DELEGATED_INCOMPLETE
 
-# Golden: зафіксовані значення `config/hubs.yaml` v2 (принцип III; запис `## 2` у config/CHANGELOG.md).
-SHIPPED_HUBS_VERSION = 2
+# Golden: зафіксовані значення `config/hubs.yaml` v3 (принцип III; запис `## 3` у config/CHANGELOG.md, T-058).
+SHIPPED_HUBS_VERSION = 3
 SHIPPED_LISTS_VERSION = 1
 SHIPPED_SNAPSHOT = {
-    "degree_threshold": 100, "one_off_senders_share": 0.8, "one_off_min_senders": 10,
+    "degree_threshold": 100, "one_off_senders_share": 0.8, "one_off_min_senders": 50,
     "giant_component_warn_share": 0.5, "prune_off_curve": True, "prune_ingest_high_degree": True,
     "dust_amount_lamports": 1_000_000, "dust_min_fanout": 5,
 }
+# Пороги, з якими згенеровано оракули фікстур (`expected.json` → `config`): історична v2 (запис `## 2`), тобто v3 з
+# `one_off_min_senders: 10`. Синтетичний `_config()` лишається на них, щоб `g_hub` (H: 32 відправники, 30
+# одноразових) і далі відсікався за `one_off_senders` у тестах версій/записів — на v3 32 < 50, і ці тести
+# перевіряли б порожнечу. Відповідність фікстур історичній v2 — golden у tests/test_hubs_prune.py.
+FIXTURE_HUBS_VERSION = 2
+FIXTURE_THRESHOLDS = {**SHIPPED_SNAPSHOT, "one_off_min_senders": 10}
 
 
 # --- Конфіг і сценарії -------------------------------------------------------------------
@@ -87,7 +93,7 @@ def _lists(version: int = 1, **categories) -> AddressLists:
 
 
 def _config(*, lists: AddressLists | None = None, **changes) -> HubConfig:
-    kw = dict(version=2, **SHIPPED_SNAPSHOT)
+    kw = dict(version=FIXTURE_HUBS_VERSION, **FIXTURE_THRESHOLDS)
     kw.update(changes)
     return HubConfig(thresholds=HubThresholds(**kw), lists=lists, thresholds_digest="0" * 64,
                      lists_digest=None if lists is None else "1" * 64)
@@ -239,11 +245,12 @@ def test_snapshot_follows_each_threshold_independently():
     changed = dict(degree_threshold=101, one_off_senders_share=0.75, one_off_min_senders=11,
                    giant_component_warn_share=0.55, prune_off_curve=False, prune_ingest_high_degree=False,
                    dust_amount_lamports=999_999, dust_min_fanout=6)
-    assert set(changed) == set(SHIPPED_SNAPSHOT)
+    assert set(changed) == set(SHIPPED_SNAPSHOT) == set(FIXTURE_THRESHOLDS)
     for name, value in changed.items():
+        assert value != FIXTURE_THRESHOLDS[name], name  # інакше перевірка «свого» поля вироджується
         md = GraphService(_config(lists=_lists(), **{name: value})).analyze(base).metadata
-        for other in SHIPPED_SNAPSHOT:
-            want = value if other == name else SHIPPED_SNAPSHOT[other]
+        for other in FIXTURE_THRESHOLDS:
+            want = value if other == name else FIXTURE_THRESHOLDS[other]
             assert getattr(md.thresholds, other) == want, (name, other)
 
 

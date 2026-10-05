@@ -265,10 +265,11 @@ def test_hit_carries_median_and_threshold_from_config_not_constants():
 
 
 def test_shipped_config_dust_thresholds_drive_the_rule():
-    """Golden-перевірка проти зафіксованого `config/hubs.yaml` v2: межі — значення з файла (принцип III)."""
+    """Golden-перевірка проти зафіксованого `config/hubs.yaml` v3 (T-058; пилові значення — з v2 без змін): межі —
+    значення з файла (принцип III)."""
     config = load_hub_config(ROOT / "config/hubs.yaml", ROOT / "config/hub_addresses.yaml")
     t = config.thresholds
-    assert (t.version, t.dust_amount_lamports, t.dust_min_fanout) == (2, 1_000_000, 5)
+    assert (t.version, t.dust_amount_lamports, t.dust_min_fanout) == (3, 1_000_000, 5)
     below = _eval(_node(fanout=t.dust_min_fanout, median=t.dust_amount_lamports - 1), config)
     at = _eval(_node(fanout=t.dust_min_fanout, median=t.dust_amount_lamports), config)
     few = _eval(_node(fanout=t.dust_min_fanout - 1, median=1), config)

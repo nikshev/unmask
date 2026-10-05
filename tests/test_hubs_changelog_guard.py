@@ -16,6 +16,12 @@ T-054: `config/hubs.yaml` — версія 2 (+ `dust_amount_lamports`, `dust_mi
 `SHIPPED_HUBS_SHA` свідомо оновлено на дайджест v2; історичний запис 1 (`SHIPPED_HUBS_SHA_V1`) лишається в журналі
 незмінним. `check_changelog` вимагає, щоб `version` файла був ОСТАННІМ записом розділу, тому синтетичні журнали,
 що описують поточний файл, містять обидва записи — `## 1` (v1) і `## 2` (поточний).
+
+T-058 (R-23, `calibration.md` «Перерахунок R-23»): `config/hubs.yaml` — версія 3 (`one_off_min_senders` 10 → 50,
+решта значень v2 без змін). Golden `SHIPPED_HUBS_SHA` свідомо оновлено на дайджест v3 (канонічний рядок
+`HUBS_V3_CANONICAL` — дослівно з контракту); записи 1 і 2 (`SHIPPED_HUBS_SHA_V1`, `SHIPPED_HUBS_SHA_V2`) лишаються в
+журналі незмінними, а копія v3 з поверненими значеннями v2 дає рівно дайджест запису 2. Синтетичні журнали, що
+описують поточний файл, містять усі три записи; «наступна» версія в тестах на підняття — 4.
 """
 
 import hashlib
@@ -40,11 +46,18 @@ LISTS = ROOT / "config" / "hub_addresses.yaml"
 CHANGELOG = ROOT / "config" / "CHANGELOG.md"
 
 # Незалежний еталон: дайджести, записані в журнал за правилом R-14 (не обчислені кодом, що тестується).
-# hubs.yaml v2 — канонічний вміст із контракту config-hubs.md (T-054); v1 — історичний запис T-023.
-SHIPPED_HUBS_SHA = "fdf65bb5369e4e40e629ca4cd45f4952466ee21447ae8bbe79a4ee0035f45409"
+# hubs.yaml v3 — канонічний вміст із контракту config-hubs.md (T-058); v2 — історичний запис T-054; v1 — T-023.
+SHIPPED_HUBS_SHA = "acfa643b0133da213d54341e6a70026dab93ce3aa67087dfddaab4a465211e2a"
+SHIPPED_HUBS_SHA_V2 = "fdf65bb5369e4e40e629ca4cd45f4952466ee21447ae8bbe79a4ee0035f45409"
 SHIPPED_HUBS_SHA_V1 = "c410d677279d02687928b12fcf490e4685007c0bb499e12c2fbfb1ca6d25c63c"
-SHIPPED_HUBS_VERSION = 2
-# Канонічний вміст hubs.yaml v2 — дослівно з contracts/config-hubs.md (golden-рядок, не похідний від коду).
+SHIPPED_HUBS_VERSION = 3
+# Канонічний вміст hubs.yaml v3 — дослівно з contracts/config-hubs.md (golden-рядок, не похідний від коду).
+HUBS_V3_CANONICAL = (
+    '{"degree_threshold":100,"dust_amount_lamports":1000000,"dust_min_fanout":5,"giant_component_warn_share":0.5,'
+    '"one_off_min_senders":50,"one_off_senders_share":0.8,"prune_ingest_high_degree":true,"prune_off_curve":true,'
+    '"version":3}'
+)
+# Канонічний вміст hubs.yaml v2 (історичний запис 2) — дослівно з contracts/config-hubs.md.
 HUBS_V2_CANONICAL = (
     '{"degree_threshold":100,"dust_amount_lamports":1000000,"dust_min_fanout":5,"giant_component_warn_share":0.5,'
     '"one_off_min_senders":10,"one_off_senders_share":0.8,"prune_ingest_high_degree":true,"prune_off_curve":true,'
@@ -55,10 +68,11 @@ SHIPPED_LISTS_SHA = "89c0a8be31ec2ffca32117ed38191e4caad0c840d9f4576048d0f312af8
 A = "a" * 64
 B = "b" * 64
 
-# Записи розділу hubs.yaml, що описують історію поставленого файла: 1 (v1) і 2 (поточний).
+# Записи розділу hubs.yaml, що описують історію поставленого файла: 1 (v1), 2 (v2) і 3 (поточний).
 HUBS_HISTORY = (
     f"## 1 — 2026-10-04\nv1\nsha256: {SHIPPED_HUBS_SHA_V1}\n\n"
-    f"## 2 — 2026-10-04\nv2\nsha256: {SHIPPED_HUBS_SHA}\n"
+    f"## 2 — 2026-10-04\nv2\nsha256: {SHIPPED_HUBS_SHA_V2}\n\n"
+    f"## 3 — 2026-10-05\nv3\nsha256: {SHIPPED_HUBS_SHA}\n"
 )
 
 
@@ -93,11 +107,48 @@ def test_shipped_hubs_yaml_digest_matches_changelog_entry_for_its_version():
 
 
 def test_shipped_hubs_yaml_canonical_content_matches_contract_literal():
-    # Дайджест v2 обчислено в контракті з канонічного рядка; тут — що файл розбирається рівно в нього
+    # Дайджест v3 обчислено в контракті з канонічного рядка; тут — що файл розбирається рівно в нього
     # (інше значення чи тип, напр. 1e6 як float чи "5" як рядок, дали б інший рядок і інший sha).
     data = yaml.safe_load(THRESHOLDS.read_text(encoding="utf-8"))
-    assert json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False) == HUBS_V2_CANONICAL
-    assert hashlib.sha256(HUBS_V2_CANONICAL.encode("utf-8")).hexdigest() == SHIPPED_HUBS_SHA
+    assert json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False) == HUBS_V3_CANONICAL
+    assert hashlib.sha256(HUBS_V3_CANONICAL.encode("utf-8")).hexdigest() == SHIPPED_HUBS_SHA
+    # історичні канонічні рядки й дайджести (незалежне обчислення, без коду, що тестується)
+    assert hashlib.sha256(HUBS_V2_CANONICAL.encode("utf-8")).hexdigest() == SHIPPED_HUBS_SHA_V2
+
+
+def test_v3_with_v2_values_restored_gives_exactly_the_v2_entry_digest(tmp_path):
+    """T-058: v3 = v2 з `one_off_min_senders` 10 → 50 і `version` 2 → 3, і нічим більше.
+
+    Текстова заміна у ПОСТАВЛЕНОМУ файлі (коментарі лишаються) повертає дайджест запису 2 журналу; повернення
+    лише одного з двох значень — ні. Отже решта значень v2 у v3 не змінились (як для v1 у T-054).
+    """
+    text = THRESHOLDS.read_text(encoding="utf-8")
+    pairs = (("\nversion: 3\n", "\nversion: 2\n"), ("\none_off_min_senders: 50 ", "\none_off_min_senders: 10 "))
+    for old, _ in pairs:
+        assert text.count(old) == 1, old  # інакше заміна мовчки нічого б не зробила
+    v2_text = text
+    for old, new in pairs:
+        v2_text = v2_text.replace(old, new)
+    v2 = _copy(tmp_path, THRESHOLDS, v2_text)
+    assert content_digest(v2) == SHIPPED_HUBS_SHA_V2 == changelog_entries(CHANGELOG, "hubs.yaml")[2]
+    canonical = json.dumps(yaml.safe_load(v2_text), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    assert canonical == HUBS_V2_CANONICAL  # незалежно від content_digest
+    # v2-копія — це вже не поставлений файл: журнал її не приймає (останній запис — 3)
+    with pytest.raises(ConfigError, match=r"hubs\.yaml.*version 2.*latest.*3"):
+        check_changelog(v2, CHANGELOG)
+    for old, new in pairs:
+        half = _copy(tmp_path, THRESHOLDS, text.replace(old, new))
+        assert content_digest(half) not in (SHIPPED_HUBS_SHA_V2, SHIPPED_HUBS_SHA), new
+
+
+def test_contract_quotes_shipped_hubs_yaml_verbatim():
+    # contracts/config-hubs.md наводить поставлений файл ДОСЛІВНО (T-058): розбіжність тексту — дрейф контракту
+    contract = (ROOT / "specs" / "002-funding-graph-hub-pruning" / "contracts" / "config-hubs.md").read_text(
+        encoding="utf-8")
+    section = contract[contract.index("## `config/hubs.yaml` (версія 3"):contract.index("## `config/hub_addresses.yaml`")]
+    block = section[section.index("```yaml\n") + len("```yaml\n"):section.index("\n```", section.index("```yaml\n"))]
+    assert block + "\n" == THRESHOLDS.read_text(encoding="utf-8")
+    assert HUBS_V3_CANONICAL in contract and SHIPPED_HUBS_SHA in contract
 
 
 def test_shipped_address_lists_digest_matches_changelog_entry():
@@ -111,7 +162,8 @@ def test_shipped_address_lists_digest_matches_changelog_entry():
 
 def test_parser_reads_only_its_own_section():
     # кожен розділ дає свій дайджест; хвіст до кінця файла (розділ ingest) чи сусідній розділ не підмішується
-    assert changelog_entries(CHANGELOG, "hubs.yaml") == {1: SHIPPED_HUBS_SHA_V1, 2: SHIPPED_HUBS_SHA}
+    assert changelog_entries(CHANGELOG, "hubs.yaml") == {
+        1: SHIPPED_HUBS_SHA_V1, 2: SHIPPED_HUBS_SHA_V2, 3: SHIPPED_HUBS_SHA}
     assert changelog_entries(CHANGELOG, "hub_addresses.yaml") == {1: SHIPPED_LISTS_SHA}
 
 
@@ -130,7 +182,7 @@ def test_changed_threshold_without_changelog_entry_is_detected(tmp_path):
     assert "degree_threshold: 100 " in text
     changed = _copy(tmp_path, THRESHOLDS, text.replace("degree_threshold: 100 ", "degree_threshold: 101 "))
     assert content_digest(changed) != changelog_entries(CHANGELOG, "hubs.yaml")[SHIPPED_HUBS_VERSION]
-    with pytest.raises(ConfigError, match=r"hubs\.yaml.*version 2.*digest"):
+    with pytest.raises(ConfigError, match=r"hubs\.yaml.*version 3.*digest"):
         check_changelog(changed, CHANGELOG)
 
 
@@ -144,6 +196,9 @@ def test_changed_threshold_without_changelog_entry_is_detected(tmp_path):
         ("dust_amount_lamports: 1000000 ", "dust_amount_lamports: 1000001 "),
         ("dust_amount_lamports: 1000000 ", "dust_amount_lamports: 1_000_000.0 "),
         ("dust_min_fanout: 5 ", "dust_min_fanout: 4 "),
+        # one_off_min_senders (T-058): повернення значення v2 чи інше значення без нового запису
+        ("one_off_min_senders: 50 ", "one_off_min_senders: 10 "),
+        ("one_off_min_senders: 50 ", "one_off_min_senders: 49 "),
     ],
 )
 def test_any_threshold_value_change_is_detected(tmp_path, old, new):
@@ -186,7 +241,7 @@ def test_moving_address_between_categories_is_detected(tmp_path):
 
 @pytest.mark.parametrize(
     "src, current, bumped_to",
-    [(THRESHOLDS, 2, 3), (LISTS, 1, 2)],
+    [(THRESHOLDS, 3, 4), (LISTS, 1, 2)],
     ids=["hubs", "hub_addresses"],
 )
 def test_version_bump_without_entry_is_detected(tmp_path, src, current, bumped_to):
@@ -198,21 +253,21 @@ def test_version_bump_without_entry_is_detected(tmp_path, src, current, bumped_t
 
 
 def test_new_entry_without_version_bump_is_detected(tmp_path):
-    # змінено поріг, у журнал дописано запис 3 з правильним дайджестом, але version у файлі лишилась 2
+    # змінено поріг, у журнал дописано запис 4 з правильним дайджестом, але version у файлі лишилась 3
     text = THRESHOLDS.read_text(encoding="utf-8")
     changed = _copy(tmp_path, THRESHOLDS, text.replace("degree_threshold: 100 ", "degree_threshold: 150 "))
     log = _changelog(
         tmp_path,
-        f"# config/hubs.yaml\n\n{HUBS_HISTORY}\n## 3 — 2026-10-05\nv3\nsha256: {content_digest(changed)}\n",
+        f"# config/hubs.yaml\n\n{HUBS_HISTORY}\n## 4 — 2026-10-06\nv4\nsha256: {content_digest(changed)}\n",
     )
-    with pytest.raises(ConfigError, match=r"hubs\.yaml.*version 2"):
+    with pytest.raises(ConfigError, match=r"hubs\.yaml.*version 3"):
         check_changelog(changed, log)
 
 
 def test_journal_ahead_of_file_is_detected(tmp_path):
     # файл не змінено, але в журналі вже є новіша версія — файл не відповідає останньому запису
-    log = _changelog(tmp_path, f"# config/hubs.yaml\n\n{HUBS_HISTORY}\n## 3 — 2026-10-05\nv3\nsha256: {A}\n")
-    with pytest.raises(ConfigError, match=r"hubs\.yaml.*version 2.*latest.*3"):
+    log = _changelog(tmp_path, f"# config/hubs.yaml\n\n{HUBS_HISTORY}\n## 4 — 2026-10-06\nv4\nsha256: {A}\n")
+    with pytest.raises(ConfigError, match=r"hubs\.yaml.*version 3.*latest.*4"):
         check_changelog(THRESHOLDS, log)
 
 
@@ -221,11 +276,11 @@ def test_proper_bump_with_entry_passes(tmp_path):
     bumped = _copy(
         tmp_path,
         THRESHOLDS,
-        text.replace("\nversion: 2\n", "\nversion: 3\n").replace("degree_threshold: 100 ", "degree_threshold: 150 "),
+        text.replace("\nversion: 3\n", "\nversion: 4\n").replace("degree_threshold: 100 ", "degree_threshold: 150 "),
     )
     log = _changelog(
         tmp_path,
-        f"# config/hubs.yaml\n\n{HUBS_HISTORY}\n## 3 — 2026-10-05\nпідняли поріг\nsha256: {content_digest(bumped)}\n",
+        f"# config/hubs.yaml\n\n{HUBS_HISTORY}\n## 4 — 2026-10-06\nпідняли поріг\nsha256: {content_digest(bumped)}\n",
     )
     check_changelog(bumped, log)
     assert load_hub_config(bumped).thresholds_digest == content_digest(bumped)
@@ -267,7 +322,9 @@ def test_digest_of_invalid_yaml_is_config_error(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "sha, version", [(SHIPPED_HUBS_SHA, 2), (SHIPPED_HUBS_SHA_V1, 1)], ids=["current-entry", "historical-entry"]
+    "sha, version",
+    [(SHIPPED_HUBS_SHA, 3), (SHIPPED_HUBS_SHA_V2, 2), (SHIPPED_HUBS_SHA_V1, 1)],
+    ids=["current-entry", "historical-entry-2", "historical-entry-1"],
 )
 def test_entry_without_sha_line_is_rejected(tmp_path, sha, version):
     # і поточний, і історичний запис мусять закінчуватись sha256: вада будь-якого запису — вада розділу
@@ -309,7 +366,7 @@ def test_entry_in_wrong_section_does_not_count(tmp_path):
     log = _changelog(tmp_path, f"# config/hub_addresses.yaml\n\n{HUBS_HISTORY}")
     with pytest.raises(ConfigError, match=r"hubs\.yaml.*section"):
         check_changelog(THRESHOLDS, log)
-    with pytest.raises(ConfigError, match=r"hub_addresses\.yaml.*version 1.*latest.*2"):
+    with pytest.raises(ConfigError, match=r"hub_addresses\.yaml.*version 1.*latest.*3"):
         check_changelog(LISTS, log)
     # контроль: ті самі записи в правильному розділі приймаються
     check_changelog(THRESHOLDS, _changelog(tmp_path, f"# config/hubs.yaml\n\n{HUBS_HISTORY}"))
@@ -434,8 +491,8 @@ def test_missing_changelog_file_is_config_error(tmp_path):
 @pytest.mark.parametrize("version", ["0", "'1'", "true", "1.0"])
 def test_check_rejects_file_with_invalid_version(tmp_path, version):
     shipped = THRESHOLDS.read_text(encoding="utf-8")
-    assert "\nversion: 2\n" in shipped
-    text = shipped.replace("\nversion: 2\n", f"\nversion: {version}\n")
+    assert "\nversion: 3\n" in shipped
+    text = shipped.replace("\nversion: 3\n", f"\nversion: {version}\n")
     # саме відмова за типом/межею версії, а не випадковий збіг (True == 1 у словнику записів)
     with pytest.raises(ConfigError, match=r"hubs\.yaml: version must be an int >= 1"):
         check_changelog(_copy(tmp_path, THRESHOLDS, text), CHANGELOG)

@@ -106,7 +106,7 @@ def test_degree_below_at_and_above_threshold(threshold, offset, expected):
         (0.7, 8, 10, True),  # поріг + 1/10
         (0.5, 5, 10, False),
         (0.5, 6, 10, True),
-        (0.8, 8, 10, False),  # значення з config/hubs.yaml v2
+        (0.8, 8, 10, False),  # частка з config/hubs.yaml (v2 і v3 — 0.8)
         (0.8, 9, 10, True),
         (0.0, 0, 10, False),  # частка 0 при порозі 0 — не хаб
         (0.0, 1, 10, True),
@@ -181,15 +181,30 @@ def test_shipped_config_thresholds_drive_the_rule():
     """Golden-перевірка проти зафіксованого `config/hubs.yaml`: межа — значення з файла, рівно поріг не хаб."""
     config = load_hub_config(ROOT / "config/hubs.yaml", ROOT / "config/hub_addresses.yaml")
     t = config.thresholds
-    assert (t.version, t.degree_threshold, t.one_off_senders_share, t.one_off_min_senders) == (2, 100, 0.8, 10)
+    # T-058 (R-23): v3 — one_off_min_senders 10 → 50; решта значень v2.
+    assert (t.version, t.degree_threshold, t.one_off_senders_share, t.one_off_min_senders) == (3, 100, 0.8, 50)
     at = evaluate(_node(degree=t.degree_threshold), config, ingest_counterparty_threshold=INGEST_THRESHOLD)
     above = evaluate(_node(degree=t.degree_threshold + 1), config, ingest_counterparty_threshold=INGEST_THRESHOLD)
     assert DEGREE not in _criteria(at)
     assert [(h.criterion, h.measured, h.threshold) for h in above if h.criterion is DEGREE] == [(DEGREE, 101, 100)]
-    share_at = evaluate(_node(unique=10, one_off=8), config, ingest_counterparty_threshold=INGEST_THRESHOLD)
-    share_above = evaluate(_node(unique=10, one_off=9), config, ingest_counterparty_threshold=INGEST_THRESHOLD)
-    assert ONE_OFF not in _criteria(share_at)
-    assert ONE_OFF in _criteria(share_above)
+
+    def one_off(unique, one_off_count):
+        node = _node(unique=unique, one_off=one_off_count)
+        return [h for h in evaluate(node, config, ingest_counterparty_threshold=INGEST_THRESHOLD)
+                if h.criterion is ONE_OFF]
+
+    # Частка на межі передумови (50 відправників, включно): рівно 0.8 (40/50) — не хаб; 41/50 = 0.82 — хаб.
+    assert one_off(50, 40) == []
+    assert [(h.measured, h.threshold) for h in one_off(50, 41)] == [(41 / 50, 0.8)]
+    # Передумова з файла — «>=» включно: 49 відправників, усі одноразові (частка 1.0) — критерій не застосовний;
+    # 50 — застосовний.
+    assert one_off(49, 49) == []
+    assert [(h.measured, h.threshold) for h in one_off(50, 50)] == [(1.0, 0.8)]
+    # Колишній кейс v2 (10 відправників, 9 одноразових) на v3 — нижче передумови: саме це T-058 і змінює.
+    assert one_off(10, 9) == []
+    assert [h.measured for h in evaluate(_node(unique=10, one_off=9), _config(one_off_min_senders=10),
+                                         ingest_counterparty_threshold=INGEST_THRESHOLD)
+            if h.criterion is ONE_OFF] == [0.9]
 
 
 # --- інваріант типу CriterionHit ---------------------------------------------------

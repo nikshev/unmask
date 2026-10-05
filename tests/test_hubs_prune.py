@@ -7,8 +7,10 @@ contracts/graph-service.md §5; data-model «PruneRecord», «BuyerFlag», «Pru
 
 - еталон — незалежний оракул генератора фікстур (`expected.json` усіх 12 сценаріїв: `prune.records`,
   `prune.buyer_flags`, `prune.after`), а не вихід `prune_hubs`; порівняння — повна рівність поле за полем;
-- golden проти зафіксованих `config/hubs.yaml` (v2) і `config/hub_addresses.yaml` (v1) — принцип III: зміна
-  порогу без перегенерації еталонів червона тут;
+- golden проти зафіксованих `config/hubs.yaml` (v3, T-058) і `config/hub_addresses.yaml` (v1) — принцип III:
+  оракули фікстур згенеровано з історичної v2 (дайджест їхнього конфігу = запис `## 2` журналу), v3 відрізняється
+  рівно `one_off_min_senders` 10 → 50, і прогін на поставленому v3 дає оракул із застосованим правилом v3; будь-яка
+  інша зміна порогу чи списку без перегенерації еталонів червона тут;
 - межові випадки: покупець з усіма п'ятьма критеріями (лишається, позначка); ребро між двома хабами (в обох
   записах); `delegated_buy`-ребро хаба (у записі); покупець-джерело з ребром до хаба (ребро зникає, покупець
   лишається); порожній граф; `lists=None`; некоректний `ingest_counterparty_threshold` навіть на порожньому графі;
@@ -19,6 +21,7 @@ contracts/graph-service.md §5; data-model «PruneRecord», «BuyerFlag», «Pru
 
 import copy
 import dataclasses
+import hashlib
 import json
 from pathlib import Path
 from types import MappingProxyType
@@ -37,7 +40,14 @@ from unmask.graph.model import (
     NodeMeasures,
     NodeRole,
 )
-from unmask.hubs.config import ADDRESS_CATEGORIES, AddressLists, HubConfig, HubThresholds, load_hub_config
+from unmask.hubs.config import (
+    ADDRESS_CATEGORIES,
+    AddressLists,
+    HubConfig,
+    HubThresholds,
+    changelog_entries,
+    load_hub_config,
+)
 from unmask.hubs.criteria import CriterionHit
 from unmask.hubs.prune import BuyerFlag, PruneOutcome, PruneRecord, prune_hubs
 from unmask.ingest.model import AddressType
@@ -46,6 +56,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SCENARIOS = sorted(p.name for p in Path(GRAPH_FIXTURES).iterdir() if (p / "expected.json").is_file())
 SHIPPED_HUBS = ROOT / "config" / "hubs.yaml"
 SHIPPED_LISTS = ROOT / "config" / "hub_addresses.yaml"
+CHANGELOG = ROOT / "config" / "CHANGELOG.md"
+# Незалежний еталон (контракт config-hubs.md): дайджест запису 2 журналу — історична v2, з якої згенеровано оракули.
+HUBS_V2_SHA = "fdf65bb5369e4e40e629ca4cd45f4952466ee21447ae8bbe79a4ee0035f45409"
 
 MEASURED_CRITERIA = {"degree", "one_off_senders", "ingest_high_degree", "dust_fanout"}
 
@@ -189,31 +202,94 @@ def test_after_graph_nodes_and_edges_are_exactly_the_full_ones_minus_hubs(name):
     assert outcome.graph.edges == tuple(e for e in graph.edges if e.sender not in pruned and e.receiver not in pruned)
 
 
-def test_golden_against_shipped_config_files():
-    """Принцип III: зафіксовані `config/hubs.yaml` v2 і `config/hub_addresses.yaml` v1 дають еталон оракула.
+def _oracle_under_one_off_min(expected: dict, min_senders: int, config_version: int) -> dict:
+    """Розділ `prune` оракула, перерахований під іншу передумову `one_off_min_senders` — з самого оракула.
 
-    Конфіг кожного сценарію, крім `g_all_hubs` (знижений `degree_threshold`, щоб кожне джерело мало свій
-    критерій), — рівно комітований; зміна порогу чи списку без перегенерації еталонів червона тут.
+    Правило (контракт config-hubs.md, FR-002-07б): хіт `one_off_senders` існує, лише якщо
+    `unique_senders >= one_off_min_senders`; решта хітів від цієї передумови не залежить. Тож хіт `one_off_senders`
+    вершини з `measures.unique_senders < min_senders` зникає; запис/позначка без хітів зникає; вершина без запису
+    повертається в `after` разом із ребрами — у порядку повного графа оракула (`graph.nodes`/`graph.edges`).
+    """
+    def keep(item: dict) -> list:
+        return [h for h in item["criteria"] if not (
+            h["criterion"] == "one_off_senders" and item["measures"]["unique_senders"] < min_senders)]
+
+    records = [{**r, "criteria": keep(r), "config_version": config_version}
+               for r in expected["prune"]["records"] if keep(r)]
+    flags = [{**f, "criteria": keep(f)} for f in expected["prune"]["buyer_flags"] if keep(f)]
+    pruned = {r["address"] for r in records}
+    return {
+        **expected["prune"],
+        "config_version": config_version,
+        "records": records,
+        "buyer_flags": flags,
+        "after": {
+            "node_addresses": [n["address"] for n in expected["graph"]["nodes"] if n["address"] not in pruned],
+            "edge_keys": [[e["kind"], e["sender"], e["receiver"], e["asset"] or ""] for e in expected["graph"]["edges"]
+                          if e["sender"] not in pruned and e["receiver"] not in pruned],
+        },
+    }
+
+
+def test_golden_against_shipped_config_files():
+    """Принцип III: зафіксовані `config/hubs.yaml` v3 і `config/hub_addresses.yaml` v1 проти оракулів фікстур.
+
+    Оракули (`expected.json`) згенеровано з історичної v2 — конфіг кожного сценарію, крім `g_all_hubs` (знижений
+    `degree_threshold`, щоб кожне джерело мало свій критерій), має рівно дайджест запису `## 2` журналу. Поставлена
+    v3 (T-058, R-23) відрізняється від v2 рівно `one_off_min_senders` 10 → 50, тож прогін на ній мусить дати оракул
+    із правилом v3, виведений з самого оракула (`_oracle_under_one_off_min`), — і саме на двох сценаріях з
+    `one_off_senders` при 10..49 відправниках (`g_hub`: H, 32; `g_buyer_hub`: позначка, 12). Будь-яка інша зміна
+    порогу чи списку без перегенерації еталонів червона тут.
     """
     shipped = load_hub_config(SHIPPED_HUBS, SHIPPED_LISTS)
-    assert shipped.thresholds.version == 2
+    assert shipped.thresholds.version == 3
     assert shipped.lists is not None and shipped.lists.version == 1
+    assert changelog_entries(CHANGELOG, "hubs.yaml")[2] == HUBS_V2_SHA
     thresholds = {f.name: getattr(shipped.thresholds, f.name)
                   for f in dataclasses.fields(HubThresholds) if f.name != "version"}
     categories = {k: list(v) for k, v in shipped.lists.categories.items()}
-    on_shipped = []
+    on_v2, affected = [], []
     for name in SCENARIOS:
         expected = _expected(name)
-        if (expected["config"]["version"], expected["config"]["thresholds"], expected["config"]["lists"]) != (
-            shipped.thresholds.version, thresholds, {"version": shipped.lists.version, "categories": categories}
-        ):
+        config = expected["config"]
+        canonical = json.dumps({"version": config["version"], **config["thresholds"]}, sort_keys=True,
+                               separators=(",", ":"), ensure_ascii=False)
+        if hashlib.sha256(canonical.encode("utf-8")).hexdigest() != HUBS_V2_SHA:
             continue
-        on_shipped.append(name)
+        assert config["lists"] == {"version": shipped.lists.version, "categories": categories}, name
+        on_v2.append(name)
+        # v3 = v2 рівно з однією відмінністю
+        assert {k for k in thresholds if thresholds[k] != config["thresholds"][k]} == {"one_off_min_senders"}, name
+        assert (config["thresholds"]["one_off_min_senders"], thresholds["one_off_min_senders"]) == (10, 50)
+        # самоперевірка виведення: під передумовою самого оракула воно відтворює оракул дослівно
+        assert _oracle_under_one_off_min(expected, 10, config["version"]) == expected["prune"], name
+        want = _oracle_under_one_off_min(expected, thresholds["one_off_min_senders"], shipped.thresholds.version)
+        if _oracle_under_one_off_min(expected, thresholds["one_off_min_senders"], config["version"]) != expected["prune"]:
+            affected.append(name)  # правило v3 змінює висновок сценарію (не лише номер версії)
         result = load_ingest_fixture(name)
         outcome = prune_hubs(build_graph(result), shipped,
                              ingest_counterparty_threshold=result.metadata.counterparty_threshold)
-        assert _outcome_dict(outcome) == expected["prune"], name
-    assert on_shipped == [n for n in SCENARIOS if n != "g_all_hubs"]
+        assert _outcome_dict(outcome) == want, name
+    assert on_v2 == [n for n in SCENARIOS if n != "g_all_hubs"]
+    assert affected == ["g_buyer_hub", "g_hub"]
+
+
+def test_shipped_v3_keeps_g_hub_H_that_v2_pruned_by_one_off_senders():
+    """T-058, явно: H у `g_hub` (32 відправники, 30 одноразових, частка 0.9375) — хаб за v2 і вершина графа за v3.
+
+    Це ціна рішення R-23 (передумова 50), записана в known-issues: на збірках, де видно 10..49 відправників,
+    `one_off_senders` не спрацьовує.
+    """
+    expected, graph, v2_outcome = _prune("g_hub")
+    H = _w(expected, "H")
+    shipped = load_hub_config(SHIPPED_HUBS, SHIPPED_LISTS)
+    v3_outcome = prune_hubs(graph, shipped, ingest_counterparty_threshold=expected["ingest_counterparty_threshold"])
+    (record,) = v2_outcome.records
+    assert record.address == H and [h.criterion.value for h in record.criteria] == ["one_off_senders"]
+    assert (record.measures.unique_senders, record.measures.one_off_senders) == (32, 30)
+    assert 10 <= record.measures.unique_senders < shipped.thresholds.one_off_min_senders == 50
+    assert v3_outcome.records == () and v3_outcome.graph == graph
+    assert H in {n.address for n in v3_outcome.graph.nodes}
 
 
 # --- Сценарії з тексту задачі -----------------------------------------------------------

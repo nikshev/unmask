@@ -8,6 +8,11 @@
 T-054 (FR-002-22, research R-22, `calibration.md`): `config/hubs.yaml` — версія 2 з `dust_amount_lamports`
 (int ≥ 1) і `dust_min_fanout` (int ≥ 2). Golden-значення нижче (`BASE_THRESHOLDS`, перевірки поставних файлів і
 журналу) свідомо оновлено з v1 на v2; запис журналу версії 1 — історичний, його sha256 незмінний.
+
+T-058 (R-23, `calibration.md` «Перерахунок R-23»): `config/hubs.yaml` — версія 3, `one_off_min_senders` 10 → 50;
+решта значень v2 без змін. Golden (`BASE_THRESHOLDS`, перевірки поставних файлів і журналу) свідомо оновлено з v2
+на v3; записи 1 і 2 журналу — історичні: їхні заголовки, текст і sha256 незмінні (`HUBS_V1_SHA`, `HUBS_V2_SHA`), а
+копії v3 з поверненими значеннями v1/v2 дають рівно їхні дайджести (решта значень не змінилась).
 """
 
 import dataclasses
@@ -50,10 +55,10 @@ TOKEN = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 JUPITER = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
 
 BASE_THRESHOLDS = {
-    "version": 2,
+    "version": 3,
     "degree_threshold": 100,
     "one_off_senders_share": 0.8,
-    "one_off_min_senders": 10,
+    "one_off_min_senders": 50,  # T-058: 10 → 50 (R-23, calibration.md «Перерахунок R-23»)
     "giant_component_warn_share": 0.5,
     "prune_off_curve": True,
     "prune_ingest_high_degree": True,
@@ -65,6 +70,11 @@ DUST_FIELDS = ("dust_amount_lamports", "dust_min_fanout")
 # Незалежний еталон: sha256 запису 1 журналу (T-023), обчислений із канонічного вмісту v1. Запис історичний —
 # T-054 його не змінює; v1 = v2 без `dust_*` і з `version: 1` (решта значень v1 без змін).
 HUBS_V1_SHA = "c410d677279d02687928b12fcf490e4685007c0bb499e12c2fbfb1ca6d25c63c"
+# sha256 запису 2 (T-054): канонічний вміст v2 дослівно з contracts/config-hubs.md. Історичний — T-058 не змінює;
+# v2 = v3 з `one_off_min_senders: 10` і `version: 2`.
+HUBS_V2_SHA = "fdf65bb5369e4e40e629ca4cd45f4952466ee21447ae8bbe79a4ee0035f45409"
+# Значення, якими v3 відрізняється від v2 (T-058). Решта значень v2 у v3 без змін.
+V2_DELTA = {"version": 2, "one_off_min_senders": 10}
 
 
 def _base_lists() -> dict:
@@ -105,16 +115,16 @@ def _digest(path: Path) -> str:
 # --- поставні файли ----------------------------------------------------------------------------------
 
 
-def test_shipped_thresholds_load_with_version_2_and_documented_values():
+def test_shipped_thresholds_load_with_version_3_and_documented_values():
     cfg = load_hub_config(THRESHOLDS, None)
 
     assert isinstance(cfg, HubConfig)
     t = cfg.thresholds
     assert isinstance(t, HubThresholds)
-    assert t.version == 2
+    assert t.version == 3
     assert t.degree_threshold == 100
     assert t.one_off_senders_share == 0.8
-    assert t.one_off_min_senders == 10
+    assert t.one_off_min_senders == 50 and type(t.one_off_min_senders) is int  # T-058, R-23
     assert t.giant_component_warn_share == 0.5
     assert t.prune_off_curve is True
     assert t.prune_ingest_high_degree is True
@@ -136,15 +146,33 @@ def test_hub_thresholds_match_thresholds_snapshot_fields():
 
 
 def test_v1_file_without_dust_fields_is_rejected_naming_the_field(tmp_path):
-    v1 = {k: v for k, v in BASE_THRESHOLDS.items() if k not in DUST_FIELDS} | {"version": 1}
+    v1 = {k: v for k, v in BASE_THRESHOLDS.items() if k not in DUST_FIELDS} | {"version": 1, "one_off_min_senders": 10}
     path = _write(tmp_path, "hubs.yaml", v1)
-    # копія v1 — це рівно історичний вміст запису 1 журналу: решта значень v1 у v2 не змінились
+    # копія v1 — це рівно історичний вміст запису 1 журналу: решта значень v1 у v2/v3 не змінились
     assert _digest(path) == HUBS_V1_SHA
     with pytest.raises(ConfigError, match=r"^dust_amount_lamports: missing required field$"):
         load_hub_config(path, None)
     only_amount = _write(tmp_path, "hubs.yaml", {**v1, "dust_amount_lamports": 1_000_000})
     with pytest.raises(ConfigError, match=r"^dust_min_fanout: missing required field$"):
         load_hub_config(only_amount, None)
+
+
+def test_v3_with_v2_values_restored_is_exactly_the_historical_v2_entry(tmp_path):
+    """T-058: v3 відрізняється від v2 рівно одним значенням (`one_off_min_senders` 10 → 50) і версією.
+
+    Копія ПОСТАВЛЕНОГО файла з повернутими `one_off_min_senders: 10` і `version: 2` дає рівно дайджест запису 2;
+    повернути лише одне з двох — не дає (обидві відмінності реальні й інших немає).
+    """
+    shipped = yaml.safe_load(THRESHOLDS.read_text(encoding="utf-8"))
+    assert shipped == BASE_THRESHOLDS
+    assert {k: shipped[k] for k in V2_DELTA} == {"version": 3, "one_off_min_senders": 50}
+    assert _digest(_write(tmp_path, "hubs.yaml", shipped | V2_DELTA)) == HUBS_V2_SHA
+    for key in V2_DELTA:
+        assert _digest(_write(tmp_path, "hubs.yaml", shipped | {key: V2_DELTA[key]})) != HUBS_V2_SHA, key
+    # v2-копія — валідний конфіг тієї самої схеми (дев'ять полів; v3 нових полів не додає)
+    v2 = load_hub_config(_write(tmp_path, "hubs.yaml", shipped | V2_DELTA), None).thresholds
+    assert (v2.version, v2.one_off_min_senders) == (2, 10)
+    assert dataclasses.asdict(v2) == BASE_THRESHOLDS | V2_DELTA
 
 
 def test_dust_amount_one_loads_as_valid_off_switch(tmp_path):
@@ -218,6 +246,11 @@ def test_shipped_files_state_strictly_greater_rule_and_min_senders_precondition(
     assert "вимикає" in dust_comment  # значення 1 — вимикач, задокументований біля поля
     fanout_comment = text[text.index("dust_min_fanout:"):]
     assert "ПЕРЕДУМОВА" in fanout_comment and ">= 5 (включно)" in fanout_comment
+    # T-058: причина значення 50 записана біля поля — калібрування R-23, кап підписів і переоцінка
+    one_off_comment = text[text.index("one_off_min_senders:"):text.index("giant_component_warn_share:")]
+    assert "ПЕРЕДУМОВА" in one_off_comment and ">= 50 (включно)" in one_off_comment
+    for fragment in ("R-23", "calibration.md", "max_signatures_per_wallet", "ins1", "переоцінити"):
+        assert fragment in one_off_comment, fragment
 
 
 def test_shipped_changelog_has_hubs_sections_with_matching_sha256_and_keeps_ingest_entries():
@@ -243,12 +276,13 @@ def test_shipped_changelog_has_hubs_sections_with_matching_sha256_and_keeps_inge
     assert [ln for ln in addresses_body.splitlines() if ln.startswith("## ")][0].startswith("## 1 — ")
     assert [ln for ln in addresses_body.splitlines() if ln.strip()][-1] == f"sha256: {_digest(LISTS)}"
 
-    # hubs.yaml: ОБИДВА записи — 1 (історичний, sha незмінний) і 2 (поточний файл)
+    # hubs.yaml: ТРИ записи — 1 і 2 (історичні, sha незмінні) і 3 (поточний файл, T-058)
     entries = _hubs_entries(section("hubs.yaml"))
-    assert [header.split(" — ")[0] for header, _ in entries] == ["## 1", "## 2"]
-    (_, body1), (_, body2) = entries
+    assert [header.split(" — ")[0] for header, _ in entries] == ["## 1", "## 2", "## 3"]
+    (_, body1), (_, body2), (_, body3) = entries
     assert body1[-1] == f"sha256: {HUBS_V1_SHA}"
-    assert body2[-1] == f"sha256: {_digest(THRESHOLDS)}"
+    assert body2[-1] == f"sha256: {HUBS_V2_SHA}"
+    assert body3[-1] == f"sha256: {_digest(THRESHOLDS)}"
     entry1 = "\n".join(body1)
     assert "не калібровано" in entry1
     for fragment in ("degree_threshold=100", "one_off_senders_share=0.8", "one_off_min_senders=10",
@@ -257,6 +291,9 @@ def test_shipped_changelog_has_hubs_sections_with_matching_sha256_and_keeps_inge
     entry2 = "\n".join(body2)
     for fragment in ("dust_amount_lamports=1000000", "dust_min_fanout=5", "calibration.md"):
         assert fragment in entry2
+    entry3 = "\n".join(body3)
+    for fragment in ("one_off_min_senders", "10 → 50", "calibration.md", "R-23", "T-058"):
+        assert fragment in entry3, fragment
     assert "exchanges(0), market_makers(0)" in addresses_body
 
 
@@ -279,10 +316,10 @@ def _changelog_section(name: str) -> str:
     return "\n".join(lines[start + 1 : end])
 
 
-def test_shipped_changelog_entry_2_cites_calibration_and_keeps_entry_1_digest():
+def test_shipped_changelog_entry_3_cites_r23_and_keeps_entries_1_and_2():
     entries = _hubs_entries(_changelog_section("hubs.yaml"))
-    assert len(entries) == 2
-    (head1, body1), (head2, body2) = entries
+    assert len(entries) == 3
+    (head1, body1), (head2, body2), (head3, body3) = entries
     assert head1 == "## 1 — 2026-10-04"  # історичний запис T-023: заголовок, текст і sha не змінено
     assert body1 == [
         "Початкова версія, не калібровано на реальних токенах: degree_threshold=100, one_off_senders_share=0.8,",
@@ -291,13 +328,31 @@ def test_shipped_changelog_entry_2_cites_calibration_and_keeps_entry_1_digest():
         "Обґрунтування — specs/002-funding-graph-hub-pruning/research.md R-12.",
         f"sha256: {HUBS_V1_SHA}",
     ]
-    assert head2.startswith("## 2 — 2026-")
+    # історичний запис T-054: заголовок, текст і sha не змінено (T-058 лише дописує запис 3)
+    assert head2 == "## 2 — 2026-10-04"
+    assert body2 == [
+        "Калібрування на 9 реальних токенах pump.fun (5 інсайдерських за MELT, 4 чисті; Helius, N=30, depth=2, кап 30;",
+        "specs/002-funding-graph-hub-pruning/calibration.md). Додано критерій dust_fanout (FR-002-22, research R-22):",
+        "dust_amount_lamports=1000000 (0,001 SOL; хаб, якщо медіана SOL-сум до різних покупців СТРОГО МЕНША),",
+        "dust_min_fanout=5 (передумова, включно). Чому: пилові джерела (fan-out 5–23, медіана < 0,001 SOL) є в кожному",
+        "токені й склеюють до 21/30 покупців; жоден критерій v1 їх не ловить. degree_threshold=100 лишено свідомо: на цих",
+        "даних неактивний (макс. ступінь 45), зниження до ~30 відсікло б справжнього фінансиста ins1 (ступінь 45, медіана",
+        "≥ 0,7 SOL). Решта значень v1 без змін. Пил/фінансист розділяє сума, не ступінь.",
+        f"sha256: {HUBS_V2_SHA}",
+    ]
     text2 = " ".join(body2)
     # що змінено, чому, на яких токенах (контракт config-hubs.md: «Кожен наступний запис…»)
     for fragment in ("9 реальних токенах", "calibration.md", "FR-002-22", "R-22", "dust_amount_lamports=1000000",
                      "СТРОГО МЕНША", "dust_min_fanout=5", "degree_threshold=100 лишено", "Решта значень v1 без змін"):
         assert fragment in text2, fragment
-    assert body2[-1] == f"sha256: {_digest(THRESHOLDS)}"
+    # запис 3 (T-058): що змінено (старе → нове), чому (R-23, calibration.md, ins1), на яких токенах, обмеження
+    assert head3 == "## 3 — 2026-10-05"
+    text3 = " ".join(body3)
+    for fragment in ("one_off_min_senders=10 → 50", "calibration.md", "R-23", "T-058", "9 реальних токенах",
+                     "max_signatures_per_wallet", "ins1", "DKrPigau", "dust_fanout", "Решта значень v2 без змін",
+                     "переоцінити"):
+        assert fragment in text3, fragment
+    assert body3[-1] == f"sha256: {_digest(THRESHOLDS)}"
 
 
 # --- кожне значення читається з YAML (тихих умовчань у коді немає) ------------------------------------
@@ -461,7 +516,7 @@ def test_missing_lists_file_yields_lists_none_not_error(tmp_path):
 
     assert cfg.lists is None
     assert cfg.lists_applied is False  # FR-002-12: недоступний список явно позначений
-    assert cfg.thresholds.version == 2
+    assert cfg.thresholds.version == BASE_THRESHOLDS["version"] == 3
 
 
 def test_lists_path_none_and_unreadable_file_yield_lists_none(tmp_path):

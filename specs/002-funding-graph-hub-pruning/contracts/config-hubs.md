@@ -6,15 +6,17 @@
 
 Завантаження: `unmask.hubs.config.load_hub_config(thresholds_path, lists_path) -> HubConfig`. Невідоме/відсутнє поле чи значення поза межами → `ConfigError` з назвою поля.
 
-## `config/hubs.yaml` (версія 2; версія 1 — без двох останніх ключів `dust_*`)
+## `config/hubs.yaml` (версія 3; версія 2 — `one_off_min_senders: 10`; версія 1 — ще й без двох останніх ключів `dust_*`)
 
 Версія 2 вводиться задачею T-054 за калібруванням (`calibration.md`, research R-22): додано критерій `dust_fanout` (FR-002-22). Решта значень v1 без змін — свідомо (`degree_threshold` на реальних даних неактивний, але зниження відсікло б справжнього фінансиста).
+
+Версія 3 вводиться задачею T-058 за перерахунком калібрування (`calibration.md`, розділ «Перерахунок R-23 (2026-10-05)»; research R-23): `one_off_min_senders` 10 → 50. При капі збору 30 видно не більше ~30 відправників, і передумова 10 давала відсікання за `one_off_senders` вершин із 15–30 відправниками — зокрема головного інсайдерського фінансиста ins1. Решта значень v2 без змін. Ціна: на збірках із капом ≤ 49 відправників критерій фактично вимкнено (known-issues 002, §3); переоцінити на збірках із капом ≥ 100.
 
 ```yaml
 # Версіонована конфігурація відсікання хабів (принцип III, VI).
 # Схема: specs/002-funding-graph-hub-pruning/contracts/config-hubs.md
 # Будь-яка зміна: підняти version і додати запис із sha256 у config/CHANGELOG.md (розділ "# config/hubs.yaml").
-version: 2
+version: 3
 
 # Правило порогу (FR-002-14, research R-9, R-22): рівно поріг НІКОЛИ не спрацьовує, нерівність строга.
 # Напрямок — властивість критерію: degree / one_off_senders_share / giant_component_warn_share — СТРОГО БІЛЬШЕ
@@ -26,8 +28,15 @@ degree_threshold: 100            # int ≥ 1. Унікальних контра�
                                  # prune_ingest_high_degree. Не калібровано на реальних токенах (research R-12).
 one_off_senders_share: 0.8       # float 0..1. Частка унікальних відправників, що надіслали рівно один переказ.
                                  # Хаб, якщо share > 0.8 (біржові депозити — майже всі одноразові).
-one_off_min_senders: 10          # int ≥ 2. ПЕРЕДУМОВА критерію (не поріг хаба): застосовується, лише коли
-                                 # унікальних відправників >= 10 (включно). Нижче частка статистично безглузда.
+one_off_min_senders: 50          # int ≥ 2. ПЕРЕДУМОВА критерію (не поріг хаба): застосовується, лише коли
+                                 # унікальних відправників >= 50 (включно). Нижче частка статистично безглузда.
+                                 # v3 (T-058, R-23, calibration.md «Перерахунок R-23»): було 10. При
+                                 # max_signatures_per_wallet = 30 (калібрувальні збори) видимих відправників <= ~30,
+                                 # і поріг 10 відсікав вузли з 15–30 відправниками, у т.ч. головного інсайдерського
+                                 # фінансиста ins1 (30 відправників, 29 одноразових, fan-out 15, 2,4 SOL). Відомий
+                                 # компроміс: при капі 30 передумова 50 недосяжна — критерій фактично вимкнено на
+                                 # таких збірках; при капі 300 (дефолт ingest.yaml) працює. Пил ловить dust_fanout;
+                                 # переоцінити на збірках із капом >= 100 (known-issues 002).
 giant_component_warn_share: 0.5  # float 0..1. Попередження giant_component, якщо після відсікання частка покупців
                                  # у найбільшій (за покупцями) компоненті > 0.5.
 prune_off_curve: true            # bool. Вершини поза кривою ed25519 (PDA: пули, сховища, бондинг-криві) —
@@ -106,7 +115,7 @@ one_off_min_senders=10, giant_component_warn_share=0.5, prune_off_curve=true, pr
 Обґрунтування — specs/002-funding-graph-hub-pruning/research.md R-12.
 sha256: <hex канонічного вмісту файла>
 
-## 2 — 2026-10-0X
+## 2 — 2026-10-04
 Калібрування на 9 реальних токенах pump.fun (5 інсайдерських за MELT, 4 чисті; Helius, N=30, depth=2, кап 30;
 specs/002-funding-graph-hub-pruning/calibration.md). Додано критерій dust_fanout (FR-002-22, research R-22):
 dust_amount_lamports=1000000 (0,001 SOL; хаб, якщо медіана SOL-сум до різних покупців СТРОГО МЕНША),
@@ -116,6 +125,13 @@ dust_min_fanout=5 (передумова, включно). Чому: пилові
 ≥ 0,7 SOL). Решта значень v1 без змін. Пил/фінансист розділяє сума, не ступінь.
 sha256: fdf65bb5369e4e40e629ca4cd45f4952466ee21447ae8bbe79a4ee0035f45409
 
+## 3 — 2026-10-05
+Змінено: one_off_min_senders=10 → 50 (передумова критерію one_off_senders, «>=» включно). Решта значень v2 без змін.
+Чому (T-058; research R-23; specs/002-funding-graph-hub-pruning/calibration.md, розділ «Перерахунок R-23»): …
+(що змінено — значення старе → нове; чому — посилання на калібрування/дослідження/задачу; на яких токенах перевірено;
+відомий компроміс і коли переоцінити)
+sha256: acfa643b0133da213d54341e6a70026dab93ce3aa67087dfddaab4a465211e2a
+
 # config/hub_addresses.yaml
 
 ## 1 — 2026-10-0X
@@ -124,9 +140,11 @@ exchanges(0), market_makers(0). Джерела — коментарі у фай�
 sha256: <hex>
 ```
 
-Правила: розділ рівня 1 — ім'я файла; запис рівня 2 — `## <version> — <дата>`; останній рядок запису — `sha256: <64 hex>`. `changelog_entries(changelog, "hubs.yaml")` повертає `{1: "<hex>", 2: "<hex>", …}`; `check_changelog` вимагає, щоб `version` файла був останнім записом розділу. Канонічний вміст = `json.dumps(yaml.safe_load(text), sort_keys=True, separators=(",", ":"), ensure_ascii=False)`; коментарі й форматування на дайджест не впливають.
+Правила: розділ рівня 1 — ім'я файла; запис рівня 2 — `## <version> — <дата>`; останній рядок запису — `sha256: <64 hex>`. `changelog_entries(changelog, "hubs.yaml")` повертає `{1: "<hex>", 2: "<hex>", …}`; `check_changelog` вимагає, щоб `version` файла був останнім записом розділу. Канонічний вміст = `json.dumps(yaml.safe_load(text), sort_keys=True, separators=(",", ":"), ensure_ascii=False)`; коментарі й форматування на дайджест не впливають. Порядок розділів парсеру байдужий, але в поставленому журналі розділ `# config/ingest.yaml` стоїть **останнім** (приклад вище — лише формат): тест 001 `tests/test_tx_batch_size.py` бере хвіст останнього `## `-запису до кінця файла.
 
-Дайджест запису 2 вище обчислено з канонічного вмісту `{"degree_threshold":100,"dust_amount_lamports":1000000,"dust_min_fanout":5,"giant_component_warn_share":0.5,"one_off_min_senders":10,"one_off_senders_share":0.8,"prune_ingest_high_degree":true,"prune_off_curve":true,"version":2}` — він не залежить від коментарів, тож T-054 має отримати рівно його (`content_digest(Path("config/hubs.yaml"))`); розбіжність означає інше значення або тип у файлі.
+Дайджест запису 3 (поточна версія, T-058) обчислено з канонічного вмісту `{"degree_threshold":100,"dust_amount_lamports":1000000,"dust_min_fanout":5,"giant_component_warn_share":0.5,"one_off_min_senders":50,"one_off_senders_share":0.8,"prune_ingest_high_degree":true,"prune_off_curve":true,"version":3}` → `acfa643b0133da213d54341e6a70026dab93ce3aa67087dfddaab4a465211e2a` (звірено трьома незалежними обчисленнями: `content_digest(Path("config/hubs.yaml"))`, `sha256(json.dumps(yaml.safe_load(...)))` і `sha256sum` цього рядка). Копія v3 з `one_off_min_senders: 10` і `version: 2` дає рівно дайджест запису 2 — решта значень не змінилась (`tests/test_hubs_changelog_guard.py`).
+
+Дайджест запису 2 вище (історичний, T-054) обчислено з канонічного вмісту `{"degree_threshold":100,"dust_amount_lamports":1000000,"dust_min_fanout":5,"giant_component_warn_share":0.5,"one_off_min_senders":10,"one_off_senders_share":0.8,"prune_ingest_high_degree":true,"prune_off_curve":true,"version":2}` — він не залежить від коментарів, тож T-054 має отримати рівно його (`content_digest(Path("config/hubs.yaml"))`); розбіжність означає інше значення або тип у файлі.
 
 Кожен наступний запис: що змінено, чому, на яких токенах перевірено. Підбір порогів «під результат» без запису заборонений (гейт критерію успіху).
 
