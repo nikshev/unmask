@@ -221,9 +221,11 @@ class Scenario:
         self.buyers.append(dict(label=label, slot=slot, spent=spent, received=received))
 
     def transfer(self, tx: str, path: str, sender: str, receiver: str, slot: int, amount: int, depth: int, *,
-                 asset: str = "sol", decimals: int | None = None) -> None:
+                 asset: str = "sol", decimals: int | None = None,
+                 block_time: int | None | str = "auto") -> None:
         self.transfers.append(dict(tx=tx, path=path, sender=sender, receiver=receiver, slot=slot,
-                                   amount=amount, depth=depth, asset=asset, decimals=decimals))
+                                   amount=amount, depth=depth, asset=asset, decimals=decimals,
+                                   block_time=block_time))
 
     def delegated(self, tx: str, payer: str, receiver: str, slot: int, *, block_time: int | None | str = "auto") -> None:
         """Делегована купівля (R-2): `payer` заплатив, `receiver` отримав токен; одна на транзакцію."""
@@ -267,8 +269,10 @@ def build_ingest(s: Scenario) -> dict:
     transfer_rows = []
     for t in s.transfers:
         asset = t["asset"] if t["asset"] == "sol" else s.spl(t["asset"][4:])
+        block_time = t.get("block_time", "auto")
         transfer_rows.append({
-            "signature": _signature(s.name, t["tx"]), "slot": t["slot"], "block_time": BASE_TIME + t["slot"],
+            "signature": _signature(s.name, t["tx"]), "slot": t["slot"],
+            "block_time": BASE_TIME + t["slot"] if block_time == "auto" else block_time,
             "instruction_path": t["path"], "sender": s.a(t["sender"]), "receiver": s.a(t["receiver"]),
             "asset": asset, "amount": t["amount"], "decimals": t["decimals"], "depth": t["depth"],
         })
@@ -348,11 +352,14 @@ def aggregate_edges(transfers: list[dict]) -> list[dict]:
         items = sorted(items, key=lambda t: (t["slot"], t["signature"], _path_key(t["instruction_path"])))
         decimals = {t["decimals"] for t in items}
         assert len(decimals) == 1, f"розбіжні decimals у {sender}->{receiver} {asset}"
+        times = [t["block_time"] for t in items]
+        edge_time = times[0] if all(x is not None for x in times) else None
+        edge_end = times[-1] if all(x is not None for x in times) else None
         edges.append({
             "kind": "transfer", "sender": sender, "receiver": receiver, "asset": asset,
             "amount": sum(t["amount"] for t in items), "decimals": items[0]["decimals"],
             "count": len(items), "first_slot": items[0]["slot"], "last_slot": items[-1]["slot"],
-            "first_time": items[0]["block_time"], "last_time": items[-1]["block_time"],
+            "first_time": edge_time, "last_time": edge_end,
             "refs": [{"signature": t["signature"], "slot": t["slot"], "instruction_path": t["instruction_path"]}
                      for t in items],
         })

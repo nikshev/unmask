@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **61** · задач: **87** (виконано 58) · вимог у роботі: **23** · порушень: **0**
+Вимог: **61** · задач: **87** (виконано 87) · вимог у роботі: **0** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -56,29 +56,29 @@
 
 | Вимога | Опис | Задачі | Імплементація | Тести |
 |---|---|---|---|---|
-| `FR-003-01` | Система MUST будувати кластери ранніх покупців із графа фічі 002: гаманці, між якими є зв'язок за фінансування | `T-066`, `T-067`, `T-086` | — | — |
-| `FR-003-02` | Прохід 1 MUST об'єднувати покупців, яких одна й та сама вершина графа 002 (джерело, що не є відсіченим хабом;  | `T-063`, `T-065`, `T-066`, `T-080`, `T-081` | — | — |
-| `FR-003-03` | Прямий переказ між покупцями і зв'язок «делегована купівля» (фіча 002, ребро `delegated_buy`) MUST бути окреми | `T-064`, `T-066` | — | — |
-| `FR-003-04` | Прохід 2 MUST знаходити непрямі зв'язки через спільне джерело на більшій глибині графа й додавати їх окремим т | `T-059`, `T-077`, `T-078` | — | — |
-| `FR-003-05` | Перекази нижче мінімальної суми зв'язку MUST NOT утворювати кластер і MUST NOT бути доказом; поріг MUST зберіг | `T-064`, `T-066`, `T-078` | — | — |
-| `FR-003-06` | Вершини, відсічені фічею 002, MUST NOT з'єднувати покупців, за винятком US6 (відновлені ребра з сумою не нижче | `T-064`, `T-066`, `T-077`, `T-078`, `T-080`, `T-081`, `T-082` | — | — |
-| `FR-003-07` | Кожен кластер MUST містити непорожній перелік доказів; кожен доказ MUST мати тип, перелік первинних посилань ( | `T-061`, `T-066`, `T-071` | — | — |
-| `FR-003-08` | Система MUST розпізнавати поведінкові докази: «однакові суми» (покупці зі збігом суми фінансування чи першої к | `T-071`, `T-075`, `T-076` | — | — |
-| `FR-003-09` | Поведінкові докази MUST підвищувати впевненість кластера, але MUST NOT самостійно утворювати кластер; поведінк | `T-061`, `T-071`, `T-075`, `T-076` | — | — |
-| `FR-003-10` | Збіг, нижчий за поріг «природного збігу» (кілька купівель в одному слоті — норма на жвавому запуску), MUST NOT | `T-059`, `T-071`, `T-075`, `T-076` | — | — |
-| `FR-003-11` | Кожен кластер MUST мати частку: частку токенів, куплених його покупцями, серед токенів, куплених усіма проанал | `T-061`, `T-062`, `T-063`, `T-068` | — | — |
-| `FR-003-12` | Кластери MUST бути відсортовані за часткою спадно з детермінованим тай-брейком; ідентифікатор кластера MUST бу | `T-061`, `T-067`, `T-084` | — | — |
-| `FR-003-13` | Система MUST обчислювати `risk_score` 0–100 на рівні токена за формулою з контракту з часток і впевненостей кл | `T-059`, `T-063`, `T-068`, `T-069` | — | — |
-| `FR-003-14` | Результат MUST супроводжувати `risk_score` переліком кластерів і їхніх доказів, на яких число побудоване; числ | `T-061`, `T-062`, `T-068`, `T-069` | — | — |
-| `FR-003-15` | Результат MUST успадковувати повноту графа 002 (статус, причини, попередження `giant_component`, `delegated_in | `T-061`, `T-062`, `T-068`, `T-069` | — | — |
-| `FR-003-16` | Порожній вхід (0 покупців) MUST давати явний результат «немає даних», а не «чисто». | `T-061`, `T-062`, `T-068`, `T-069`, `T-071` | — | — |
-| `FR-003-17` | Кластер, що охоплює понад поріг частки покупців при попередженні `giant_component` або при переважно непрямих  | `T-068`, `T-077`, `T-079` | — | — |
-| `FR-003-18` | Усі пороги (вікно, мінімальна сума зв'язку, пороги поведінкових доказів, ваги впевненості, межі смуг, поріг ар | `T-059`, `T-060`, `T-070`, `T-071`, `T-085`, `T-087` | — | — |
-| `FR-003-19` | Усі зовнішні дані MUST надходити лише з результату фічі 002 і результату збору 001; фіча не звертається до мер | `T-063`, `T-064`, `T-071`, `T-075`, `T-077`, `T-080` | — | — |
-| `FR-003-20` | Результат MUST серіалізуватися у JSON за контрактом, версіонованим окремо від контрактів 001 і 002; серіалізац | `T-070`, `T-084`, `T-085` | — | — |
-| `FR-003-21` | Модуль кластеризації MUST NOT змінювати граф чи відсікання 002 і MUST залежати лише від публічного результату  | `T-071`, `T-083` | — | — |
-| `FR-003-22` | Система MUST надавати оцінювальну команду, що на наборі збережених результатів збору без мережі виводить для к | `T-073`, `T-074`, `T-087` | — | — |
-| `FR-003-23` | Набір збережених результатів збору для оцінювання MUST зберігатися в репозиторії як фікстури (публічні ончейн- | `T-072`, `T-073`, `T-074`, `T-087` | — | — |
+| `FR-003-01` | Система MUST будувати кластери ранніх покупців із графа фічі 002: гаманці, між якими є зв'язок за фінансування | `T-066`, `T-067`, `T-086` | `src/unmask/clusters/cluster.py`, `src/unmask/clusters/links.py` | `tests/test_clusters_performance.py`, `tests/test_clusters_links.py`, `tests/test_clusters_union.py` |
+| `FR-003-02` | Прохід 1 MUST об'єднувати покупців, яких одна й та сама вершина графа 002 (джерело, що не є відсіченим хабом;  | `T-063`, `T-065`, `T-066`, `T-080`, `T-081` | `src/unmask/clusters/links.py` | `tests/test_clusters_recovered.py`, `tests/test_clusters_window.py`, `tests/test_clusters_links.py` |
+| `FR-003-03` | Прямий переказ між покупцями і зв'язок «делегована купівля» (фіча 002, ребро `delegated_buy`) MUST бути окреми | `T-064`, `T-066` | `src/unmask/clusters/links.py` | `tests/test_clusters_links.py` |
+| `FR-003-04` | Прохід 2 MUST знаходити непрямі зв'язки через спільне джерело на більшій глибині графа й додавати їх окремим т | `T-059`, `T-077`, `T-078` | `src/unmask/clusters/indirect.py`, `src/unmask/clusters/config.py` | `tests/test_clusters_indirect.py`, `tests/test_clusters_config.py` |
+| `FR-003-05` | Перекази нижче мінімальної суми зв'язку MUST NOT утворювати кластер і MUST NOT бути доказом; поріг MUST зберіг | `T-064`, `T-066`, `T-078` | `src/unmask/clusters/indirect.py`, `src/unmask/clusters/links.py` | `tests/test_clusters_links.py` |
+| `FR-003-06` | Вершини, відсічені фічею 002, MUST NOT з'єднувати покупців, за винятком US6 (відновлені ребра з сумою не нижче | `T-064`, `T-066`, `T-077`, `T-078`, `T-080`, `T-081`, `T-082` | `src/unmask/clusters/indirect.py`, `src/unmask/clusters/links.py` | `tests/test_clusters_recovered.py`, `tests/test_clusters_indirect.py`, `tests/test_clusters_links.py`, `tests/test_clusters_hub_fixtures.py` |
+| `FR-003-07` | Кожен кластер MUST містити непорожній перелік доказів; кожен доказ MUST мати тип, перелік первинних посилань ( | `T-061`, `T-066`, `T-071` | `src/unmask/clusters/model.py` | `tests/test_clusters_service.py`, `tests/test_clusters_model.py` |
+| `FR-003-08` | Система MUST розпізнавати поведінкові докази: «однакові суми» (покупці зі збігом суми фінансування чи першої к | `T-071`, `T-075`, `T-076` | `src/unmask/clusters/behavior.py` | `tests/test_clusters_behavior.py` |
+| `FR-003-09` | Поведінкові докази MUST підвищувати впевненість кластера, але MUST NOT самостійно утворювати кластер; поведінк | `T-061`, `T-071`, `T-075`, `T-076` | `src/unmask/clusters/behavior.py`, `src/unmask/clusters/model.py` | `tests/test_clusters_model.py`, `tests/test_clusters_behavior.py` |
+| `FR-003-10` | Збіг, нижчий за поріг «природного збігу» (кілька купівель в одному слоті — норма на жвавому запуску), MUST NOT | `T-059`, `T-071`, `T-075`, `T-076` | `src/unmask/clusters/behavior.py`, `src/unmask/clusters/config.py` | `tests/test_clusters_config.py`, `tests/test_clusters_behavior.py` |
+| `FR-003-11` | Кожен кластер MUST мати частку: частку токенів, куплених його покупцями, серед токенів, куплених усіма проанал | `T-061`, `T-062`, `T-063`, `T-068` | `src/unmask/clusters/score.py`, `src/unmask/clusters/model.py` | `tests/test_clusters_model.py`, `tests/test_clusters_score.py` |
+| `FR-003-12` | Кластери MUST бути відсортовані за часткою спадно з детермінованим тай-брейком; ідентифікатор кластера MUST бу | `T-061`, `T-067`, `T-084` | `src/unmask/clusters/cluster.py`, `src/unmask/clusters/model.py` | `tests/test_clusters_model.py`, `tests/test_clusters_determinism.py`, `tests/test_clusters_union.py` |
+| `FR-003-13` | Система MUST обчислювати `risk_score` 0–100 на рівні токена за формулою з контракту з часток і впевненостей кл | `T-059`, `T-063`, `T-068`, `T-069` | `src/unmask/clusters/score.py`, `src/unmask/clusters/config.py` | `tests/test_clusters_completeness.py`, `tests/test_clusters_config.py`, `tests/test_clusters_score.py` |
+| `FR-003-14` | Результат MUST супроводжувати `risk_score` переліком кластерів і їхніх доказів, на яких число побудоване; числ | `T-061`, `T-062`, `T-068`, `T-069` | `src/unmask/clusters/score.py`, `src/unmask/clusters/model.py` | `tests/test_clusters_model.py`, `tests/test_clusters_completeness.py`, `tests/test_clusters_score.py` |
+| `FR-003-15` | Результат MUST успадковувати повноту графа 002 (статус, причини, попередження `giant_component`, `delegated_in | `T-061`, `T-062`, `T-068`, `T-069` | `src/unmask/clusters/score.py`, `src/unmask/clusters/model.py` | `tests/test_clusters_model.py`, `tests/test_clusters_completeness.py` |
+| `FR-003-16` | Порожній вхід (0 покупців) MUST давати явний результат «немає даних», а не «чисто». | `T-061`, `T-062`, `T-068`, `T-069`, `T-071` | `src/unmask/clusters/service.py`, `src/unmask/clusters/score.py` | `tests/test_clusters_service.py`, `tests/test_clusters_completeness.py` |
+| `FR-003-17` | Кластер, що охоплює понад поріг частки покупців при попередженні `giant_component` або при переважно непрямих  | `T-068`, `T-077`, `T-079` | `src/unmask/clusters/score.py` | `tests/test_clusters_score.py` |
+| `FR-003-18` | Усі пороги (вікно, мінімальна сума зв'язку, пороги поведінкових доказів, ваги впевненості, межі смуг, поріг ар | `T-059`, `T-060`, `T-070`, `T-071`, `T-085`, `T-087` | `src/unmask/clusters/serialize.py`, `src/unmask/clusters/service.py`, `src/unmask/clusters/config.py` | `tests/test_clusters_config.py`, `tests/test_clusters_changelog_guard.py`, `tests/test_clusters_serialize_contract.py` |
+| `FR-003-19` | Усі зовнішні дані MUST надходити лише з результату фічі 002 і результату збору 001; фіча не звертається до мер | `T-063`, `T-064`, `T-071`, `T-075`, `T-077`, `T-080` | `src/unmask/clusters/service.py` | `tests/test_clusters_service.py`, `tests/test_clusters_fixture_builder.py` |
+| `FR-003-20` | Результат MUST серіалізуватися у JSON за контрактом, версіонованим окремо від контрактів 001 і 002; серіалізац | `T-070`, `T-084`, `T-085` | `src/unmask/clusters/serialize.py` | `tests/test_clusters_determinism.py`, `tests/test_clusters_serialize_contract.py` |
+| `FR-003-21` | Модуль кластеризації MUST NOT змінювати граф чи відсікання 002 і MUST залежати лише від публічного результату  | `T-071`, `T-083` | `src/unmask/clusters/service.py` | `tests/test_clusters_service.py`, `tests/test_clusters_boundaries.py` |
+| `FR-003-22` | Система MUST надавати оцінювальну команду, що на наборі збережених результатів збору без мережі виводить для к | `T-073`, `T-074`, `T-087` | `src/unmask/clusters/evaluate.py` | `tests/test_clusters_evaluate.py` |
+| `FR-003-23` | Набір збережених результатів збору для оцінювання MUST зберігатися в репозиторії як фікстури (публічні ончейн- | `T-072`, `T-073`, `T-074`, `T-087` | `src/unmask/clusters/evaluate.py` | `tests/test_clusters_evaluate.py`, `tests/test_clusters_real_fixtures.py` |
 
 ## Критичні задачі
 
@@ -120,24 +120,24 @@
 - `T-046` (002-funding-graph-hub-pruning) — виконано
 - `T-047` (002-funding-graph-hub-pruning) — виконано
 - `T-058` (002-funding-graph-hub-pruning) — виконано
-- `T-059` (003-wallet-clusters-risk) — у роботі
-- `T-061` (003-wallet-clusters-risk) — у роботі
-- `T-062` (003-wallet-clusters-risk) — у роботі
-- `T-063` (003-wallet-clusters-risk) — у роботі
-- `T-065` (003-wallet-clusters-risk) — у роботі
-- `T-066` (003-wallet-clusters-risk) — у роботі
-- `T-067` (003-wallet-clusters-risk) — у роботі
-- `T-068` (003-wallet-clusters-risk) — у роботі
-- `T-069` (003-wallet-clusters-risk) — у роботі
-- `T-071` (003-wallet-clusters-risk) — у роботі
-- `T-073` (003-wallet-clusters-risk) — у роботі
-- `T-074` (003-wallet-clusters-risk) — у роботі
-- `T-075` (003-wallet-clusters-risk) — у роботі
-- `T-076` (003-wallet-clusters-risk) — у роботі
-- `T-077` (003-wallet-clusters-risk) — у роботі
-- `T-078` (003-wallet-clusters-risk) — у роботі
-- `T-079` (003-wallet-clusters-risk) — у роботі
-- `T-080` (003-wallet-clusters-risk) — у роботі
-- `T-081` (003-wallet-clusters-risk) — у роботі
-- `T-084` (003-wallet-clusters-risk) — у роботі
-- `T-087` (003-wallet-clusters-risk) — у роботі
+- `T-059` (003-wallet-clusters-risk) — виконано
+- `T-061` (003-wallet-clusters-risk) — виконано
+- `T-062` (003-wallet-clusters-risk) — виконано
+- `T-063` (003-wallet-clusters-risk) — виконано
+- `T-065` (003-wallet-clusters-risk) — виконано
+- `T-066` (003-wallet-clusters-risk) — виконано
+- `T-067` (003-wallet-clusters-risk) — виконано
+- `T-068` (003-wallet-clusters-risk) — виконано
+- `T-069` (003-wallet-clusters-risk) — виконано
+- `T-071` (003-wallet-clusters-risk) — виконано
+- `T-073` (003-wallet-clusters-risk) — виконано
+- `T-074` (003-wallet-clusters-risk) — виконано
+- `T-075` (003-wallet-clusters-risk) — виконано
+- `T-076` (003-wallet-clusters-risk) — виконано
+- `T-077` (003-wallet-clusters-risk) — виконано
+- `T-078` (003-wallet-clusters-risk) — виконано
+- `T-079` (003-wallet-clusters-risk) — виконано
+- `T-080` (003-wallet-clusters-risk) — виконано
+- `T-081` (003-wallet-clusters-risk) — виконано
+- `T-084` (003-wallet-clusters-risk) — виконано
+- `T-087` (003-wallet-clusters-risk) — виконано

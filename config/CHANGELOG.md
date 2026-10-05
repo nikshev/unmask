@@ -37,6 +37,12 @@ sha256: acfa643b0133da213d54341e6a70026dab93ce3aa67087dfddaab4a465211e2a
 exchanges(0), market_makers(0). Джерела — коментарі у файлі. Біржі й ММ — порожньо до калібрування.
 sha256: 89c0a8be31ec2ffca32117ed38191e4caad0c840d9f4576048d0f312af80f2d5
 
+# config/clusters.yaml
+
+## 1 — 2026-10-05
+Початкова версія за research.md R-2, R-4, R-6, R-8, R-9, R-10, R-12 (пропозиція; калібрування на 9 збережених результатах 002 — calibration.md 003): link_min_amount_lamports=10000000 (0,01 SOL), funding_window_seconds=3600 (вікно-ланцюг за проміжком), seconds_per_slot=0.4, link_through_flagged_buyers=false (PDA бондинг-кривої як покупець склеює чисті токени), link_assets=[sol], indirect_enabled=true, same_amount_natural_max=3, same_slot_natural_max=5, same_slot_window_slots=0, evidence_weights (shared_funder 0.6, direct_transfer 0.5, delegated_buy 0.6, recovered_edge 0.4, indirect_link 0.3, same_amounts 0.2, same_slot 0.15), slot_fallback_multiplier=0.8, artifact_buyer_share=0.5, artifact_confidence_multiplier=0.5, band_clean_max=20, band_suspicious_max=50. На 9 токенах: інсайдерські > 20 — 3/5 (32, 23, 6, 5, 54), чисті <= 20 — 3/4 (0, 10, 5, 25); мітки MELT цінові, вибірка не статистична.
+sha256: c8a0636918c1d08f1af87af88da4117a55c4ecbc4760adabe57e621fa7426b05
+
 # config/ingest.yaml
 
 ## 1 — 2026-10-03

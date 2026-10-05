@@ -60,9 +60,9 @@ for c in d["clusters"]:
 EOF
 ```
 
-Очікувано: один кластер з трьох покупців (S1 → P1, P2, P3 у вікні) з доказом `shared_funder`, `via = [S1]`, трьома підписами й вікном у секундах; P4 (той самий S1, але через 2 год) і група S2 — окремо або окремим кластером за декларацією сценарію; `band_reasons` пояснюють смугу.
+Очікувано: один кластер {P1, P2, P3} (S1 → P1, P2, P3 у вікні) з доказом `shared_funder`, `via = [S1]`, трьома підписами й вікном у секундах; P4 (той самий S1, але через 2 год) і група S2 — окремо або окремим кластером за декларацією сценарію; `band_reasons` пояснюють смугу.
 
-Прямий переказ і позначений покупець (`c_direct_flagged`): кластер P5–P6 з доказом `direct_transfer`; покупець-PDA з `buyer_flags` жодного зв'язку не утворює, а в `diagnostics` є `flagged_buyers_excluded` з його адресою й критерієм `known_list`.
+Прямий переказ і позначений покупець (`c_direct_flagged`): кластер {P7, P8} з доказом `direct_transfer`; покупець-PDA з `buyer_flags` жодного зв'язку не утворює, а в `diagnostics` є `flagged_buyers_excluded` з його адресою й критерієм `known_list`.
 
 ## 4. User Story 2 — оцінка ризику з поясненням
 
@@ -70,7 +70,7 @@ EOF
 uv run pytest tests/test_clusters_score.py tests/test_clusters_completeness.py -q
 ```
 
-Очікувано на `c_two_clusters`: кластери відсортовані за часткою спадно (0,4 потім 0,1), `risk_score == floor(100·Σ share·confidence + 0.5)`, смуга за межами з `metadata.thresholds`; на `c_incomplete` — `computed_band: clean`, але `band: insufficient_data` з причиною `delegated_incomplete`/`ingest_incomplete`; на `c_empty` — `insufficient_data` з `empty_input`, `clusters: []`; на `c_shared` з повними даними і без кластерів у варіанті — `clean` з `no_clusters_on_complete_data`.
+Очікувано на `c_two_clusters`: кластери відсортовані за часткою спадно (0.3333 потім 0.1429), `risk_score == floor(100·Σ share·confidence + 0.5)`, смуга за межами з `metadata.thresholds`; на `c_incomplete` — `computed_band: clean`, але `band: insufficient_data` з причиною `delegated_incomplete`/`ingest_incomplete`; на `c_empty` — `insufficient_data` з `empty_input`, `clusters: []`; на `c_shared` з повними даними і без кластерів у варіанті — `clean` з `no_clusters_on_complete_data`.
 
 ## 5. User Story 3 і 4 — поведінкові докази, непрямі зв'язки, артефакт
 
@@ -97,7 +97,7 @@ uv run python -m unmask.clusters.evaluate --fixtures tests/fixtures/real --check
 uv run pytest tests/test_clusters_evaluate.py -q
 ```
 
-Очікувано (за пропозицією v1 конфігу; точні числа фіксує калібрування): заголовок із версіями `clusters.yaml` (і дайджестом), `hubs.yaml` (3), `hub_addresses.yaml` (1), `schema 003.1`; 9 рядків у порядку маніфесту; `risk_score` інсайдерських {32, 23, 6, 5, 54}, чистих {0, 10, 5, 25}; `status: incomplete` у всіх (результати зібрано без аналізу делегованих купівель; cln4 ще й `missing: 3`), тож `band` чистих — `insufficient_data`, а колонка `band_if_complete` показує `clean` для cln1–cln3; зведення: `insider_above_clean 3/5`, `clean_within_clean 3/4`, `clean_band_shown 0/4`, `prd_criterion_met yes` і блок застережень (мітки MELT цінові, вибірка не статистична, калібрування на тому ж наборі, `delegated` не аналізовано). Два запуски — побайтово однакові.
+Очікувано (за пропозицією v1 конфігу; точні числа фіксує калібрування): заголовок із версіями `clusters.yaml` (і дайджестом), `hubs.yaml` (3), `hub_addresses.yaml` (1), `schema 003.1`; 9 рядків у порядку маніфесту; `risk_score` інсайдерських {32, 23, 13, 5, 54} (ins2 — 2 кластери, другий непрямий; R-12 передбачав 6 без проходу 2), чистих {0, 10, 5, 25}; `status: incomplete` у всіх (результати зібрано без аналізу делегованих купівель; cln4 ще й `missing: 3`), тож `band` чистих — `insufficient_data`, а колонка `band_if_complete` показує `clean` для cln1–cln3; зведення: `insider_above_clean 3/5`, `clean_within_clean 3/4`, `clean_band_shown 0/4`, `prd_criterion_met yes` і блок застережень (мітки MELT цінові, вибірка не статистична, калібрування на тому ж наборі, `delegated` не аналізовано). Два запуски — побайтово однакові.
 
 Зміна будь-якого значення `config/clusters.yaml` без перегенерації еталона → `--check` ненульовий і `test_clusters_evaluate.py` червоний (дайджест у заголовку еталона ≠ `content_digest`). Перегенерація (`--write`) — лише як крок калібрування із записом у `calibration.md` 003.
 

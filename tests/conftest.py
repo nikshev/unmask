@@ -22,6 +22,7 @@ def _forbid_network(monkeypatch):
 
 
 GRAPH_FIXTURES = Path(__file__).parent / "fixtures" / "graph"
+CLUSTER_FIXTURES = Path(__file__).parent / "fixtures" / "clusters"
 
 
 def load_ingest_fixture(name: str):
@@ -39,3 +40,21 @@ def load_ingest_fixture(name: str):
     if not isinstance(result, IngestResult):
         raise TypeError(f"fixture {name!r} is {type(result).__name__}, not IngestResult")
     return result
+
+
+def load_cluster_fixture(name: str):
+    """`tests/fixtures/clusters/<name>/ingest.json` -> `IngestResult` (фіча 003)."""
+    from unmask.ingest.model import IngestResult
+    from unmask.ingest.serialize import from_dict
+
+    path = CLUSTER_FIXTURES / name / "ingest.json"
+    result = from_dict(json.loads(path.read_text(encoding="utf-8")))
+    if not isinstance(result, IngestResult):
+        raise TypeError(f"fixture {name!r} is {type(result).__name__}, not IngestResult")
+    return result
+
+
+def load_cluster_expected(name: str) -> dict:
+    """`tests/fixtures/clusters/<name>/expected.json` -> словник."""
+    path = CLUSTER_FIXTURES / name / "expected.json"
+    return json.loads(path.read_text(encoding="utf-8"))

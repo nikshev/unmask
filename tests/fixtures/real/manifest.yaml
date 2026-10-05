@@ -1,0 +1,21 @@
+# Маніфест збережених результатів збору для оцінювання 003 (FR-003-23).
+# Мітки класу — MELT (ціновий/модельний детектор), НЕ підтверджене інсайдерство.
+source: MELT (ціновий/модельний детектор; НЕ підтверджене інсайдерство)
+collected_at: 2026-10-04
+collection:
+  first_buyers_n: 30
+  funding_depth: 2
+  max_signatures_per_wallet: 30
+  collect_spl_inbound: false
+  ingest_config_version: 2
+  delegated_analyzed: false
+tokens:
+  - {label: ins0, class: insider, file: result_ins0.json, mint: AedQTgnVjAvzSaCjUdDX6QN4rGD9aQwVwfhbovgDpump, sha256: b76d113e2511c89cd626aabc3b04335fd8fa5be315419484ad8737c56585ac8b, note: "melt475c"}
+  - {label: ins1, class: insider, file: result_ins1.json, mint: 3vgBAf4c6TKTfBgZwrVhnJeqN3NuFpkRjWyUVHvvpump, sha256: 782ff1fabb5c90df98bbb1533a6186c92aedc6fd6021665bad39db1208d255cc, note: ""}
+  - {label: ins2, class: insider, file: result_ins2.json, mint: 9Q6cZ2JgzjKEuiLATRJVY7mCkBnP1np1HQdZiQkapump, sha256: 688dc01afaf2a0821187d2d4a0c29b7416f50df385a32b7b3eede1ab86045f09, note: ""}
+  - {label: ins3, class: insider, file: result_ins3.json, mint: Aj9cy2nroeXArCCXPcM78JnbEnWeUVWKJLtbYEVdpump, sha256: 2dcc174cea044eeb377bb8a9189e622bce613c067cb75e26056160715489599f, note: ""}
+  - {label: ins4, class: insider, file: result_ins4.json, mint: 3JZKYE9RyjVzGjW6ACfAQHqsxFyFQfu2gJZUyZwspump, sha256: 12732626f06c9df23c978583baedf2030c98341c5709908878cfbf7c4630fdb9, note: ""}
+  - {label: cln1, class: clean, file: result_cln1.json, mint: DwxtQ9nMu2as4GL3axZ11m8YjK6vQ3t5NrkgPjzbpump, sha256: 2687063931691ee518d69ae01bc09409f0b9ae18a4551d446bd20a633d41590e, note: ""}
+  - {label: cln2, class: clean, file: result_cln2.json, mint: D7wetpmAQ7ukDzpEDeWtpxFS8HmaxSgnVpDVjHDGpump, sha256: 0efc7bbd74f50825293e6f744528b52199c3172642fa3763cbc41a5d6f157bdc, note: ""}
+  - {label: cln3, class: clean, file: result_cln3.json, mint: 3p6YXraqy7AqTVtoAyUf444XPxwDZxawz3JY6UMopump, sha256: 436e003dd0627e89dcedcb097283f15c2163d7c488ee6a1ae287281cc56357ba, note: ""}
+  - {label: cln4, class: clean, file: result_cln4.json, mint: 6s8sb29m7dKX4jAPaCYCbhifvzEEE2iD4s13muFTpump, sha256: 48ec49fc1c7eb525d46349dea29c9ac2644ed0e83f8efdc6e82dd03fa7c458fb, note: "неповний на рівні 001 (missing 3, corrupt_data)"}
