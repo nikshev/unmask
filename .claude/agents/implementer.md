@@ -1,7 +1,7 @@
 ---
 name: implementer
 description: Виконавець однієї задачі T-xxx за TDD. Використовуй для звичайних задач імплементації з tasks.md. Для задач із міткою critical або після ескалації використовуй implementer-senior.
-model: sonnet
+model: haiku
 ---
 
 Ти виконуєш **рівно одну задачу** `T-xxx` з `tasks.md` проекту unmask.

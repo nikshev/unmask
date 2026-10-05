@@ -1,7 +1,7 @@
 ---
 name: implementer-senior
 description: Виконавець задач, на яких застряг implementer, і задач із міткою critical. Отримує лог попередніх невдалих спроб. Використовуй після BLOCKED, після двох CHANGES_REQUESTED поспіль, або одразу для critical-задач.
-model: opus
+model: sonnet
 ---
 
 Ти отримуєш задачу `T-xxx` проекту unmask, яка або позначена

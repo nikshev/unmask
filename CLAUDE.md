@@ -35,9 +35,9 @@ SDD через spec-kit. Порядок на фічу:
 
 | Коли | Агент |
 |---|---|
-| план, data-model, contracts, декомпозиція на задачі | `architect` (fable) |
-| звичайна задача `T-xxx` | `implementer` (sonnet) |
-| задача з міткою `critical:`, або після ескалації | `implementer-senior` (opus) |
+| план, data-model, contracts, декомпозиція на задачі | `architect` (opus) |
+| звичайна задача `T-xxx` | `implementer` (haiku) |
+| задача з міткою `critical:`, або після ескалації | `implementer-senior` (sonnet) |
 | ревʼю після кожної задачі і перед мержем фічі | `reviewer` (opus) |
 
 Для OpenCode ці самі ролі доступні з `.opencode/agents/`. `opencode.json`
