@@ -200,7 +200,7 @@ def handle_check(text: str, service, transport: BotTransport, chat_id: Any,
         return None
     mint = parts[1]
     try:
-        doc = service.analyze(mint)
+        doc = service.analyze(mint, progress=lambda msg: transport.send_message(chat_id, msg))
     except Exception as exc:
         transport.send_message(chat_id, f"помилка аналізу: {type(exc).__name__}")
         return None

@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable, Optional
 
 from unmask.delivery.cache import DeliveryCache
 from unmask.delivery.report import build_report
@@ -39,7 +39,7 @@ class DeliveryService:
     def cache(self) -> DeliveryCache:
         return self._cache
 
-    def analyze(self, mint: str) -> dict[str, Any]:
+    def analyze(self, mint: str, *, progress: Optional[Callable[[str], None]] = None) -> dict[str, Any]:
         """Документ відповіді 004.1 або документ-помилка `{mint, error:{kind, detail}}`."""
         if isinstance(mint, str):
             hit = self._cache.get(mint)
@@ -48,17 +48,25 @@ class DeliveryService:
         else:
             return {"mint": "", "error": {"kind": "invalid_address", "detail": "mint must be a string"}}
         try:
-            return self._cache.single_flight(mint, lambda: self._build(mint))
+            return self._cache.single_flight(mint, lambda: self._build(mint, progress=progress))
         except _ErrorDoc as err:
             return err.doc
 
-    def _build(self, mint: str) -> dict[str, Any]:
+    def _build(self, mint: str, *, progress: Optional[Callable[[str], None]] = None) -> dict[str, Any]:
+        if progress:
+            progress("🔄 Збираю дані...")
         outcome = self._ingest.collect(mint)
         if isinstance(outcome, Rejection):
             raise _ErrorDoc({
                 "mint": outcome.mint or mint,
                 "error": {"kind": outcome.kind.value, "detail": outcome.detail},
             })
+        if progress:
+            progress("🔄 Будую граф фінансування...")
         graph_result = self._graph.analyze(outcome)
+        if progress:
+            progress("🔄 Знаходжу кластери...")
         cluster_result = self._clusters.analyze(graph_result, outcome)
+        if progress:
+            progress("🔄 Формую звіт...")
         return build_report(outcome, graph_result, cluster_result)

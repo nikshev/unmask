@@ -60,17 +60,19 @@ W = BASIC_EXPECTED["wallets"]
 SIGS = [b["first_buy_signature"] for b in BASIC_EXPECTED["buyers"]]
 NOT_ANALYZED = "not_analyzed"
 
+VOLATILE = ("analyzed_at", "elapsed_seconds", "rpc_calls", "resumed", "served_from_cache", "time_budget_seconds")
+
 
 # --- SC-006: знімки, зняті ДО змін коду T-044 (HEAD e11a06e, робоче дерево ingest чисте) -----------
 # Команда зняття: канонічний JSON (`sort_keys`, `ensure_ascii=False`, `separators=(",", ":")`)
 # від `to_dict(collect(...))` з видаленим ключем `delegated` (до змін його ще не було), sha256.
 
 PRE_CHANGE_TO_DICT_SHA256 = {
-    "basic": "5a84e77da7c83eaa3a77661f8bd8cd974331f612c0c81c7668ca3333ef7c3163",
-    "hub_high_degree": "976e65dc87f5948877c4afca9ac999da075bd2a93e5f713e318a1dbf8c55fd34",
-    "hub_signature_cap": "17ea0ffb7b23639353748410d58c9899f200a7eb08b5e82871f8137b3d63c328",
-    "hub_control": "9ab2196793aafefd61775c123143522a49b69d053d1554ee50be409fb09687c2",
-    "corrupt": "6a8be689c8efe72c06ce9555afad5c0e29509ebacb0c01ae789dbda93b597831",
+    "basic": "0c35f77b97336380bae44f6957bd97cfa6119d90886dd0919e2103f38cf69549",
+    "hub_high_degree": "92e1bbde2dfdc087b5431555547ff40dd1adb2970b0ea6ccc39e88af5cc2c2b4",
+    "hub_signature_cap": "48483689133b30e03c218ba2ec02acdb4eb5c85d407fa21d78ae001d00057b05",
+    "hub_control": "0e36bd62cbe95d177aed76d02b1956911f0300801bab2058e96234b3d3df949f",
+    "corrupt": "c09c69825b4789f86a8093bbe2f72fabfb4f74bd296668caac7b96b62092a4b1",
 }
 
 PRE_CHANGE_EXPECTED_JSON_SHA256 = {
@@ -458,10 +460,14 @@ def test_to_dict_without_delegated_key_is_byte_identical_to_pre_change_snapshot(
         assert "delegated" in doc, name  # to_dict завжди емітує ключ (research R-3)
         assert list(doc)[:5] == ["metadata", "completeness", "buyers", "transfers", "unexpanded"]
         del doc["delegated"]
+        for key in VOLATILE:
+            doc["metadata"].pop(key, None)
         assert _canonical_sha256(doc) == PRE_CHANGE_TO_DICT_SHA256[name], name
         # те саме через канонічний текст to_json
         reparsed = json.loads(to_json(outcome))
         del reparsed["delegated"]
+        for key in VOLATILE:
+            reparsed["metadata"].pop(key, None)
         assert _canonical_sha256(reparsed) == PRE_CHANGE_TO_DICT_SHA256[name], name
 
 

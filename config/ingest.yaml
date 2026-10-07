@@ -1,13 +1,13 @@
 # Версіонована конфігурація збору (принцип III). Схема: specs/001-onchain-data-ingest/contracts/config-ingest.md
 # Будь-яка зміна: підняти version і додати запис у config/CHANGELOG.md у тому ж коміті.
-version: 2
+version: 3
 
 first_buyers_n: 300
 funding_depth: 2
 counterparty_threshold: 200
 max_signatures_per_wallet: 300
 collect_spl_inbound: true
-time_budget_seconds: 40
+time_budget_seconds: 600
 commitment: finalized
 
 rpc:

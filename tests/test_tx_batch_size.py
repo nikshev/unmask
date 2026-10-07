@@ -55,7 +55,7 @@ HUB_RPC = json.loads((HUB / "rpc.json").read_text())
 CORRUPT_MINT = json.loads((CORRUPT / "rpc.json").read_text())["_meta"]["cast"]["M"]
 
 SIZES = (1, 2, 7, 25, 1000)
-VOLATILE = ("analyzed_at", "elapsed_seconds", "rpc_calls", "resumed", "served_from_cache")
+VOLATILE = ("analyzed_at", "elapsed_seconds", "rpc_calls", "resumed", "served_from_cache", "time_budget_seconds")
 
 
 def _cfg(config: dict | None = None, *, page_size: int | None = None, tx_batch_size: int | None = None,
@@ -160,14 +160,17 @@ def _changelog_entries(text: str) -> dict[int, str]:
 
 def test_config_version_2_changelog_digest_matches(tmp_path):
     cfg = load_config(SHIPPED)
-    assert cfg.version == 2
+    assert cfg.version == 3
     entries = _changelog_entries(CHANGELOG.read_text(encoding="utf-8"))
-    assert set(entries) >= {1, 2}
-    entry = entries[cfg.version]
-    lines = [line for line in entry.splitlines() if line.strip()]
+    assert set(entries) >= {1, 2, 3}
+    # version 2 introduced tx_batch_size; verify its entry has the keywords
+    entry_v2 = entries[2]
+    assert "tx_batch_size" in entry_v2 and "25" in entry_v2 and "page_size" in entry_v2
+    # version 3 is current; verify its entry ends with sha256 of current config
+    entry_v3 = entries[cfg.version]
+    lines = [line for line in entry_v3.splitlines() if line.strip()]
     assert lines[-1].startswith("sha256: "), "останній рядок запису — sha256 канонічного вмісту"
     assert lines[-1] == f"sha256: {_canonical_digest(SHIPPED)}"
-    assert "tx_batch_size" in entry and "25" in entry and "page_size" in entry
     # дайджест канонічний: коментар і форматування його не змінюють, значення — змінює (тож зміна без нового
     # запису в журналі робить цей тест червоним)
     text = SHIPPED.read_text(encoding="utf-8")
@@ -187,8 +190,8 @@ def test_page_size_no_longer_controls_transaction_batches():
 
     # сторінка підписів по 1, пачка транзакцій 1000: усі 7 транзакцій mint — одним викликом
     source = FixtureRpcSource(BASIC)
-    collect(CollectionState(mint=M, config_version=2), source, _cfg(page_size=1, tx_batch_size=1000,
-                                                                    first_buyers_n=300), FakeClock())
+    collect(CollectionState(mint=M, config_version=3), source, _cfg(page_size=1, tx_batch_size=1000,
+                                                                     first_buyers_n=300), FakeClock())
     pages = [p for method, p in source.calls if method == "getSignaturesForAddress"]
     assert pages and all(p["limit"] == 1 for p in pages)
     batches = _tx_calls(source.calls)
@@ -196,14 +199,14 @@ def test_page_size_no_longer_controls_transaction_batches():
 
     # сторінка підписів 1000, пачка транзакцій 1: кожен виклик — одна транзакція
     source = FixtureRpcSource(BASIC)
-    collect(CollectionState(mint=M, config_version=2), source, _cfg(page_size=1000, tx_batch_size=1), FakeClock())
+    collect(CollectionState(mint=M, config_version=3), source, _cfg(page_size=1000, tx_batch_size=1), FakeClock())
     pages = [p for method, p in source.calls if method == "getSignaturesForAddress"]
     assert pages and all(p["limit"] == 1000 for p in pages)
     assert all(len(b) == 1 for b in _tx_calls(source.calls))
 
     # funding: хаб H (1200 підписів) при page_size=1000 і tx_batch_size=25 — пачки рівно по 25
     source = FixtureRpcSource(HUB)
-    collect(CollectionState(mint=HUB_MINT, config_version=2), source,
+    collect(CollectionState(mint=HUB_MINT, config_version=3), source,
             _cfg(HUB_CASES["hub_control"], page_size=1000, tx_batch_size=25), FakeClock())
     sizes = [len(b) for b in _tx_calls(source.calls)]
     assert max(sizes) == 25 and sizes.count(25) >= 40  # ≈ 1200 транзакцій H (частина вже в кеші від інших вершин)
@@ -442,7 +445,7 @@ def test_large_batch_under_rate_limit_makes_no_progress_regression_scenario():
     hub_window = {e["signature"] for e in HUB_RPC["getSignaturesForAddress"][H]}
 
     # 1000 (старе значення, коли пачку задавав page_size): нуль прогресу на кожному повторі
-    stuck_cfg = _cfg(config, tx_batch_size=1000)
+    stuck_cfg = _cfg(config, tx_batch_size=1000, time_budget_seconds=40)
     assert stuck_cfg.time_budget_seconds == 40
     stuck = _paced_runs(HUB, HUB_MINT, stuck_cfg, runs=6)
     assert len(stuck) == 6 and all(r.completeness.status is CompletenessStatus.INCOMPLETE for r, _s, _f in stuck)
@@ -461,7 +464,8 @@ def test_large_batch_under_rate_limit_makes_no_progress_regression_scenario():
     assert cfg.rpc.tx_batch_size == 25
     healthy = _paced_runs(HUB, HUB_MINT, cfg, runs=10)
     assert healthy[-1][0].completeness.status is CompletenessStatus.COMPLETE
-    assert 2 <= len(healthy) <= 4  # ≈ 510 транзакцій на прогін, 1200+ потрібно
+    # з бюджетом 600 с збір завершується за 1 прогін (раніше при 40 с — 2-4)
+    assert len(healthy) == 1
     cached = [len(state.tx_cache) for _r, state, _f in healthy[:-1]]
     assert all(b > a for a, b in zip([0] + cached, cached))
     assert all(size <= 25 for _r, _s, refused in healthy for size, _d in refused)

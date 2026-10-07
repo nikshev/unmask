@@ -43,7 +43,7 @@ BUYERS = {b["wallet"] for b in EXPECTED["buyers"]}
 CORRUPT_MINT = json.loads((CORRUPT / "rpc.json").read_text())["_meta"]["cast"]["M"]
 HUB_EXPECTED = json.loads((HUB / "expected.json").read_text())
 
-VOLATILE = ("analyzed_at", "elapsed_seconds", "rpc_calls", "resumed", "served_from_cache")
+VOLATILE = ("analyzed_at", "elapsed_seconds", "rpc_calls", "resumed", "served_from_cache", "time_budget_seconds")
 BUDGET = MissingReason.BUDGET_EXHAUSTED
 
 
@@ -66,7 +66,7 @@ def _timed_run(directory: Path, cfg, budget: float, *, step: float = 1.0, mint: 
 def _stable(result: IngestResult, *also_ignore: str) -> tuple:
     meta = dataclasses.asdict(result.metadata)
     for key in VOLATILE + also_ignore:
-        meta.pop(key)
+        meta.pop(key, None)
     return (meta, result.completeness, result.buyers, result.transfers, result.unexpanded)
 
 

@@ -64,7 +64,7 @@ H = HUB_EXPECTED["wallets"]["H"]
 
 # Golden: зафіксовані версії й пороги поставлених конфігів (принцип III; hubs.yaml — `## 3` у config/CHANGELOG.md,
 # T-058: one_off_min_senders 10 → 50; ingest.yaml — `## 2`).
-SHIPPED_HUB_VERSION, SHIPPED_LISTS_VERSION, SHIPPED_INGEST_VERSION = 3, 1, 2
+SHIPPED_HUB_VERSION, SHIPPED_LISTS_VERSION, SHIPPED_INGEST_VERSION = 3, 1, 3
 SHIPPED_SNAPSHOT = {
     "degree_threshold": 100, "one_off_senders_share": 0.8, "one_off_min_senders": 50,
     "giant_component_warn_share": 0.5, "prune_off_curve": True, "prune_ingest_high_degree": True,

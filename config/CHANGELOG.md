@@ -66,3 +66,9 @@ collect_spl_inbound=true, time_budget_seconds=40, commitment=finalized, rpc.*=(1
 версія підіймається, бо змінилась схема файла. Перевірено на фікстурах (basic, hub, corrupt) і емуляторі пейсера;
 живий повтор на `95DELX…pump` — після злиття.
 sha256: 6932a067da2dabe970cc0bea24a44170ef71948acd128664e0a71f2e36c62a3d
+
+## 3 — 2026-10-06
+Змінено: `time_budget_seconds: 40` → `600` (10 хвилин) для підтримки живого аналізу через бота (фіча 004,
+T-094/T-095; specs/004-api-bot-delivery). Результат з фікстур не змінився — лише розширено часовий бюджет для
+реальних RPC-викликів (Helius).
+sha256: 9928e5e44f0e1ed9f8cae8ecea156d0926a8c33892565d0e53810899d8f2c926

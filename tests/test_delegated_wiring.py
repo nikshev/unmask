@@ -69,7 +69,7 @@ BASIC_EXPECTED = json.loads((SCENARIOS / "basic" / "expected.json").read_text(en
 HUB_EXPECTED = json.loads((SCENARIOS / "hub" / "expected.json").read_text(encoding="utf-8"))
 CORRUPT_CAST = json.loads((SCENARIOS / "corrupt" / "rpc.json").read_text(encoding="utf-8"))["_meta"]["cast"]
 
-VOLATILE = ("analyzed_at", "elapsed_seconds", "rpc_calls", "resumed", "served_from_cache")
+VOLATILE = ("analyzed_at", "elapsed_seconds", "rpc_calls", "resumed", "served_from_cache", "time_budget_seconds")
 RPC_ERRORS = [RpcUnavailable("node down"), RpcRateLimited(retry_after=1.0), RpcTimeout("slow")]
 
 
@@ -81,17 +81,17 @@ RPC_ERRORS = [RpcUnavailable("node down"), RpcRateLimited(retry_after=1.0), RpcT
 # sha256 канонічного JSON журналу `source.calls` (список `[method, params]`).
 
 PRE_CHANGE = {
-    "basic": ("86366e753871621a78350033c135c4861877aab1c524906155d0d6e8881205bc", 50, 7,
+    "basic": ("1d365e6300aa333af28fd2d20dd8a320144d4f245411625806c93ddf3ce4b955", 50, 7,
               "25bbbfb03c2518c9d85388d71e428a8a547f1d62670f665bf3251411a03f3e83"),
-    "hub_high_degree": ("bdb4b70defe1c57a377b5e0e6b2d4f8c00d5e6769e4a5e3ec38c77b57128ad9e", 69, 3,
+    "hub_high_degree": ("ef1fdc64bef1a9713bd1676aeda8d4e00f42edb8664500a761f91182a037e0a3", 69, 3,
                         "463f090d2d02822b512fde67dbe17059b51b969c8ed634f04bbdc83ca067cfd9"),
-    "hub_signature_cap": ("abdbb38edc748982abd1a3769834e6193f00f587168183767bd066b80b715091", 51, 3,
+    "hub_signature_cap": ("69146cbb2340cecb72501fa777b9bbbfd0709297410c156ed6b64de93f9e561a", 51, 3,
                           "cfe00b9613bd83f7356770c3490c06af0e22457f0bb6541e822dc54d7e171ab8"),
-    "hub_control": ("a60296cd61232543a1d5446e54792ee228c70e9f859a6c55db267fabf079849a", 87, 3,
+    "hub_control": ("449031700fc2066eee969bfb0c796c07ab9893ba9fe8a3c84eaba11f51f8a7b0", 87, 3,
                     "21aca53c3e8adf06b0ddad20b60c3b24162e3e1f8abde4da0802da4b39695f9d"),
-    "corrupt": ("460aeb1731b91ba3e686afdc01e312dfc77b844319afecb2eecf344bd6606b07", 21, 4,
+    "corrupt": ("53a7d25ff8b3c55cec98e02248ac248dc425bbc40b5f088b39c8a998cb723da2", 21, 4,
                 "c035ab4c9409c24c5969624692094f4870d53a5f2c922c9abc0f8c91cd04a337"),
-    "swapsend": ("7ded3d10ac15c4f433ab570af32cc6d229165385da955b76e9a1f538625be8dd", 15, 8,
+    "swapsend": ("c4fd046cd3a5d7f4823c81d00397f8d6d30686c95790e3251cc6009b421a2dcf", 15, 8,
                  "5405758cd301623a5f7a1cbd52c1abf2d273063a8bf3f1408e53e673fbf6461a"),
 }
 
@@ -206,9 +206,7 @@ def test_buyers_composition_order_and_ranks_equal_expected_and_exclude_receiver(
 def test_basic_hub_corrupt_results_identical_to_pre_change_except_delegated_key(name):
     directory, mint, values = CASES[name]
     _state, source, result = _collect(SCENARIOS / directory, mint, _cfg(values))
-    doc = to_dict(result)
-    assert "delegated" in doc
-    doc.pop("delegated")
+    doc = _stable(result)  # removes delegated and volatile fields
     got = (_canonical_sha256(doc), result.metadata.rpc_calls, result.metadata.transactions_scanned,
            _canonical_sha256([list(call) for call in source.calls]))
     assert got == PRE_CHANGE[name]

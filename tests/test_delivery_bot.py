@@ -73,13 +73,21 @@ def test_evidence_callback_sends_full_proof_text() -> None:
     callback_id = _check_id(transport)
     handle_evidence(callback_id, "q1", service, transport, 123, requests, limit=4000)
     kinds = [c[0] for c in transport.calls]
-    assert kinds[0] == "send_photo" and kinds[1] == "answer_callback"
+    # handle_check: 4 progress msgs + send_photo = 5 calls
+    # handle_evidence: answer_callback + send_message (evidence) = 2 calls
+    assert kinds[0] == "send_message"  # progress 1
+    assert kinds[1] == "send_message"  # progress 2
+    assert kinds[2] == "send_message"  # progress 3
+    assert kinds[3] == "send_message"  # progress 4
+    assert kinds[4] == "send_photo"    # photo from handle_check
+    assert kinds[5] == "answer_callback"  # answer_callback from handle_evidence
+    assert kinds[6] == "send_message"  # evidence text from handle_evidence
     texts = [c[1][1] for c in transport.calls if c[0] == "send_message"]
-    assert len(texts) == 1
+    assert len(texts) == 5  # 4 progress + 1 evidence
     doc = service.analyze(mint)
     for cluster in doc["clusters"]:
         for ev in cluster["evidence"]:
-            assert ev["type"] in texts[0]
+            assert ev["type"] in texts[-1]  # evidence is in the last send_message
 
 
 def test_evidence_overflow_is_truncated_with_remainder_count() -> None:
@@ -119,7 +127,10 @@ def test_invalid_mint_replies_error_and_stays_alive() -> None:
     requests = run_polling(transport, service, evidence_limit=4000, stop_after=2)
     assert requests == {}
     texts = [c[1][1] for c in transport.calls if c[0] == "send_message"]
-    assert len(texts) == 2 and all("адресу" in t for t in texts)
+    # 1 progress + 1 error per check = 2 per check, 2 checks = 4 messages
+    assert len(texts) == 4
+    error_texts = [t for t in texts if "адресу" in t]
+    assert len(error_texts) == 2 and all("адресу" in t for t in error_texts)
 
 
 def test_unknown_command_is_ignored_silently() -> None:
@@ -210,7 +221,12 @@ def test_request_registry_is_bounded() -> None:
     from unmask.delivery import bot as bot_module
 
     class Canned:
-        def analyze(self, mint: str):
+        def analyze(self, mint: str, progress=None):
+            if progress:
+                progress("🔄 Збираю дані...")
+                progress("🔄 Будую граф фінансування...")
+                progress("🔄 Знаходжу кластери...")
+                progress("🔄 Формую звіт...")
             return {"mint": mint, "analyzed_at": 1, "wallets_analyzed": 1, "clusters": [],
                     "risk_score": 0, "band": "insufficient_data", "band_reasons": ["empty_input"],
                     "provenance": {}, "error": None}
