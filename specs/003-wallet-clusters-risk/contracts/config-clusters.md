@@ -6,13 +6,13 @@
 
 Завантаження: `unmask.clusters.config.load_cluster_config(path) -> ClusterConfig`. Невідоме/відсутнє поле чи значення поза межами → `ConfigError` (клас `unmask.hubs.config.ConfigError`) з назвою поля. Завантажувач спершу викликає `hubs.config.content_digest(path)` — обмежений розбір 002 (без анкерів/аліасів/тегів, ліміти розміру й глибини) відкидає будь-яку ваду файла `ConfigError`, — і лише потім читає значення (research R-11); `hubs/config.py` не змінюється.
 
-## `config/clusters.yaml` (версія 1 — ПРОПОЗИЦІЯ; точні значення фіксує задача калібрування із записом)
+## `config/clusters.yaml` (версія 2 — калібровано за ground truth фінансової координації)
 
 ```yaml
 # Версіонована конфігурація кластеризації й оцінки ризику (принцип III).
 # Схема: specs/003-wallet-clusters-risk/contracts/config-clusters.md
 # Будь-яка зміна: підняти version і додати запис із sha256 у config/CHANGELOG.md (розділ "# config/clusters.yaml").
-version: 1
+version: 2
 
 # Правило порогу — як у всьому проєкті (002 R-9): нерівність строга, рівно поріг не змінює рішення в бік
 # «спрацювало». Напрямок — властивість поля: *_min_* — зв'язок при «>=» (рівно поріг — зв'язок; строго менше — ні);
@@ -69,9 +69,9 @@ artifact_confidence_multiplier: 0.5  # float 0 < m <= 1. Впевненість 
 
 # --- Оцінка токена (FR-003-13; PRD) ---
 # risk_score = floor(100 × Σ_clusters share × confidence + 0.5), ціле 0..100.
-band_clean_max: 20                   # int >= 0, < band_suspicious_max. risk_score <= 20 → clean (лише на повних даних;
-                                     # на неповних — insufficient_data з причинами, FR-003-15).
-band_suspicious_max: 50              # int <= 100. 20 < risk_score <= 50 → suspicious; > 50 → high_concentration.
+band_clean_max: 18                   # int >= 0, < band_suspicious_max. risk_score <= 18 → clean (лише на повних даних;
+                                      # на неповних — insufficient_data з причинами, FR-003-15).
+band_suspicious_max: 48              # int <= 100. 18 < risk_score <= 48 → suspicious; > 48 → high_concentration.
 ```
 
 Обмеження (усі перевіряються завантажувачем; відсутній або невідомий ключ → `ConfigError(field)`): `version ≥ 1`; `link_min_amount_lamports ≥ 1` (ціле, не bool); `funding_window_seconds ≥ 1`; `seconds_per_slot > 0` (число, не NaN); булеві — лише `true`/`false`; `link_assets` — непорожній список рядків `sol` | `spl:<base58 32 байти>` без дублів; `same_amount_natural_max ≥ 1`, `same_slot_natural_max ≥ 1`, `same_slot_window_slots ≥ 0`; `evidence_weights` — рівно сім ключів, кожен `0 < w < 1`, `indirect_link < shared_funder`; `0 < slot_fallback_multiplier ≤ 1`; `0 < artifact_buyer_share ≤ 1`; `0 < artifact_confidence_multiplier ≤ 1`; `0 ≤ band_clean_max < band_suspicious_max ≤ 100`.

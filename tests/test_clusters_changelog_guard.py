@@ -30,7 +30,7 @@ CHANGELOG = REPO_ROOT / "config" / "CHANGELOG.md"
 CLUSTERS_YAML = REPO_ROOT / "config" / "clusters.yaml"
 CONTRACT_CLUSTERS = REPO_ROOT / "specs" / "003-wallet-clusters-risk" / "contracts" / "config-clusters.md"
 
-SHIPPED_CLUSTERS_SHA = "c8a0636918c1d08f1af87af88da4117a55c4ecbc4760adabe57e621fa7426b05"
+SHIPPED_CLUSTERS_SHA = "f04bbf8c32271c8d8389357ddf478973266b7ea99f8a7e7074b11fb541c65f86"
 
 
 def _canonical_yaml_digest(text: str) -> str:
@@ -68,7 +68,11 @@ def test_shipped_clusters_yaml_passes_check_changelog() -> None:
 def test_entry_1_sha_equals_content_digest_of_shipped_file() -> None:
     """Запис 1 у журналі має sha256, що дорівнює `content_digest` доставленого файла."""
     entries = changelog_entries(CHANGELOG, "clusters.yaml")
-    assert entries == {1: SHIPPED_CLUSTERS_SHA}
+    # перевіряємо, що остання версія (v2) має правильний sha
+    assert max(entries.keys()) == 2
+    assert entries[2] == SHIPPED_CLUSTERS_SHA
+    # і що версія 1 все ще там з правильним старим sha
+    assert entries[1] == "c8a0636918c1d08f1af87af88da4117a55c4ecbc4760adabe57e621fa7426b05"
 
 
 def test_clusters_section_sits_between_hub_addresses_and_ingest_and_ingest_is_last() -> None:
@@ -104,7 +108,7 @@ def test_load_cluster_config_does_not_consult_changelog(tmp_path: Path) -> None:
     shutil.copyfile(CLUSTERS_YAML, clusters_copy)
     # не створюємо CHANGELOG.md
     cfg = load_cluster_config(clusters_copy)
-    assert cfg.version == 1
+    assert cfg.version == 2
     assert cfg.digest == SHIPPED_CLUSTERS_SHA
 
 
@@ -125,8 +129,8 @@ def test_load_cluster_config_does_not_consult_changelog(tmp_path: Path) -> None:
         ("slot_fallback_multiplier", "0.8", "0.9"),
         ("artifact_buyer_share", "0.5", "0.6"),
         ("artifact_confidence_multiplier", "0.5", "0.6"),
-        ("band_clean_max", "20", "21"),
-        ("band_suspicious_max", "50", "51"),
+        ("band_clean_max", "18", "19"),
+        ("band_suspicious_max", "48", "49"),
         # evidence_weights (вкладені) — у YAML вони відступлені, ключ без префікса
         ("shared_funder", "0.6", "0.61"),
         ("direct_transfer", "0.5", "0.51"),
@@ -152,42 +156,38 @@ def test_any_value_change_without_entry_is_detected(
 
 
 def test_version_bump_without_entry_is_detected(tmp_path: Path) -> None:
-    """`version: 2` без запису `## 2` → ConfigError."""
+    """`version: 4` без запису `## 4` → ConfigError."""
     text = CLUSTERS_YAML.read_text(encoding="utf-8")
-    changed = text.replace("version: 1", "version: 2")
+    changed = text.replace("version: 2", "version: 4")
     clusters_copy = _copy_with_change(tmp_path, CLUSTERS_YAML, changed)
     changelog_copy = _copy_changelog(tmp_path)
-    with pytest.raises(ConfigError, match=r"clusters\.yaml.*version 2.*has no entry"):
+    with pytest.raises(ConfigError, match=r"clusters\.yaml.*version 4.*has no entry"):
         check_changelog(clusters_copy, changelog_copy)
 
 
 def test_proper_bump_with_entry_passes(tmp_path: Path) -> None:
-    """`version: 2` + новий запис `## 2` з правильним дайджестом → ok."""
+    """`version: 4` + новий запис `## 4` з правильним дайджестом → ok."""
     text = CLUSTERS_YAML.read_text(encoding="utf-8")
-    changed = text.replace("version: 1", "version: 2")
+    changed = text.replace("version: 2", "version: 4")
     clusters_copy = _copy_with_change(tmp_path, CLUSTERS_YAML, changed)
     new_digest = _canonical_yaml_digest(changed)
 
     changelog_text = CHANGELOG.read_text(encoding="utf-8")
-    # знаходимо кінець розділу clusters.yaml і додаємо запис
     lines = changelog_text.splitlines()
-    # знаходимо рядок sha256 запису 1
     sha_idx = next(
         i
         for i, ln in enumerate(lines)
         if ln.strip() == f"sha256: {SHIPPED_CLUSTERS_SHA}"
     )
-    # вставляємо після нього
-    new_entry = f"\n## 2 — 2026-10-05\nТестовий запис v2.\nsha256: {new_digest}\n"
+    new_entry = f"\n## 4 — 2026-10-07\nТестовий запис v4.\nsha256: {new_digest}\n"
     lines.insert(sha_idx + 1, new_entry)
     changelog_copy = _copy_changelog(tmp_path, "\n".join(lines) + "\n")
 
-    # має пройти
     check_changelog(clusters_copy, changelog_copy)
 
 
 def test_journal_ahead_of_file_is_detected(tmp_path: Path) -> None:
-    """Журнал має `## 2`, файл v1 → ConfigError."""
+    """Журнал має `## 3`, файл v2 → ConfigError."""
     changelog_text = CHANGELOG.read_text(encoding="utf-8")
     lines = changelog_text.splitlines()
     sha_idx = next(
@@ -195,13 +195,13 @@ def test_journal_ahead_of_file_is_detected(tmp_path: Path) -> None:
         for i, ln in enumerate(lines)
         if ln.strip() == f"sha256: {SHIPPED_CLUSTERS_SHA}"
     )
-    new_entry = "\n## 2 — 2026-10-05\nТестовий запис v2.\nsha256: " + "a" * 64 + "\n"
+    new_entry = "\n## 3 — 2026-10-07\nТестовий запис v3.\nsha256: " + "a" * 64 + "\n"
     lines.insert(sha_idx + 1, new_entry)
     changelog_copy = _copy_changelog(tmp_path, "\n".join(lines) + "\n")
-    # файл залишаємо v1
+    # файл залишаємо v2
     clusters_copy = tmp_path / "clusters.yaml"
     shutil.copyfile(CLUSTERS_YAML, clusters_copy)
-    with pytest.raises(ConfigError, match=r"clusters\.yaml.*version 1.*not the latest"):
+    with pytest.raises(ConfigError, match=r"clusters\.yaml.*version 2.*not the latest"):
         check_changelog(clusters_copy, changelog_copy)
 
 

@@ -18,7 +18,7 @@ from unmask.hubs.config import ConfigError, content_digest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLUSTERS_YAML = REPO_ROOT / "config" / "clusters.yaml"
 
-SHIPPED_SHA = "c8a0636918c1d08f1af87af88da4117a55c4ecbc4760adabe57e621fa7426b05"
+SHIPPED_SHA = "f04bbf8c32271c8d8389357ddf478973266b7ea99f8a7e7074b11fb541c65f86"
 
 
 def _shipped_kwargs(**overrides):
@@ -34,7 +34,7 @@ def _shipped_kwargs(**overrides):
 
 def test_shipped_config_loads_with_v1_values_and_digest() -> None:
     cfg = load_cluster_config(CLUSTERS_YAML)
-    assert cfg.version == 1
+    assert cfg.version == 2
     assert cfg.digest == SHIPPED_SHA == content_digest(CLUSTERS_YAML)
     assert cfg.link_min_amount_lamports == 10_000_000
     assert cfg.funding_window_seconds == 3600
@@ -50,8 +50,8 @@ def test_shipped_config_loads_with_v1_values_and_digest() -> None:
     assert cfg.slot_fallback_multiplier == 0.8
     assert cfg.artifact_buyer_share == 0.5
     assert cfg.artifact_confidence_multiplier == 0.5
-    assert cfg.band_clean_max == 20
-    assert cfg.band_suspicious_max == 50
+    assert cfg.band_clean_max == 18
+    assert cfg.band_suspicious_max == 48
 
 
 def test_indirect_link_must_be_below_shared_funder() -> None:

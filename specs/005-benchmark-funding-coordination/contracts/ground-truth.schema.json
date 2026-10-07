@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unmask.local/schemas/005/ground-truth-1.json",
+  "title": "unmask Ground Truth Record (feature 005, schema v1)",
+  "description": "Ground truth label for a Solana token mint: insider (confirmed coordinated funding) or clean (no evidence of coordination). Source enum tracks provenance of the label.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "mint", "class", "source"],
+  "properties": {
+    "version": {
+      "description": "Ground truth schema version",
+      "type": "integer",
+      "const": 1
+    },
+    "mint": {
+      "description": "Token mint address (base58, 32-44 chars)",
+      "type": "string",
+      "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$"
+    },
+    "class": {
+      "description": "Ground truth class",
+      "type": "string",
+      "enum": ["insider", "clean"]
+    },
+    "source": {
+      "description": "Provenance of the label",
+      "type": "string",
+      "enum": [
+        "creator_wallet",
+        "bundled_accounts",
+        "court_filings",
+        "exchange_listing",
+        "manual_review"
+      ]
+    },
+    "notes": {
+      "description": "Optional context: URLs, court case numbers, creator wallet addresses, review details",
+      "type": "string",
+      "maxLength": 500
+    }
+  }
+}

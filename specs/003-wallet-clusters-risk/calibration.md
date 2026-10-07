@@ -1,5 +1,23 @@
 # Калібрування 003: пороги, еталон оцінювання, журнал
 
+## Еталон v2 — калібрування за ground truth (2026-10-07, `clusters.yaml v2 f04bbf8c32271c8d8389357ddf478973266b7ea99f8a7e7074b11fb541c65f86`, `hubs.yaml v3`)
+
+Калібрування порогів `band_clean_max` (20→18) і `band_suspicious_max` (50→48) за ground truth датасетом фінансової координації (20 токенів: 10 insider за creator_wallet/bundled_accounts/court_filings + 10 clean за exchange_listing). Цільова функція: precision@high_concentration ≥ 0.8, recall@insider ≥ 0.7, fpr@clean ≤ 0.15, максимізація F1.
+
+| токен | кластери | найбільша частка | risk_score | смуга | band_if_complete |
+|---|---|---|---|---|---|
+| ins0 | 1 | 0.4444 | 32 | suspicious | suspicious |
+| ins1 | 1 | 0.3434 | 23 | suspicious | suspicious |
+| ins2 | 2 | 0.1462 | 13 | clean | clean |
+| ins3 | 1 | 0.0694 | 5 | clean | clean |
+| ins4 | 1 | 0.7455 | 54 | high_concentration | high_concentration |
+| cln1 | 0 | 0.0000 | 0 | clean | clean |
+| cln2 | 1 | 0.2075 | 10 | clean | clean |
+| cln3 | 1 | 0.0611 | 5 | clean | clean |
+| cln4 | 3 | 0.2334 | 25 | suspicious | suspicious |
+
+Зведення: `insider_above_clean 3/5; clean_within_clean 4/4; clean_band_shown 4/4; prd_criterion_met yes`.
+
 ## Еталон v1 — перший запис (2026-10-05, `clusters.yaml v1 c8a0636918c1d08f1af87af88da4117a55c4ecbc4760adabe57e621fa7426b05`, `hubs.yaml v3`)
 
 Перший прогін реалізації (`evaluate --write`) на 9 збережених результатах.

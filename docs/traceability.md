@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **73** · задач: **98** (виконано 98) · вимог у роботі: **0** · порушень: **0**
+Вимог: **79** · задач: **109** (виконано 109) · вимог у роботі: **0** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -97,6 +97,17 @@
 | `FR-004-11` | Жодна нова константа API/бота, що змінює кластери, впевненість, `risk_score` чи смугу, MUST NOT з'являтися поз | `T-088`, `T-093`, `T-097` | `src/unmask/delivery/config.py` | `tests/test_delivery_config.py`, `tests/test_delivery_boundaries.py` |
 | `FR-004-12` | Відповідь MUST нести походження висновку: версії конфігів 001/002/003, `analyzed_at`, статус повноти з причина | `T-089` | `src/unmask/delivery/report.py` | `tests/test_delivery_report.py` |
 
+## 005-benchmark-funding-coordination
+
+| Вимога | Опис | Задачі | Імплементація | Тести |
+|---|---|---|---|---|
+| `FR-005-01` | Система MUST надавати офлайн бенчмарк-команду, що приймає ground truth JSONL і фікстури/живий збір. | `T-112`, `T-113`, `T-116`, `T-120` | `src/unmask/benchmark/runner.py`, `src/unmask/benchmark/cli.py` | `tests/test_benchmark_runner.py`, `tests/test_benchmark_e2e.py`, `tests/test_benchmark_cli.py` |
+| `FR-005-02` | Ground truth формат MUST бути версіонованим (`version: 1`), з полями `mint`, `class` (insider|clean), `source` | `T-111`, `T-121` | `src/unmask/benchmark/ground_truth.py` | `tests/test_benchmark_ground_truth.py` |
+| `FR-005-03` | Бенчмарк MUST виводити confusion matrix, precision/recall/F1 по кластерах, calibration curve, PR-AUC, ROC-AUC, | `T-114`, `T-117`, `T-120` | `src/unmask/benchmark/metrics.py`, `src/unmask/benchmark/report.py` | `tests/test_benchmark_report.py`, `tests/test_benchmark_e2e.py`, `tests/test_benchmark_metrics.py` |
+| `FR-005-04` | Калібрування порогів MUST базуватися на ground truth метриках, а не на MELT; нові пороги MUST записуватися у в | `T-115`, `T-118`, `T-120` | `src/unmask/benchmark/calibrate.py` | `tests/test_benchmark_e2e.py`, `tests/test_benchmark_calibrate.py` |
+| `FR-005-05` | Бенчмарк MUST підтримувати `--live` режим (живий збір нових токенів) і `--fixtures` режим (офлайн на записаних | `T-113` | `src/unmask/benchmark/runner.py` | `tests/test_benchmark_runner.py`, `tests/test_benchmark_e2e.py` |
+| `FR-005-06` | Всі константи, що впливають на метрики, MUST бути в YAML (clusters.yaml v2), не в коді (принцип III). | `T-119`, `T-120` | `src/unmask/benchmark/calibrate.py` | `tests/test_benchmark_boundaries.py` |
+
 ## Критичні задачі
 
 - `T-003` (001-onchain-data-ingest) — виконано
@@ -164,3 +175,5 @@
 - `T-091` (004-api-bot-delivery) — виконано
 - `T-093` (004-api-bot-delivery) — виконано
 - `T-094` (004-api-bot-delivery) — виконано
+- `T-113` (005-benchmark-funding-coordination) — виконано
+- `T-115` (005-benchmark-funding-coordination) — виконано

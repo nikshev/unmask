@@ -51,8 +51,8 @@ def test_evaluate_check_returns_zero() -> None:
 def test_expected_table_header_digest_equals_shipped_clusters_yaml_digest_and_hubs_v3() -> None:
     header = (REAL / "expected_table.md").read_text(encoding="utf-8").splitlines()[2]
     digest = content_digest(ROOT / "config" / "clusters.yaml")
-    assert f"clusters.yaml v1 sha256 {digest}" in header
-    assert digest == "c8a0636918c1d08f1af87af88da4117a55c4ecbc4760adabe57e621fa7426b05"
+    assert f"clusters.yaml v2 sha256 {digest}" in header
+    assert digest == "f04bbf8c32271c8d8389357ddf478973266b7ea99f8a7e7074b11fb541c65f86"
     assert "hubs.yaml v3" in header
 
 
@@ -60,7 +60,7 @@ def test_expected_table_differs_on_other_config(tmp_path: Path) -> None:
     import shutil
     alt = tmp_path / "clusters.yaml"
     shutil.copyfile(ROOT / "config" / "clusters.yaml", alt)
-    text = alt.read_text(encoding="utf-8").replace("band_clean_max: 20", "band_clean_max: 30")
+    text = alt.read_text(encoding="utf-8").replace("band_clean_max: 18", "band_clean_max: 30")
     alt.write_text(text, encoding="utf-8")
     other = evaluate(REAL, clusters_config=alt, hubs_config=ROOT / "config" / "hubs.yaml",
                      lists_config=ROOT / "config" / "hub_addresses.yaml")
@@ -112,7 +112,7 @@ def test_calibration_md_journal_cites_current_digest_and_versions() -> None:
     digest = content_digest(ROOT / "config" / "clusters.yaml")
     assert digest in text
     assert "hubs.yaml v3" in text
-    assert "clusters.yaml v1" in text
+    assert "clusters.yaml v2" in text
 
 
 def test_calibration_md_lists_every_r12_variant_with_nine_measured_scores() -> None:

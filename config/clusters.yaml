@@ -1,7 +1,7 @@
 # Версіонована конфігурація кластеризації й оцінки ризику (принцип III).
 # Схема: specs/003-wallet-clusters-risk/contracts/config-clusters.md
 # Будь-яка зміна: підняти version і додати запис із sha256 у config/CHANGELOG.md (розділ "# config/clusters.yaml").
-version: 1
+version: 2
 
 # Правило порогу — як у всьому проєкті (002 R-9): нерівність строга, рівно поріг не змінює рішення в бік
 # «спрацювало». Напрямок — властивість поля: *_min_* — зв'язок при «>=» (рівно поріг — зв'язок; строго менше — ні);
@@ -58,6 +58,6 @@ artifact_confidence_multiplier: 0.5  # float 0 < m <= 1. Впевненість 
 
 # --- Оцінка токена (FR-003-13; PRD) ---
 # risk_score = floor(100 × Σ_clusters share × confidence + 0.5), ціле 0..100.
-band_clean_max: 20                   # int >= 0, < band_suspicious_max. risk_score <= 20 → clean (лише на повних даних;
-                                     # на неповних — insufficient_data з причинами, FR-003-15).
-band_suspicious_max: 50              # int <= 100. 20 < risk_score <= 50 → suspicious; > 50 → high_concentration.
+band_clean_max: 18                   # int >= 0, < band_suspicious_max. risk_score <= 18 → clean (лише на повних даних;
+                                      # на неповних — insufficient_data з причинами, FR-003-15).
+band_suspicious_max: 48              # int <= 100. 18 < risk_score <= 48 → suspicious; > 48 → high_concentration.

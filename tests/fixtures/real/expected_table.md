@@ -1,6 +1,6 @@
 # Оцінювання кластерів 003
 
-clusters.yaml v1 sha256 c8a0636918c1d08f1af87af88da4117a55c4ecbc4760adabe57e621fa7426b05; hubs.yaml v3; hub_addresses.yaml v1; ingest_config_version 2; schema 003.1
+clusters.yaml v2 sha256 f04bbf8c32271c8d8389357ddf478973266b7ea99f8a7e7074b11fb541c65f86; hubs.yaml v3; hub_addresses.yaml v1; ingest_config_version 2; schema 003.1
 band_if_complete = computed_band: смуга за повних даних при тому самому risk_score (Q1 (а)); усі 9 результатів зібрані без аналізу делегованих купівель.
 
 | label | class | mint | clusters | largest_share | risk_score | computed_band | band | band_if_complete | status | warnings |

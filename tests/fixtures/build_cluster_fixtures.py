@@ -30,7 +30,7 @@ OUT_DIR = _HERE / "clusters"
 SOL = 10**9
 
 CLUSTER_CONFIG = {
-    "version": 1,
+    "version": 2,
     "link_min_amount_lamports": 10_000_000,
     "funding_window_seconds": 3600,
     "seconds_per_slot": 0.4,
@@ -52,8 +52,8 @@ CLUSTER_CONFIG = {
     "slot_fallback_multiplier": 0.8,
     "artifact_buyer_share": 0.5,
     "artifact_confidence_multiplier": 0.5,
-    "band_clean_max": 20,
-    "band_suspicious_max": 50,
+    "band_clean_max": 18,
+    "band_suspicious_max": 48,
 }
 
 HUB_THRESHOLDS_V3 = {
@@ -573,7 +573,7 @@ def oracle_result(s, ingest: dict, exp002: dict, declared: list[dict]) -> dict:
     meta_ingest = ingest["metadata"]
     return {
         "metadata": {
-            "mint": meta_ingest["mint"], "schema_version": "003.1", "cluster_config_version": 1,
+            "mint": meta_ingest["mint"], "schema_version": "003.1", "cluster_config_version": cfg["version"],
             "thresholds": {k: v for k, v in cfg.items() if k != "version"},
             "graph_schema_version": "002.1", "hub_config_version": 3,
             "address_lists_version": 1, "lists_applied": True,
@@ -891,8 +891,8 @@ def dump(data) -> str:
 
 
 def build_all() -> dict[str, str]:
-    assert _canonical_digest(CLUSTER_CONFIG) == "c8a0636918c1d08f1af87af88da4117a55c4ecbc4760adabe57e621fa7426b05", \
-        "cluster_config generator diverged from shipped clusters.yaml v1"
+    assert _canonical_digest(CLUSTER_CONFIG) == "f04bbf8c32271c8d8389357ddf478973266b7ea99f8a7e7074b11fb541c65f86", \
+        "cluster_config generator diverged from shipped clusters.yaml v2"
     out = {}
     for name, builder in SCENARIOS.items():
         s, declared_raw = builder()

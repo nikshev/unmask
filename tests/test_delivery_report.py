@@ -81,7 +81,7 @@ def test_provenance_carries_all_four_versions_and_completeness() -> None:
     prov = build_report(ingest, graph, result)["provenance"]
     assert prov["ingest_config_version"] == 2
     assert prov["hub_config_version"] == 3
-    assert prov["cluster_config_version"] == 1
+    assert prov["cluster_config_version"] == 2
     assert prov["graph_status"] == "complete"
     assert prov["completeness_reasons"] == ["complete_data"]
 

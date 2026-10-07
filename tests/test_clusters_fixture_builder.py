@@ -36,7 +36,7 @@ def test_cluster_config_digest_equals_shipped_clusters_yaml() -> None:
     from unmask.hubs.config import content_digest
     shipped = content_digest(Path(__file__).resolve().parents[1] / "config" / "clusters.yaml")
     assert mod._canonical_digest(mod.CLUSTER_CONFIG) == shipped == \
-        "c8a0636918c1d08f1af87af88da4117a55c4ecbc4760adabe57e621fa7426b05"
+        "f04bbf8c32271c8d8389357ddf478973266b7ea99f8a7e7074b11fb541c65f86"
 
 
 def test_every_expected_has_config_hub_config_result_notes() -> None:

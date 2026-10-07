@@ -84,8 +84,8 @@ def test_assess_never_returns_clean_when_can_be_clean_false() -> None:
 
 def test_computed_band_thresholds_from_config() -> None:
     cfg = _cluster_config(load_cluster_expected("c_shared"))
-    assert computed_band(20, cfg) == RiskBand.CLEAN
-    assert computed_band(21, cfg) == RiskBand.SUSPICIOUS
-    assert computed_band(50, cfg) == RiskBand.SUSPICIOUS
-    assert computed_band(51, cfg) == RiskBand.HIGH_CONCENTRATION
+    assert computed_band(18, cfg) == RiskBand.CLEAN
+    assert computed_band(19, cfg) == RiskBand.SUSPICIOUS
+    assert computed_band(48, cfg) == RiskBand.SUSPICIOUS
+    assert computed_band(49, cfg) == RiskBand.HIGH_CONCENTRATION
     assert risk_score([]) == 0

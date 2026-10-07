@@ -65,7 +65,7 @@ def test_live_pipeline_uses_same_configs_and_versions() -> None:
     doc = service.analyze(mint)
     assert doc["mint"] == mint and doc["risk_score"] == 54
     assert doc["provenance"]["hub_config_version"] == 3
-    assert doc["provenance"]["cluster_config_version"] == 1
+    assert doc["provenance"]["cluster_config_version"] == 2
     assert doc["provenance"]["ingest_config_version"] == 2
 
 
