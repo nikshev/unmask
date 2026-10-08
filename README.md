@@ -24,7 +24,8 @@ uv run python -m unmask.clusters.evaluate --fixtures tests/fixtures/real --check
 Live server and bot (operator keys required, not stored in the repository):
 
 ```bash
-export UNMASK_RPC_URL='https://…key…'
+export UNMASK_RPC_URL='https://…rpcfast key…'          # RPC Fast (non-archival)
+export UNMASK_RPC_URL_ALT='https://…helius key…'       # at least one archival provider is required
 export UNMASK_BOT_TOKEN='123:ABC…'
 uv run python scripts/serve_unmask.py --port 8080
 curl localhost:8080/api/token/<mint> | python3 -m json.tool
