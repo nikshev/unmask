@@ -64,12 +64,14 @@ retention")` (чесна неповнота, а не «історія скінч
 
 from __future__ import annotations
 
+import logging
 import math
 import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from fractions import Fraction
+from types import MappingProxyType
 from typing import Any, Callable, Mapping, Sequence
 
 from unmask.ingest.budget import Clock
@@ -80,6 +82,7 @@ from unmask.ingest.rpc.protocol import (
     RpcBudgetTimeout,
     RpcError,
     RpcRateLimited,
+    RpcTimeout,
     RpcUnavailable,
     SignatureInfo,
     TokenAccountInfo,
@@ -96,6 +99,10 @@ _SHAPE_ERROR = "unexpected response shape: pool share length"
 _RETENTION_ERROR = "history beyond provider retention"
 _NO_PROVIDER_ERROR = "no provider available"
 
+_log = logging.getLogger("unmask.ingest.rpc.pool")
+# Класи відмов для лічильників (contracts/pooled-rpc-source.md «Лічильники»).
+FAILURE_CLASSES = ("budget", "timeout", "rate_limited", "unavailable", "other")
+
 
 @dataclass(frozen=True, repr=False)
 class Provider:
@@ -110,6 +117,30 @@ class Provider:
 
     def __repr__(self) -> str:
         return f"Provider(name={self.name!r})"
+
+
+@dataclass(frozen=True)
+class ProviderStats:
+    """Знімок лічильників одного провайдера (FR-007-13). Без URL і ключів; `failures` — незмінний mapping."""
+
+    requests: int  # звернень до провайдера (будь-який метод; частка = 1 звернення), включно з невдалими
+    units: int  # одиниць: частка get_transactions = к-сть її підписів; інші звернення = 1
+    failures: Mapping[str, int]  # класи FAILURE_CLASSES, завжди всі п'ять ключів
+    not_found_escalations: int  # позицій, переданих архівному після None/короткої сторінки
+    cooldowns: int  # постановок паузи після RpcRateLimited
+
+
+def _failure_class(exc: BaseException) -> str:
+    """Клас відмови: `budget` перевіряється раніше за `timeout` (RpcBudgetTimeout є підкласом RpcTimeout)."""
+    if isinstance(exc, RpcBudgetTimeout):
+        return "budget"
+    if isinstance(exc, RpcTimeout):
+        return "timeout"
+    if isinstance(exc, RpcRateLimited):
+        return "rate_limited"
+    if isinstance(exc, RpcUnavailable):
+        return "unavailable"
+    return "other"
 
 
 def apportion(n: int, weights: Sequence[float]) -> list[int]:
@@ -183,6 +214,11 @@ class PooledRpcSource:
         self._swrr_current = [Fraction(0)] * len(providers)  # стан згладженого round-robin, за індексом
         self._age: OrderedDict[str, int] = OrderedDict()  # підпис -> blockTime, FIFO ≤ age_cache_entries (_state_lock)
         self._not_found_escalations = [0] * len(providers)  # позицій, переданих архівному після None (_state_lock)
+        self._requests = [0] * len(providers)  # звернень до провайдера, включно з невдалими (_state_lock)
+        self._units = [0] * len(providers)  # одиниць: частка = к-сть підписів, інше = 1 (_state_lock)
+        self._failures: list[dict[str, int]] = [dict.fromkeys(FAILURE_CLASSES, 0) for _ in providers]  # (_state_lock)
+        self._cooldown_count = [0] * len(providers)  # постановок паузи (_state_lock)
+        self._closed = False  # close() ідемпотентний (_state_lock)
         self._cooldown_until: dict[int, float] = {}  # індекс провайдера -> clock.monotonic() кінця паузи (_state_lock)
         self._clock = clock
         self._cooldown_seconds = float(rate_limit_cooldown_seconds)
@@ -199,6 +235,77 @@ class PooledRpcSource:
 
     def __repr__(self) -> str:
         return f"PooledRpcSource(providers={tuple(p.name for p in self._providers)!r})"  # лише імена
+
+    # --- лічильники і закриття (T-141, FR-007-13, FR-007-12) -------------------------------
+
+    def stats(self) -> Mapping[str, ProviderStats]:
+        """Знімок лічильників за іменами з конфігу, у порядку конфігу. Подальші виклики пулу знімок не змінюють."""
+        with self._state_lock:
+            return MappingProxyType(
+                {
+                    provider.name: ProviderStats(
+                        requests=self._requests[index],
+                        units=self._units[index],
+                        failures=MappingProxyType(dict(self._failures[index])),
+                        not_found_escalations=self._not_found_escalations[index],
+                        cooldowns=self._cooldown_count[index],
+                    )
+                    for index, provider in enumerate(self._providers)
+                }
+            )
+
+    def stats_line(self) -> str:
+        """Один рядок для логу/друку: `rpc_pool <ім'я> requests=… units=… failures=… escalations=… cooldowns=…; …`.
+
+        `failures` — сума за класами. Лише імена з конфігу й цілі числа: ні URL, ні ключів.
+        """
+        parts = []
+        for name, entry in self.stats().items():
+            parts.append(
+                f"{name} requests={entry.requests} units={entry.units} "
+                f"failures={sum(entry.failures.values())} escalations={entry.not_found_escalations} "
+                f"cooldowns={entry.cooldowns}"
+            )
+        return "rpc_pool " + "; ".join(parts)
+
+    def close(self) -> None:
+        """Закриває runner і джерела провайдерів (кожне джерело — один раз), пише `stats_line()` у лог рівно раз.
+
+        Ідемпотентно: повторний виклик нічого не робить. Виняток закриття одного компонента не перериває решту:
+        усі закриваються, лог пишеться, і лише потім піднімається перший виняток (обʼєкт як є, поза `except`).
+        """
+        with self._state_lock:
+            if self._closed:
+                return
+            self._closed = True
+        closers: list[Callable[[], Any]] = []
+        runner_close = getattr(self._runner, "close", None)
+        if callable(runner_close):
+            closers.append(runner_close)
+        seen: set[int] = set()
+        for provider in self._providers:
+            if id(provider.source) in seen:  # одне джерело під кількома іменами — закрити один раз
+                continue
+            seen.add(id(provider.source))
+            source_close = getattr(provider.source, "close", None)
+            if callable(source_close):
+                closers.append(source_close)
+        errors: list[Exception] = []
+        for closer in closers:
+            try:
+                closer()
+            except Exception as exc:  # noqa: BLE001 — решта закриттів і лог виконуються; перший виняток піде далі
+                errors.append(exc)
+        _log.info(self.stats_line())
+        if errors:
+            raise errors[0]  # поза `except`: без `__context__`
+
+    def __enter__(self) -> PooledRpcSource:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        """Закриває пул; виняток із блоку `with` не ковтає (повертає None)."""
+        self.close()
 
     def get_account_info(self, address: str, *, deadline: Deadline) -> AccountInfo | None:
         _, info = self._single("getAccountInfo", deadline, lambda s: s.get_account_info(address, deadline=deadline))
@@ -309,6 +416,10 @@ class PooledRpcSource:
             outcomes = self._runner(tasks)
             if len(outcomes) != len(tasks):
                 raise RuntimeError("runner: must return one outcome per task")  # дефект runner, не відмова RPC
+            with self._state_lock:  # кожна частка — одне звернення; одиниць — підписи частки (FR-007-13)
+                for index, positions in shares:
+                    self._requests[index] += 1
+                    self._units[index] += len(positions)
 
             failed: list[int] = []  # позиції часток, що впали (RpcError)
             defect: BaseException | None = None
@@ -328,6 +439,7 @@ class PooledRpcSource:
                     failed.extend(positions)
                     for position in positions:
                         last_error[position] = exc
+                    self._record_failure(index, exc)
                     if isinstance(exc, RpcRateLimited):
                         self._cool_down(index, exc)
                 elif defect is None:
@@ -365,11 +477,15 @@ class PooledRpcSource:
                 raise RpcUnavailable(_NO_PROVIDER_ERROR)
             index = self._pick(candidates)
             failure: RpcError | None = None
+            with self._state_lock:  # звернення рахується до виклику, невдале теж (FR-007-13)
+                self._requests[index] += 1
+                self._units[index] += 1
             try:
                 with self._locks[index]:  # `_state_lock` тут уже відпущено
                     return index, call(self._providers[index].source)
             except RpcError as exc:
                 failure = exc  # лише запамʼятати: усе `raise` — нижче, поза `except`
+            self._record_failure(index, failure)
             excluded.add(index)
             last = failure
             if isinstance(failure, RpcRateLimited):
@@ -426,6 +542,12 @@ class PooledRpcSource:
         with self._state_lock:
             until = self._clock.monotonic() + pause
             self._cooldown_until[index] = max(until, self._cooldown_until.get(index, until))
+            self._cooldown_count[index] += 1  # кожна постановка паузи (FR-007-13)
+
+    def _record_failure(self, index: int, exc: BaseException) -> None:
+        """Лічильник відмови провайдера за класом (`budget` раніше за `timeout`)."""
+        with self._state_lock:
+            self._failures[index][_failure_class(exc)] += 1
 
     def _age_snapshot(self, sigs: Sequence[str]) -> tuple[dict[str, int], int]:
         """Відомі `blockTime` підписів виклику й «зараз» пулу (`clock.wall()`) — одним знімком під `_state_lock`."""

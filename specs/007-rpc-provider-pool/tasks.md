@@ -160,7 +160,7 @@ T-131 → T-132 → T-133 → T-134 → T-135 → T-136 → T-137 → T-138 → 
   `test_defect_exception_propagates_not_masked`; файли: `pool.py`, `tests/test_rpc_pool_failover.py`
   (`# verifies: FR-007-05, FR-007-08, FR-007-12`).
 
-- [ ] T-141 [FR-007-13, FR-007-12] Лічильники. `pool.py`: `ProviderStats`, `stats()`, `stats_line()` (формат
+- [x] T-141 [FR-007-13, FR-007-12] Лічильники. `pool.py`: `ProviderStats`, `stats()`, `stats_line()` (формат
   контракту дослівно), лог у `close()` (логер `unmask.ingest.rpc.pool`, INFO), класи `failures`
   (`budget` перевіряється до `timeout`). — тест: `tests/test_rpc_pool_stats.py::test_stats_count_requests_and_units_per_provider`,
   `::test_failures_counted_by_class`, `::test_escalations_counted`, `::test_stats_line_exact_format`,
