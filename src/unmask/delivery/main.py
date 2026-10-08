@@ -1,4 +1,4 @@
-# impl: FR-004-10, FR-007-14, FR-008-07, FR-008-08
+# impl: FR-004-10, FR-007-13, FR-007-14, FR-008-07, FR-008-08
 """Точка входу доставки: env → YAML → сервіси → HTTP-потік + polling-бот.
 
 Секрети — лише з оточення (`UNMASK_BOT_TOKEN` і змінні RPC-провайдерів з `config/rpc_pool.yaml`,
@@ -15,6 +15,7 @@ fail-fast із назвою змінної ДО відкриття портів.
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 import threading
@@ -41,6 +42,43 @@ from unmask.ingest.service import IngestService
 __all__ = ["main"]
 
 BOT_TOKEN_VAR = "UNMASK_BOT_TOKEN"
+# Частота логу лічильників пулу (FR-007-13). Впливає лише на те, як часто пишеться рядок, не на результат (принцип III).
+STATS_LOG_SECONDS = 60
+_LOG = logging.getLogger("unmask.delivery")
+
+
+def _log_stats_if_changed(source, last: str) -> str:
+    """Один крок: логує `source.stats_line()`, якщо рядок змінився з `last`. Повертає останній залогований рядок."""
+    line = source.stats_line()
+    if line != last:
+        _LOG.info("%s", line)
+        return line
+    return last
+
+
+def _stats_loop(source, interval: float, stop: threading.Event) -> None:
+    """Тіло daemon-потоку: раз на `interval` с викликає крок логування, доки `stop` не встановлено.
+
+    Збій `stats_line` не вбиває потік і не зупиняє сервер: одне попередження на серію збоїв, без тексту винятку
+    (він може містити URL з ключем) — лише назва типу.
+    """
+    last = ""
+    warned = False
+    while not stop.wait(interval):
+        try:
+            last = _log_stats_if_changed(source, last)
+            warned = False
+        except Exception as exc:  # noqa: BLE001 — лог-потік не має права вбивати сервіс
+            if not warned:
+                _LOG.warning("stats_line failed (%s); will retry in %s s", type(exc).__name__, interval)
+                warned = True
+
+
+def _ensure_logging() -> None:
+    """INFO з `unmask.delivery` має дійти до stderr/файлу. Налаштовуємо root лише коли хендлерів ще немає."""
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 
 
 def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
@@ -75,6 +113,7 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
         print(f"serve: {exc}", file=sys.stderr)
         return 2
 
+    _ensure_logging()
     protection = build_protection(protection_cfg)  # один на процес: сервіс і HTTP ділять його
     service = DeliveryService(
         IngestService(ingest_cfg, source),
@@ -93,6 +132,9 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
                     "gate": protection.users},
             daemon=True)
         thread.start()
+    if getattr(source, "stats_line", None):  # без stats_line (одиночний провайдер без пулу) потоку немає
+        threading.Thread(target=_stats_loop, args=(source, STATS_LOG_SECONDS, threading.Event()),
+                         daemon=True).start()
     serve(service, args.port or delivery_cfg.http_port, host=args.host, protection=protection)
     return 0
 

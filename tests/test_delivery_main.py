@@ -11,6 +11,7 @@ import ipaddress
 import re
 import shutil
 import socket
+import threading
 import time
 import types
 from pathlib import Path
@@ -140,7 +141,7 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict:
     monkeypatch.setattr(main_mod, "IngestService", DummyIngest)
     monkeypatch.setattr(main_mod, "serve", fake_serve)
     monkeypatch.setattr(main_mod, "HttpxBotTransport", FakeTransport)
-    monkeypatch.setattr(main_mod, "threading", types.SimpleNamespace(Thread=FakeThread))
+    monkeypatch.setattr(main_mod, "threading", types.SimpleNamespace(Thread=FakeThread, Event=threading.Event))
     monkeypatch.setattr(main_mod, "build_protection", spy_build)
     for name in ("create_connection", "getaddrinfo"):
         monkeypatch.setattr(socket, name, refuse)
@@ -151,6 +152,11 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict:
 
 def _run(config_dir: Path, *flags: str, environ=None) -> int:
     return main([*flags, "--config-dir", str(config_dir)], environ=dict(ENV if environ is None else environ))
+
+
+def _bot_threads(wired: dict) -> list:
+    # T-146: рядом із потоком бота стартує потік лічильників (`_stats_loop`); рахуємо лише бот.
+    return [t for t in wired["threads"] if t.target is main_mod.run_polling]
 
 
 def _nothing_started(wired: dict) -> None:
@@ -210,7 +216,7 @@ def test_bot_thread_runs_on_the_same_service_and_protection(config_dir: Path, wi
     assert _run(config_dir) == 0
 
     (call,) = wired["serve_calls"]
-    (thread,) = wired["threads"]
+    (thread,) = _bot_threads(wired)
     assert thread.started is True and thread.daemon is True
     assert wired["bot_tokens"] == [SENTINEL_BOT]
     assert thread.args[1] is call["service"]  # бот отримує спільні слоти через той самий сервіс
@@ -223,7 +229,7 @@ def test_main_passes_shared_users_gate(config_dir: Path, wired: dict) -> None:
     assert _run(config_dir) == 0
 
     (call,) = wired["serve_calls"]
-    (thread,) = wired["threads"]
+    (thread,) = _bot_threads(wired)
     assert thread.target is main_mod.run_polling
     assert thread.kwargs["gate"] is call["protection"].users
     assert thread.kwargs["gate"] is wired["build_calls"][0]["result"].users
@@ -237,7 +243,7 @@ def test_main_passes_shared_users_gate(config_dir: Path, wired: dict) -> None:
 
 def test_no_bot_flag_starts_no_thread(config_dir: Path, wired: dict) -> None:
     assert _run(config_dir, "--no-bot") == 0
-    assert wired["threads"] == [] and wired["bot_tokens"] == []
+    assert _bot_threads(wired) == [] and wired["bot_tokens"] == []
 
 
 def test_missing_protection_yaml_fails_fast_before_serve(config_dir: Path, wired: dict, capsys) -> None:

@@ -190,6 +190,8 @@ T-131 → T-132 → T-133 → T-134 → T-135 → T-136 → T-137 → T-138 → 
   `tests/test_rpc_pool_perf.py::test_pool_wall_time_at_most_half_of_single` (маркер `perf`); файли:
   `tests/test_rpc_pool_perf.py` (`# verifies: FR-007-02, FR-007-15`).
 
+- [x] T-146 [FR-007-13] Лічильники пулу видно в сервісі (знайдено фінальним ревʼю 007 та живим прогоном демо: холодний аналіз давнього токена — 7 хв, `ingest_incomplete`, а діагностики немає). `delivery/main.py`: фоновий daemon-потік логує `source.stats_line()` (логер `unmask.delivery`, INFO) раз на 60 с (константа `STATS_LOG_SECONDS` у `main.py`: впливає лише на частоту логування, не на результат — принцип III не зачеплено) — лише коли рядок змінився з попереднього логу; потік не стартує, якщо у джерела немає `stats_line`; зупиняється при завершенні (daemon). Без URL/ключів (stats_line їх не містить). — тест: `tests/test_delivery_main_stats.py::test_stats_line_logged_when_changed`, `::test_not_logged_when_unchanged`, `::test_no_thread_without_stats_line`, `::test_log_has_no_urls`; мутація: логувати завжди (навіть без змін) → червоний `test_not_logged_when_unchanged`; файли: `src/unmask/delivery/main.py`, `tests/test_delivery_main_stats.py` (`# verifies: FR-007-13`)
+
 - [ ] T-145 [FR-007-04, FR-007-13, FR-007-14] [GATE] Живий замір SC-002 за `quickstart.md`: один Helius vs
   пул із чотирьох; побайтовий збіг `buyers`/`transfers`/`completeness.status`, час, рядок `rpc_pool` (у
   `rpcfast` `requests > 0`). Нотатка з числами — `specs/007-rpc-provider-pool/live-sc002.md`, без
