@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **116** · задач: **146** (виконано 137) · вимог у роботі: **12** · порушень: **0**
+Вимог: **116** · задач: **146** (виконано 139) · вимог у роботі: **11** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -125,8 +125,8 @@
 
 | Вимога | Опис | Задачі | Імплементація | Тести |
 |---|---|---|---|---|
-| `FR-007-01` | Система MUST надавати джерело RPC, що реалізує той самий публічний протокол джерела фічі 001, але розподіляє з | `T-133`, `T-134`, `T-142` | `src/unmask/ingest/rpc/pool.py` | `tests/test_rpc_pool.py`, `tests/test_rpc_pool_equivalence.py` |
-| `FR-007-02` | Пакетні запити (транзакції за підписами) MUST ділитися між провайдерами й виконуватися одночасно; відповіді MU | `T-132`, `T-144` | `src/unmask/ingest/rpc/pool.py` | `tests/test_rpc_pool.py` |
+| `FR-007-01` | Система MUST надавати джерело RPC, що реалізує той самий публічний протокол джерела фічі 001, але розподіляє з | `T-133`, `T-134`, `T-142` | `src/unmask/ingest/rpc/pool.py` | `tests/test_rpc_pool_boundaries.py`, `tests/test_rpc_pool.py`, `tests/test_rpc_pool_equivalence.py` |
+| `FR-007-02` | Пакетні запити (транзакції за підписами) MUST ділитися між провайдерами й виконуватися одночасно; відповіді MU | `T-132`, `T-144` | `src/unmask/ingest/rpc/pool.py` | `tests/test_rpc_pool_perf.py`, `tests/test_rpc_pool.py` |
 | `FR-007-03` | Розподіл MUST враховувати пропускну здатність кожного провайдера (профіль швидкості фічі 001), а не ділити пор | `T-132`, `T-138` | `src/unmask/ingest/rpc/pool.py`, `src/unmask/ingest/rpc/pool_config.py` | `tests/test_rpc_pool_config.py`, `tests/test_rpc_pool.py` |
 | `FR-007-04` | Результат збору через пул MUST бути побітово рівним результату збору через одного провайдера на тих самих дани | `T-132`, `T-133`, `T-134`, `T-136`, `T-145` | `src/unmask/ingest/rpc/pool.py` | `tests/test_rpc_pool_routing.py`, `tests/test_rpc_pool.py`, `tests/test_rpc_pool_equivalence.py` |
 | `FR-007-05` | Інваріанти фічі 001 (`resume` дорівнює свіжому збору, ліміти й бюджети, класифікація помилок) MUST зберігатися | `T-134`, `T-140` | `src/unmask/ingest/rpc/pool.py` | `tests/test_rpc_pool_failover.py`, `tests/test_rpc_pool_equivalence.py` |
@@ -136,10 +136,10 @@
 | `FR-007-09` | Перелік провайдерів, профілі швидкості, архівність і глибина історії MUST зберігатися у версіонованому YAML із | `T-137` | `src/unmask/ingest/rpc/pool_config.py` | `tests/test_rpc_pool_config.py` |
 | `FR-007-10` | Без конфігу пулу (або з єдиним провайдером) система MUST поводитись як до цієї фічі; змінна `UNMASK_RPC_URL` л | `T-138` | `src/unmask/ingest/rpc/pool_config.py` | `tests/test_rpc_pool_config.py` |
 | `FR-007-11` | Недоступну (не задану в середовищі) змінну провайдера MUST бути пропущено з попередженням без значень; якщо пр | `T-138` | `src/unmask/ingest/rpc/pool_config.py` | `tests/test_rpc_pool_config.py` |
-| `FR-007-12` | URL і ключі провайдерів MUST NOT потрапляти в повідомлення про помилки, логи, `repr`, результати й кеші (діє ч | `T-138`, `T-140`, `T-141` | `src/unmask/ingest/rpc/pool.py`, `src/unmask/ingest/rpc/pool_config.py` | `tests/test_rpc_pool_config.py`, `tests/test_rpc_pool_failover.py` |
-| `FR-007-13` | Пул MUST надавати оператору лічильники запитів за провайдерами (без URL і ключів), щоб було видно, що кожен пр | `T-141`, `T-145` | `src/unmask/ingest/rpc/pool.py` | — |
+| `FR-007-12` | URL і ключі провайдерів MUST NOT потрапляти в повідомлення про помилки, логи, `repr`, результати й кеші (діє ч | `T-138`, `T-140`, `T-141` | `src/unmask/ingest/rpc/pool.py`, `src/unmask/ingest/rpc/pool_config.py` | `tests/test_rpc_pool_stats.py`, `tests/test_rpc_pool_config.py`, `tests/test_rpc_pool_failover.py` |
+| `FR-007-13` | Пул MUST надавати оператору лічильники запитів за провайдерами (без URL і ключів), щоб було видно, що кожен пр | `T-141`, `T-145` | `src/unmask/ingest/rpc/pool.py` | `tests/test_rpc_pool_stats.py` |
 | `FR-007-14` | Сервіс доставки й воркер експерименту MUST створювати джерело через пул за конфігом; чинні тести доставки лиша | `T-139`, `T-143`, `T-145` | `src/unmask/delivery/main.py` | `tests/test_delivery_main_pool.py` |
-| `FR-007-15` | Тести MUST працювати без мережі на фікстурних провайдерах із керованими затримками й відмовами (принцип II). | `T-131`, `T-144` | `tests/rpc_pool_doubles.py` | `tests/test_rpc_pool_doubles.py` |
+| `FR-007-15` | Тести MUST працювати без мережі на фікстурних провайдерах із керованими затримками й відмовами (принцип II). | `T-131`, `T-144` | `tests/rpc_pool_doubles.py` | `tests/test_rpc_pool_perf.py`, `tests/test_rpc_pool_doubles.py` |
 
 ## 008-api-protection-ops
 
@@ -245,5 +245,5 @@
 - `T-165` (008-api-protection-ops) — виконано
 - `T-166` (008-api-protection-ops) — виконано
 - `T-167` (008-api-protection-ops) — у роботі
-- `T-168` (008-api-protection-ops) — у роботі
+- `T-168` (008-api-protection-ops) — виконано
 - `T-169` (008-api-protection-ops) — у роботі

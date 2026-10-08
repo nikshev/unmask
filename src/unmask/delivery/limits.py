@@ -1,24 +1,39 @@
-# impl: FR-008-01, FR-008-02, FR-008-06, FR-008-14
+# impl: FR-008-01, FR-008-02, FR-008-06, FR-008-07, FR-008-08, FR-008-14
 """Примітиви обмеження навантаження доставки (фіча 008; data-model.md, R-1, R-3).
 
 Чисті, потокобезпечні, без I/O: стан лише в пам'яті процесу. Годинник інжектується
 (`clock`, умовчання `time.monotonic`), тож тести керують часом без `sleep` (FR-008-14).
 
-Тут — ковзне вікно запитів на ключ (адресу клієнта) і слоти важких аналізів (`HeavySlots`/`Lease`).
-Жодна межа не живе в цьому файлі: значення приходять із `config/protection.yaml` через
+Тут — ковзне вікно запитів на ключ (адресу клієнта), слоти важких аналізів (`HeavySlots`/`Lease`),
+ворота користувача бота (`UserGate`/`GateDecision`) і збирання всього з конфігу
+(`Protection`/`build_protection`). Жодна межа не живе в цьому файлі: значення приходять із `config/protection.yaml` через
 викликача (принцип III).
 """
 
 from __future__ import annotations
 
+import ipaddress
 import math
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable, Hashable
+from ipaddress import IPv4Network, IPv6Network
+from typing import TYPE_CHECKING, Callable, Hashable
 
-__all__ = ["Decision", "HeavySlots", "Lease", "SlidingWindowLimiter"]
+if TYPE_CHECKING:  # лише для анотації: примітиви не залежать від завантажувача конфігу
+    from unmask.delivery.config import ProtectionConfig
+
+__all__ = [
+    "Decision",
+    "GateDecision",
+    "HeavySlots",
+    "Lease",
+    "Protection",
+    "SlidingWindowLimiter",
+    "UserGate",
+    "build_protection",
+]
 
 
 @dataclass(frozen=True)
@@ -196,3 +211,101 @@ class HeavySlots:
             lease = Lease(self)  # якщо конструктор впаде — лічильник ще не зачеплено
             self._in_use += 1
             return lease
+
+
+_GATE_KINDS = ("ok", "in_progress", "rate_limited")
+
+
+@dataclass(frozen=True)
+class GateDecision:
+    """Рішення воріт користувача: `kind` ∈ {ok, in_progress, rate_limited}.
+
+    `retry_after_seconds` = 0 для `ok`/`in_progress` (чекати треба завершення власного аналізу,
+    а не таймера) і ціле ≥ 1 для `rate_limited`.
+    """
+
+    kind: str
+    retry_after_seconds: int
+
+    def __post_init__(self) -> None:
+        kind, r = self.kind, self.retry_after_seconds
+        if type(kind) is not str or kind not in _GATE_KINDS:
+            raise ValueError(f"GateDecision.kind must be one of {_GATE_KINDS}, got {kind!r}")
+        if type(r) is not int:
+            raise ValueError("GateDecision.retry_after_seconds must be an int")
+        if kind == "rate_limited":
+            if r < 1:
+                raise ValueError("a rate_limited GateDecision must have retry_after_seconds >= 1")
+        elif r != 0:
+            raise ValueError(f"a {kind} GateDecision must have retry_after_seconds == 0")
+
+
+_OK = GateDecision("ok", 0)
+_IN_PROGRESS = GateDecision("in_progress", 0)
+
+
+class UserGate:
+    """Ворота користувача бота: один одночасний аналіз + ковзне вікно «важких» перевірок (FR-008-07).
+
+    `try_enter` атомарно (один `threading.Lock` на всю перевірку й позначку) віддає рішення в
+    порядку `in_progress` → `rate_limited` → `ok`:
+
+    1. користувач уже активний -> `in_progress`; вікно НЕ чіпається (повтор під час аналізу не
+       їсть квоту);
+    2. `counts=True` і вікно вичерпане -> `rate_limited` з чесним `retry_after`; відмова у вікно
+       не пишеться (`SlidingWindowLimiter.hit`), користувач активним не стає;
+    3. інакше вікно рахує запит (лише при `counts=True`: кешований токен чи невалідна адреса
+       квоту не їдять, але правило «один одночасний» діє й для них) і користувач стає активним.
+
+    `leave` ідемпотентний; квоту не повертає. Замок вікна вкладений у замок воріт (порядок
+    завжди ворота -> вікно, зворотного немає), тож взаємного блокування не буде. Ключ користувача
+    — довільний hashable (Telegram `from.id` / `chat.id`); `1` і `"1"` — різні ключі.
+    Виклик `leave` лежить на викликачі (`finally` воркера): гейт сам активність не скидає.
+    """
+
+    def __init__(self, checks_per_window: int, window_seconds: float,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        # валідацію (int ≥ 1, скінченне вікно > 0, callable) робить SlidingWindowLimiter
+        self._window = SlidingWindowLimiter(checks_per_window, window_seconds, clock)
+        self._lock = threading.Lock()
+        self._active: set[Hashable] = set()
+
+    def try_enter(self, user: Hashable, *, counts: bool) -> GateDecision:
+        """Атомарно: допустити користувача, відмовити через активний аналіз чи через вікно."""
+        if type(counts) is not bool:  # `counts=1`/`None` тихо вимкнуло б або ввімкнуло квоту
+            raise TypeError(f"counts must be a bool, got {counts!r}")
+        with self._lock:
+            if user in self._active:
+                return _IN_PROGRESS
+            if counts:
+                decision = self._window.hit(user)
+                if not decision.allowed:
+                    return GateDecision("rate_limited", decision.retry_after_seconds)
+            self._active.add(user)
+            return _OK
+
+    def leave(self, user: Hashable) -> None:
+        """Зняти позначку активності; для неактивного (або повторно) — нічого не робить."""
+        with self._lock:
+            self._active.discard(user)
+
+
+@dataclass(frozen=True)
+class Protection:
+    """Один регулятор на процес: збирається `build_protection` раз у `main.py` (data-model)."""
+
+    api: SlidingWindowLimiter
+    slots: HeavySlots
+    users: UserGate
+    trusted_proxies: tuple[IPv4Network | IPv6Network, ...]
+
+
+def build_protection(cfg: "ProtectionConfig", clock: Callable[[], float] = time.monotonic) -> Protection:
+    """Зібрати `Protection` із `config/protection.yaml` (FR-008-08): усі межі — з конфігу."""
+    return Protection(
+        api=SlidingWindowLimiter(cfg.api_requests_per_window, cfg.api_window_seconds, clock),
+        slots=HeavySlots(cfg.max_concurrent_analyses, cfg.busy_retry_after_seconds),
+        users=UserGate(cfg.bot_checks_per_window, cfg.bot_window_seconds, clock),
+        trusted_proxies=tuple(ipaddress.ip_network(item, strict=False)
+                              for item in cfg.trusted_proxies),
+    )

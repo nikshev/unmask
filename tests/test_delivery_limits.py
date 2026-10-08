@@ -1,6 +1,6 @@
-# verifies: FR-008-01, FR-008-02, FR-008-06, FR-008-14
+# verifies: FR-008-01, FR-008-02, FR-008-06, FR-008-07, FR-008-08, FR-008-14
 """Примітиви обмеження доставки (фіча 008): `SlidingWindowLimiter`/`Decision` (T-162) і
-`HeavySlots`/`Lease` (T-163).
+`HeavySlots`/`Lease` (T-163), `UserGate`/`GateDecision` і `build_protection` (T-168).
 
 Годинник — локальний `ManualClock` (R-3): реального часу й `sleep` у тестах немає. Конкурентні
 тести синхронізуються лише `threading.Barrier` / `join` з таймаутом.
@@ -9,14 +9,27 @@
 from __future__ import annotations
 
 import dataclasses
+import ipaddress
 import math
 import random
 import sys
 import threading
+import time
+from pathlib import Path
 
 import pytest
 
-from unmask.delivery.limits import Decision, HeavySlots, Lease, SlidingWindowLimiter
+from unmask.delivery.config import ProtectionConfig, load_protection_config
+from unmask.delivery.limits import (
+    Decision,
+    GateDecision,
+    HeavySlots,
+    Lease,
+    Protection,
+    SlidingWindowLimiter,
+    UserGate,
+    build_protection,
+)
 
 
 class ManualClock:
@@ -1164,3 +1177,728 @@ def test_lock_is_released_when_exit_runs_with_exception() -> None:
             raise KeyboardInterrupt
     assert not hs._lock.locked()
     assert hs.in_use == 0
+
+
+# --------------------------------------------------------------------------- T-168: UserGate
+
+OK = GateDecision("ok", 0)
+IN_PROGRESS = GateDecision("in_progress", 0)
+
+
+def gate(checks: int = 5, window: float = 600, start: float = 0.0):
+    clock = ManualClock(start)
+    return UserGate(checks, window, clock), clock
+
+
+# --- рядок T-168
+
+
+def test_second_enter_while_active_is_in_progress() -> None:
+    g, _ = gate()
+    assert g.try_enter("u", counts=True) == OK
+    assert g.try_enter("u", counts=True) == IN_PROGRESS
+    assert g.try_enter("u", counts=False) == IN_PROGRESS  # правило «один одночасний» діє й для counts=False
+
+
+def test_leave_allows_next() -> None:
+    g, _ = gate()
+    assert g.try_enter("u", counts=True) == OK
+    g.leave("u")
+    assert g.try_enter("u", counts=True) == OK
+    assert g.try_enter("u", counts=True) == IN_PROGRESS
+
+
+def test_window_counts_only_when_counts_true() -> None:
+    g, _ = gate(checks=2, window=600)
+    for _ in range(10):  # кешовані токени/невалідні адреси: вікно не споживається
+        assert g.try_enter("u", counts=False) == OK
+        g.leave("u")
+    for _ in range(2):  # тож обидва «важкі» ще проходять
+        assert g.try_enter("u", counts=True) == OK
+        g.leave("u")
+    assert g.try_enter("u", counts=True) == GateDecision("rate_limited", 600)
+    # вікно вичерпане, але counts=False все одно проходить (кеш віддається будь-кому)
+    assert g.try_enter("u", counts=False) == OK
+
+
+def test_rate_limited_has_honest_retry_after() -> None:
+    g, clock = gate(checks=2, window=60)
+    assert g.try_enter("u", counts=True) == OK  # t=0
+    g.leave("u")
+    clock.now = 5
+    assert g.try_enter("u", counts=True) == OK
+    g.leave("u")
+    clock.now = 10
+    denied = g.try_enter("u", counts=True)
+    assert denied == GateDecision("rate_limited", 50)  # 0 + 60 - 10
+    clock.now = 10 + 50 - 1  # ще рано (і відмова вікно не зсунула)
+    assert g.try_enter("u", counts=True) == GateDecision("rate_limited", 1)
+    clock.now = 10 + 50  # рівно через retry_after — проходить
+    assert g.try_enter("u", counts=True) == OK
+
+
+def test_in_progress_does_not_consume_window() -> None:
+    g, _ = gate(checks=2, window=600)
+    assert g.try_enter("u", counts=True) == OK  # 1 з 2
+    for _ in range(10):
+        assert g.try_enter("u", counts=True) == IN_PROGRESS  # не їсть вікно
+    g.leave("u")
+    assert g.try_enter("u", counts=True) == OK  # 2 з 2: якщо б in_progress їв вікно -> rate_limited
+    g.leave("u")
+    assert g.try_enter("u", counts=True).kind == "rate_limited"
+
+
+def test_in_progress_takes_precedence_over_rate_limited() -> None:
+    g, _ = gate(checks=1, window=600)
+    assert g.try_enter("u", counts=True) == OK
+    # вікно вичерпане І користувач активний: порядок in_progress -> rate_limited -> ok
+    assert g.try_enter("u", counts=True) == IN_PROGRESS
+    g.leave("u")
+    assert g.try_enter("u", counts=True) == GateDecision("rate_limited", 600)
+
+
+def test_concurrent_enter_same_user_admits_one() -> None:
+    for counts in (True, False):
+        g, _ = gate(checks=100, window=600)
+        threads = 20
+        barrier = threading.Barrier(threads, timeout=10)
+        results: list[GateDecision] = []
+        out = threading.Lock()
+
+        def worker() -> None:
+            barrier.wait()
+            d = g.try_enter("u", counts=counts)
+            with out:
+                results.append(d)
+
+        ts = [threading.Thread(target=worker, daemon=True) for _ in range(threads)]
+        old = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        try:
+            for t in ts:
+                t.start()
+            for t in ts:
+                t.join(timeout=10)
+        finally:
+            sys.setswitchinterval(old)
+        assert not any(t.is_alive() for t in ts)
+        assert len(results) == threads
+        assert sum(d.kind == "ok" for d in results) == 1
+        assert sum(d.kind == "in_progress" for d in results) == threads - 1
+
+
+# --- межові випадки
+
+
+def test_users_are_independent() -> None:
+    g, _ = gate(checks=1, window=600)
+    assert g.try_enter("a", counts=True) == OK
+    assert g.try_enter("b", counts=True) == OK  # a активний, але це не заважає b
+    assert g.try_enter("a", counts=True) == IN_PROGRESS
+    g.leave("a")
+    assert g.try_enter("a", counts=True).kind == "rate_limited"  # вікно a вичерпане
+    assert g.try_enter("b", counts=True) == IN_PROGRESS  # b своє ще тримає
+    g.leave("b")
+    g.leave("a")  # ні-оп
+    assert g.try_enter("c", counts=True) == OK  # c чистий
+
+
+def test_leave_of_one_user_does_not_release_another() -> None:
+    g, _ = gate()
+    assert g.try_enter("a", counts=False) == OK
+    assert g.try_enter("b", counts=False) == OK
+    g.leave("a")
+    assert g.try_enter("b", counts=False) == IN_PROGRESS
+    assert g.try_enter("a", counts=False) == OK
+
+
+def test_leave_of_inactive_user_is_noop() -> None:
+    g, _ = gate()
+    g.leave("never-seen")  # не кидає
+    assert g.try_enter("never-seen", counts=True) == OK
+    g.leave("other")  # чужий leave не чіпає активного
+    assert g.try_enter("never-seen", counts=True) == IN_PROGRESS
+
+
+def test_leave_twice_is_idempotent() -> None:
+    g, _ = gate(checks=5)
+    assert g.try_enter("u", counts=True) == OK
+    g.leave("u")
+    g.leave("u")  # нічого не ламає
+    assert g.try_enter("u", counts=True) == OK
+    assert g.try_enter("u", counts=True) == IN_PROGRESS
+    assert g._active == {"u"}  # type: ignore[attr-defined]
+
+
+def test_leave_does_not_refund_the_window() -> None:
+    g, _ = gate(checks=1, window=600)
+    assert g.try_enter("u", counts=True) == OK
+    g.leave("u")
+    assert g.try_enter("u", counts=True) == GateDecision("rate_limited", 600)
+
+
+def test_rate_limited_does_not_mark_user_active() -> None:
+    g, clock = gate(checks=1, window=60)
+    assert g.try_enter("u", counts=True) == OK
+    g.leave("u")
+    assert g.try_enter("u", counts=True).kind == "rate_limited"
+    clock.now = 60
+    assert g.try_enter("u", counts=True) == OK  # якби відмова лишила «активним» -> in_progress
+    assert g.try_enter("u", counts=True) == IN_PROGRESS
+
+
+def test_rate_limited_denials_do_not_extend_block() -> None:
+    g, clock = gate(checks=1, window=60)
+    assert g.try_enter("u", counts=True) == OK
+    g.leave("u")
+    for t in (10, 20, 30, 59):
+        clock.now = t
+        assert g.try_enter("u", counts=True).kind == "rate_limited"
+    clock.now = 60
+    assert g.try_enter("u", counts=True) == OK
+
+
+def test_window_frees_after_it_slides_and_user_is_ok_again() -> None:
+    g, clock = gate(checks=2, window=100)
+    for _ in range(2):
+        assert g.try_enter("u", counts=True) == OK
+        g.leave("u")
+    assert g.try_enter("u", counts=True).kind == "rate_limited"
+    clock.now = 100
+    assert g.try_enter("u", counts=True) == OK
+
+
+def test_int_and_str_keys_are_distinct() -> None:
+    g, _ = gate()
+    assert g.try_enter(1, counts=True) == OK
+    assert g.try_enter("1", counts=True) == OK  # не зливаються
+    assert g.try_enter(1, counts=True) == IN_PROGRESS
+    assert g.try_enter("1", counts=True) == IN_PROGRESS
+    g.leave(1)
+    assert g.try_enter("1", counts=True) == IN_PROGRESS
+    assert g.try_enter(1, counts=True) == OK
+
+
+def test_negative_and_large_int_keys() -> None:
+    g, _ = gate()
+    for key in (-1001234567890, 0, 2**63):  # chat.id груп бувають від'ємними
+        assert g.try_enter(key, counts=True) == OK
+        assert g.try_enter(key, counts=True) == IN_PROGRESS
+    g.leave(-1001234567890)
+    assert g.try_enter(0, counts=True) == IN_PROGRESS
+
+
+def test_counts_must_be_a_keyword_bool() -> None:
+    g, _ = gate()
+    with pytest.raises(TypeError):
+        g.try_enter("u", True)  # type: ignore[misc]
+    for bad in (1, 0, None, "yes"):
+        with pytest.raises(TypeError):
+            g.try_enter("u", counts=bad)  # type: ignore[arg-type]
+    assert g.try_enter("u", counts=True) == OK  # відхилений виклик нічого не зачепив
+    assert not g._lock.locked()  # type: ignore[attr-defined]
+
+
+def test_unhashable_user_raises_type_error_and_leaves_state_clean() -> None:
+    g, _ = gate()
+    with pytest.raises(TypeError):
+        g.try_enter(["u"], counts=True)  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        g.leave(["u"])  # type: ignore[arg-type]
+    assert not g._lock.locked()  # type: ignore[attr-defined]
+    assert g._active == set()  # type: ignore[attr-defined]
+    assert g.try_enter("u", counts=True) == OK
+
+
+def test_clock_failure_does_not_mark_user_active_nor_hold_lock() -> None:
+    state = {"fail": True}
+
+    def clock() -> float:
+        if state["fail"]:
+            raise RuntimeError("clock failed")
+        return 0.0
+
+    g = UserGate(1, 60, clock)
+    with pytest.raises(RuntimeError):
+        g.try_enter("u", counts=True)
+    assert not g._lock.locked()  # type: ignore[attr-defined]
+    state["fail"] = False
+    assert g.try_enter("u", counts=True) == OK  # не лишився «активним» після збою
+
+
+def test_counts_false_never_reads_clock_or_window() -> None:
+    def clock() -> float:
+        raise AssertionError("counts=False must not touch the window")
+
+    g = UserGate(1, 60, clock)
+    assert g.try_enter("u", counts=False) == OK
+    assert g.try_enter("u", counts=False) == IN_PROGRESS
+    g.leave("u")
+
+
+def test_clock_regress_never_blocks_longer_than_window() -> None:
+    g, clock = gate(checks=1, window=60, start=1000.0)
+    assert g.try_enter("u", counts=True) == OK
+    g.leave("u")
+    clock.now = 100.0  # годинник стрибнув назад
+    denied = g.try_enter("u", counts=True)
+    assert denied.kind == "rate_limited" and 1 <= denied.retry_after_seconds <= 60
+    clock.now += denied.retry_after_seconds
+    assert g.try_enter("u", counts=True) == OK
+
+
+def test_active_set_is_bounded_by_live_users() -> None:
+    g, _ = gate(checks=1000, window=600)
+    for i in range(500):
+        assert g.try_enter(i, counts=True) == OK
+        g.leave(i)
+    assert g._active == set()  # type: ignore[attr-defined]
+
+
+def test_checks_one_window_one() -> None:
+    g, clock = gate(checks=1, window=1)
+    assert g.try_enter("u", counts=True) == OK
+    g.leave("u")
+    assert g.try_enter("u", counts=True) == GateDecision("rate_limited", 1)
+    clock.now = 1
+    assert g.try_enter("u", counts=True) == OK
+
+
+def test_fractional_window() -> None:
+    g, clock = gate(checks=1, window=0.5)
+    assert g.try_enter("u", counts=True) == OK
+    g.leave("u")
+    assert g.try_enter("u", counts=True) == GateDecision("rate_limited", 1)  # ceil(0.5), не 0
+    clock.now = 0.5
+    assert g.try_enter("u", counts=True) == OK
+
+
+@pytest.mark.parametrize("checks", [0, -1, True, 1.5, "5", None])
+def test_invalid_checks_rejected(checks: object) -> None:
+    with pytest.raises(ValueError):
+        UserGate(checks, 60)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("window", [0, -1, math.inf, math.nan, "60", None])
+def test_invalid_window_rejected(window: object) -> None:
+    with pytest.raises(ValueError):
+        UserGate(5, window)  # type: ignore[arg-type]
+
+
+def test_non_callable_clock_rejected() -> None:
+    with pytest.raises(ValueError):
+        UserGate(5, 60, 0)  # type: ignore[arg-type]
+
+
+def test_default_clock_is_monotonic_and_works() -> None:
+    g = UserGate(2, 60)
+    assert g.try_enter("u", counts=True) == OK
+    assert g.try_enter("u", counts=True) == IN_PROGRESS
+
+
+def test_gates_are_independent_instances() -> None:
+    g1, _ = gate(checks=1)
+    g2, _ = gate(checks=1)
+    assert g1.try_enter("u", counts=True) == OK
+    assert g2.try_enter("u", counts=True) == OK
+
+
+def test_random_walk_keeps_invariants_against_a_reference_model() -> None:
+    rng = random.Random(168)
+    window, checks = 100, 3
+    g, clock = gate(checks=checks, window=window)
+    active: set[int] = set()
+    stamps: dict[int, list[float]] = {}
+    for _ in range(3000):
+        clock.now += rng.choice([0, 0, 1, 5, 40, 101])
+        user = rng.randrange(4)
+        if rng.random() < 0.4:
+            g.leave(user)
+            active.discard(user)
+            continue
+        counts = rng.random() < 0.7
+        got = g.try_enter(user, counts=counts)
+        if user in active:
+            assert got == IN_PROGRESS
+            continue
+        live = [s for s in stamps.get(user, []) if s > clock.now - window]
+        stamps[user] = live
+        if counts and len(live) >= checks:
+            assert got.kind == "rate_limited"
+            assert got.retry_after_seconds == math.ceil(live[0] + window - clock.now)
+            continue
+        assert got == OK
+        active.add(user)
+        if counts:
+            live.append(clock.now)
+
+
+# --- GateDecision
+
+
+def test_gate_decision_is_frozen_value_object() -> None:
+    d = GateDecision("rate_limited", 5)
+    assert d == GateDecision("rate_limited", 5)
+    assert d != GateDecision("rate_limited", 6)
+    assert d != GateDecision("in_progress", 0)
+    assert hash(d) == hash(GateDecision("rate_limited", 5))
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        d.kind = "ok"  # type: ignore[misc]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        d.retry_after_seconds = 1  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    "kind,retry",
+    [
+        ("ok", 1),
+        ("in_progress", 3),
+        ("rate_limited", 0),
+        ("rate_limited", -1),
+        ("busy", 0),
+        ("OK", 0),
+        ("", 0),
+        (None, 0),
+        ("ok", True),
+        ("ok", 0.0),
+        ("rate_limited", 5.0),
+        ("rate_limited", True),  # bool — не int-кількість секунд (True == 1)
+    ],
+)
+def test_gate_decision_rejects_inconsistent_values(kind: object, retry: object) -> None:
+    with pytest.raises(ValueError):
+        GateDecision(kind, retry)  # type: ignore[arg-type]
+
+
+# --- детермінований тест гонки (Barrier-рандеву, як T-162/T-163)
+
+
+class _RendezvousUser:
+    """Ключ користувача, чий N-й `__hash__` чекає на другий потік.
+
+    Кожен потік має власний екземпляр (лічильник викликів — на екземпляр), усі екземпляри
+    рівні й з однаковим хешем. У `try_enter` перший хеш — `user in self._active` (перевірка
+    активності). Якщо активність перевіряється й позначається НЕ під одним утриманням замка
+    (замка немає або він розщеплений на «перевірку» й «запис»), обидва потоки проходять
+    перевірку й зустрічаються на `Barrier(2)` у наступному хешуванні (вікно/запис) -> обидва
+    `ok`. З чинним замком другий потік чекає на замок, бар'єр першого розривається за
+    таймаутом (він лише синхронізує потоки; логіка реального часу не читає), а другий бачить
+    уже позначену активність -> `in_progress`.
+    """
+
+    def __init__(self, barrier: threading.Barrier, wait_on: int) -> None:
+        self._barrier = barrier
+        self._wait_on = wait_on
+        self._calls = 0
+
+    def __hash__(self) -> int:
+        self._calls += 1
+        if self._calls == self._wait_on:
+            try:
+                self._barrier.wait()
+            except threading.BrokenBarrierError:
+                pass
+        return 777
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _RendezvousUser)
+
+
+@pytest.mark.parametrize("counts,wait_on", [(False, 2), (True, 2), (True, 3)])
+def test_check_and_mark_active_are_atomic_deterministic_race(counts: bool, wait_on: int) -> None:
+    # counts=False: у try_enter два хешування ключа (перевірка, запис); counts=True — чотири
+    g, _ = gate(checks=100, window=600)  # велике вікно: гонку не маскує rate_limited
+    barrier = threading.Barrier(2, timeout=0.3)
+    results: list[GateDecision] = []
+    errors: list[BaseException] = []
+    out = threading.Lock()
+
+    def worker() -> None:
+        try:
+            d = g.try_enter(_RendezvousUser(barrier, wait_on), counts=counts)
+            with out:
+                results.append(d)
+        except BaseException as exc:  # noqa: BLE001
+            with out:
+                errors.append(exc)
+
+    ts = [threading.Thread(target=worker, daemon=True) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(timeout=10)
+    assert not any(t.is_alive() for t in ts)
+    assert not errors
+    assert len(results) == 2
+    assert sorted(d.kind for d in results) == ["in_progress", "ok"]
+
+
+class _RendezvousLock:
+    """Справжній `Lock`, після ПЕРШОГО звільнення кожним потоком чекає на другий потік.
+
+    Ловить «розщеплений» замок: перевірка активності під одним утриманням, запис — під іншим.
+    Хеш-рандеву (`_RendezvousUser`) тут безсилий: воно спрацьовує всередині утримання, тож
+    другий потік просто блокується на замку. Рандеву ПОЗА замком — між утриманнями — змушує
+    обох пройти «перевірку» до того, як хтось «запише». З чинним єдиним замком потік, що вийшов,
+    уже все записав, тож другий бачить `in_progress`, а бар'єр збирається одразу (без простою).
+    """
+
+    def __init__(self, barrier: threading.Barrier) -> None:
+        self._lock = threading.Lock()
+        self._barrier = barrier
+        self._seen: set[int] = set()
+        self._guard = threading.Lock()
+
+    def acquire(self, *args: object, **kwargs: object) -> bool:
+        return self._lock.acquire(*args, **kwargs)  # type: ignore[arg-type]
+
+    def release(self) -> None:
+        self._lock.release()
+        me = threading.get_ident()
+        with self._guard:
+            first = me not in self._seen
+            self._seen.add(me)
+        if first:
+            try:
+                self._barrier.wait()
+            except threading.BrokenBarrierError:
+                pass
+
+    def locked(self) -> bool:
+        return self._lock.locked()
+
+    def __enter__(self) -> bool:
+        return self.acquire()
+
+    def __exit__(self, *exc: object) -> None:
+        self.release()
+
+
+@pytest.mark.parametrize("counts", [False, True])
+def test_check_and_mark_active_not_split_across_lock_holds_deterministic_race(counts: bool) -> None:
+    g, _ = gate(checks=100, window=600)
+    g._lock = _RendezvousLock(threading.Barrier(2, timeout=0.3))  # type: ignore[attr-defined,assignment]
+    results: list[GateDecision] = []
+    out = threading.Lock()
+
+    def worker() -> None:
+        d = g.try_enter("u", counts=counts)
+        with out:
+            results.append(d)
+
+    ts = [threading.Thread(target=worker, daemon=True) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(timeout=10)
+    assert not any(t.is_alive() for t in ts)
+    assert sorted(d.kind for d in results) == ["in_progress", "ok"]
+
+
+def test_window_hit_and_activity_mark_are_one_critical_section() -> None:
+    # вікно (hit) відбувається ПІД замком гейта: інакше між hit і позначкою активності
+    # можна вклинитись — і «один одночасний» перестав би бути гарантією
+    g, _ = gate(checks=5)
+    seen: list[bool] = []
+    real = g._window.hit  # type: ignore[attr-defined]
+
+    def spy(key):  # type: ignore[no-untyped-def]
+        seen.append(g._lock.locked())  # type: ignore[attr-defined]
+        return real(key)
+
+    g._window.hit = spy  # type: ignore[attr-defined,method-assign]
+    assert g.try_enter("u", counts=True) == OK
+    assert seen == [True]
+
+
+def test_every_gate_operation_holds_the_single_lock_exactly_once() -> None:
+    g, _ = gate(checks=5)
+    lock = _CountingLock()
+    g._lock = lock  # type: ignore[attr-defined,assignment]
+
+    def count(fn):  # type: ignore[no-untyped-def]
+        before = lock.acquisitions
+        result = fn()
+        return result, lock.acquisitions - before
+
+    got, n = count(lambda: g.try_enter("u", counts=True))
+    assert got == OK and n == 1
+    got, n = count(lambda: g.try_enter("u", counts=True))
+    assert got == IN_PROGRESS and n == 1
+    got, n = count(lambda: g.try_enter("v", counts=False))
+    assert got == OK and n == 1
+    _, n = count(lambda: g.leave("u"))
+    assert n == 1
+    _, n = count(lambda: g.leave("u"))  # повторний/зайвий leave теж під замком
+    assert n == 1
+    assert not lock.locked()
+
+
+def test_concurrent_churn_one_active_per_user_and_window_never_exceeded() -> None:
+    g, _ = gate(checks=7, window=10_000)
+    users = ["a", "b", "c"]
+    threads = 12
+    barrier = threading.Barrier(threads, timeout=10)
+    inside = {u: 0 for u in users}
+    peak = {u: 0 for u in users}
+    oks = {u: 0 for u in users}
+    guard = threading.Lock()
+    errors: list[BaseException] = []
+
+    def worker(i: int) -> None:
+        user = users[i % len(users)]
+        try:
+            barrier.wait()
+            while True:
+                d = g.try_enter(user, counts=True)
+                if d.kind == "rate_limited":
+                    return
+                if d.kind == "ok":
+                    with guard:
+                        inside[user] += 1
+                        peak[user] = max(peak[user], inside[user])
+                        oks[user] += 1
+                    with guard:
+                        inside[user] -= 1
+                    g.leave(user)
+        except BaseException as exc:  # noqa: BLE001
+            with guard:
+                errors.append(exc)
+
+    ts = [threading.Thread(target=worker, args=(i,), daemon=True) for i in range(threads)]
+    old = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join(timeout=30)
+    finally:
+        sys.setswitchinterval(old)
+    assert not any(t.is_alive() for t in ts)
+    assert not errors
+    assert all(p == 1 for p in peak.values())  # одночасно не більше одного на користувача
+    assert oks == {"a": 7, "b": 7, "c": 7}  # рівно checks_per_window допусків на користувача
+    assert g._active == set()  # type: ignore[attr-defined]
+
+
+# --------------------------------------------------------------------------- T-168: build_protection
+
+# Явні числа config/protection.yaml v1 (golden, принцип III): зміна конфігу без зміни тесту — червоне.
+V1 = dict(version=1, api_requests_per_window=30, api_window_seconds=60, max_concurrent_analyses=3,
+          busy_retry_after_seconds=60, trusted_proxies=("127.0.0.1", "::1"),
+          bot_checks_per_window=5, bot_window_seconds=600, digest="d")
+
+# Усі числа різні: переплутане поле конфігу видно (у v1 api.window == busy_retry == 60).
+DISTINCT = dict(version=2, api_requests_per_window=7, api_window_seconds=11, max_concurrent_analyses=2,
+                busy_retry_after_seconds=13, trusted_proxies=("10.0.0.0/8",),
+                bot_checks_per_window=4, bot_window_seconds=17, digest="d")
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+def test_protection_fields_and_frozen() -> None:
+    p = build_protection(ProtectionConfig(**V1), ManualClock())
+    assert [f.name for f in dataclasses.fields(Protection)] == ["api", "slots", "users", "trusted_proxies"]
+    assert isinstance(p.api, SlidingWindowLimiter)
+    assert isinstance(p.slots, HeavySlots)
+    assert isinstance(p.users, UserGate)
+    assert isinstance(p.trusted_proxies, tuple)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        p.api = p.api  # type: ignore[misc]
+
+
+def test_build_protection_maps_every_config_field() -> None:
+    clock = ManualClock()
+    p = build_protection(ProtectionConfig(**V1), clock)
+    # api: 30 запитів / 60 с
+    for _ in range(30):
+        assert p.api.hit("ip") == Decision(True, 0)
+    assert p.api.hit("ip") == Decision(False, 60)
+    # slots: 3 одночасні, busy Retry-After 60
+    assert p.slots.capacity == 3 and p.slots.retry_after_seconds == 60
+    leases = [p.slots.try_acquire() for _ in range(3)]
+    assert all(leases) and p.slots.try_acquire() is None
+    # users: 5 перевірок / 600 с
+    for _ in range(5):
+        assert p.users.try_enter("u", counts=True) == OK
+        p.users.leave("u")
+    assert p.users.try_enter("u", counts=True) == GateDecision("rate_limited", 600)
+    # trusted: 127.0.0.1 і ::1 як мережі
+    assert p.trusted_proxies == (ipaddress.ip_network("127.0.0.1/32"), ipaddress.ip_network("::1/128"))
+
+
+def test_build_protection_does_not_swap_similar_fields() -> None:
+    clock = ManualClock()
+    p = build_protection(ProtectionConfig(**DISTINCT), clock)
+    assert (p.slots.capacity, p.slots.retry_after_seconds) == (2, 13)
+    for _ in range(7):
+        assert p.api.hit("ip").allowed
+    assert p.api.hit("ip") == Decision(False, 11)
+    for _ in range(4):
+        assert p.users.try_enter("u", counts=True) == OK
+        p.users.leave("u")
+    assert p.users.try_enter("u", counts=True) == GateDecision("rate_limited", 17)
+    assert p.trusted_proxies == (ipaddress.ip_network("10.0.0.0/8"),)
+
+
+def test_build_protection_api_and_users_are_separate_windows() -> None:
+    p = build_protection(ProtectionConfig(**V1), ManualClock())
+    for _ in range(30):
+        p.api.hit("1")
+    assert p.api.hit("1").allowed is False
+    assert p.users.try_enter("1", counts=True) == OK  # ключ "1" в api не впливає на users
+    assert p.slots.in_use == 0
+
+
+def test_build_protection_shares_one_injected_clock() -> None:
+    clock = ManualClock()
+    p = build_protection(ProtectionConfig(**DISTINCT), clock)
+    for _ in range(7):
+        p.api.hit("ip")
+    for _ in range(4):
+        p.users.try_enter("u", counts=True)
+        p.users.leave("u")
+    assert not p.api.hit("ip").allowed
+    assert p.users.try_enter("u", counts=True).kind == "rate_limited"
+    clock.advance(11)
+    assert p.api.hit("ip").allowed  # api — своє вікно 11 с
+    assert p.users.try_enter("u", counts=True).kind == "rate_limited"  # users ще 6 с
+    clock.advance(6)
+    assert p.users.try_enter("u", counts=True) == OK
+
+
+def test_build_protection_default_clock_is_monotonic() -> None:
+    p = build_protection(ProtectionConfig(**V1))
+    assert p.api._clock is time.monotonic  # type: ignore[attr-defined]
+    assert p.users._window._clock is time.monotonic  # type: ignore[attr-defined]
+
+
+def test_build_protection_trusted_proxy_forms() -> None:
+    def trusted(*items: str):  # type: ignore[no-untyped-def]
+        return build_protection(ProtectionConfig(**{**V1, "trusted_proxies": items}),
+                                ManualClock()).trusted_proxies
+
+    assert trusted() == ()  # порожній список дозволено
+    assert trusted("10.0.0.0/8", "fd00::/8") == (
+        ipaddress.ip_network("10.0.0.0/8"), ipaddress.ip_network("fd00::/8"))
+    assert trusted("10.1.2.3/8") == (ipaddress.ip_network("10.0.0.0/8"),)  # strict=False, як у конфігу
+    assert trusted("192.168.1.5") == (ipaddress.ip_network("192.168.1.5/32"),)  # порядок збережено
+    assert [str(n) for n in trusted("::1", "127.0.0.1")] == ["::1/128", "127.0.0.1/32"]
+
+
+def test_build_protection_from_real_protection_yaml_v1_golden() -> None:
+    cfg = load_protection_config(REPO / "config" / "protection.yaml")
+    expected = {k: v for k, v in V1.items() if k != "digest"}
+    assert {k: getattr(cfg, k) for k in expected} == expected  # змінили YAML — оновлюйте версію й журнал
+    p = build_protection(cfg, ManualClock())
+    assert p.slots.capacity == 3 and p.slots.retry_after_seconds == 60
+    assert p.trusted_proxies == (ipaddress.ip_network("127.0.0.1/32"), ipaddress.ip_network("::1/128"))
+
+
+def test_build_protection_instances_are_independent() -> None:
+    a = build_protection(ProtectionConfig(**V1), ManualClock())
+    b = build_protection(ProtectionConfig(**V1), ManualClock())
+    assert a.users is not b.users and a.slots is not b.slots and a.api is not b.api
+    assert a.users.try_enter("u", counts=True) == OK
+    assert b.users.try_enter("u", counts=True) == OK
