@@ -49,7 +49,7 @@ PooledRpcSource — внутрішній стан
   _state_lock: Lock                          # кеш віку, паузи, SWRR, лічильники
   _age: OrderedDict[str, int]                # signature -> blockTime, FIFO ≤ age_cache_entries
   _cooldown_until: dict[str, float]          # name -> clock.monotonic()
-  _swrr_current: dict[str, float]            # стан згладженого round-robin
+  _swrr_current: list[Fraction]               # стан згладженого round-robin за індексом провайдера (точна арифметика)
   _stats: dict[str, _MutableStats]
 ```
 
