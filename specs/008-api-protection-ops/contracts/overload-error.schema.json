@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unmask.local/schemas/008/overload-error-1.json",
+  "title": "unmask overload error (feature 008, schema 008.1)",
+  "description": "Body of 429 (kind=rate_limited) and 503 (kind=busy) responses of GET /api/token/{mint}. Always accompanied by the HTTP header `Retry-After: <retry_after_seconds>` (delta-seconds, same integer). An overload error is never an analysis result: it carries no clusters, score or band and is never cached. Success documents (schema 004.1) and 400/500 error documents are unchanged by this feature.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mint", "error"],
+  "properties": {
+    "mint": {
+      "description": "The requested path segment as received (unvalidated for rate_limited).",
+      "type": "string"
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "detail", "retry_after_seconds"],
+      "properties": {
+        "kind": { "enum": ["rate_limited", "busy"] },
+        "detail": { "type": "string", "minLength": 1 },
+        "retry_after_seconds": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}
