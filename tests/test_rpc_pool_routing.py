@@ -849,3 +849,263 @@ def test_nonarchival_only_pool_is_incomplete_not_clean(name):
     buyers = pooled.completeness.buyers
     assert buyers.complete is False and buyers.reason.value == "unavailable"  # причина — недоступність, не «порожньо»
     assert RETENTION_TEXT in buyers.detail  # чесна мітка пулу дійшла до результату
+
+
+# =========================================================================== T-136: підписи — архівним
+# verifies: FR-007-04, FR-007-06, FR-007-07
+#
+# `getSignaturesForAddress` (FR-007-06/07, research R-5, contracts «Одиночні методи»): підписи йдуть ЛИШЕ
+# архівним, поки є придатний архівний (архівний, що не пропускає метод); неархівний — запасний, і його
+# коротка/порожня сторінка НІКОЛИ не остаточна (вона каже «у моєму сховищі більше нічого», а не «в адреси більше
+# нічого»; ядро ж читає порожню сторінку як кінець історії) → `RpcUnavailable("history beyond provider
+# retention")`. Повна сторінка (`len >= limit`) неархівного приймається. Помилка тут тиха: прийнята коротка
+# сторінка обриває історію mint на горизонті вузла, і перші покупці (найстаріші!) зникають без жодного сліду.
+#
+# Дубль неархівного (`_non`) тут НЕ пропускає підписи (`skip=()`): захист — правило пулу, а не `skip_methods`.
+
+
+def _page_of(double: ScriptedProvider) -> list[tuple[str, tuple[str, ...]]]:
+    return [call for call in double.log if call[0] == "getSignaturesForAddress"]
+
+
+def _sig_page(pool, *, before=None, limit=1000, until=None):
+    return pool.get_signatures_for_address(ADDRESS, before=before, until=until, limit=limit, deadline=_deadline())
+
+
+def test_signatures_go_to_archival_when_present(tmp_path):
+    sigs = _sigs("s", 8)
+    scenario = _write_scenario(tmp_path, {s: FRESH for s in sigs})
+    # ваги віддають неархівному 12/13.5 викликів: без правила він отримав би майже все
+    pool, (non_d, a1_d, a2_d) = _pool(
+        [_non("n", 12, scenario, skip=()), _arch("a1", 1.0, scenario), _arch("a2", 0.5, scenario)]
+    )
+    pages = [_sig_page(pool) for _ in range(6)]
+
+    assert all([e["signature"] for e in page] == sigs for page in pages)  # повні сторінки від архівних
+    assert _page_of(non_d) == []  # журнал дубля: неархівний НЕ отримав жодного getSignaturesForAddress
+    # SWRR лише серед архівних за їхніми вагами 1 : 0,5 → a1,a2,a1,a1,a2,a1
+    assert (len(_page_of(a1_d)), len(_page_of(a2_d))) == (4, 2)
+    assert pool._not_found_escalations == [0, 0, 0]
+
+
+def test_signatures_cursor_arguments_reach_the_archival_provider_unchanged(tmp_path):
+    sigs = _sigs("s", 8)
+    scenario = _write_scenario(tmp_path, {s: FRESH for s in sigs})
+    pool, (non_d, arch_d) = _pool([_non("n", 12, scenario, skip=()), _arch("a", 1.0, scenario)])
+    page = _sig_page(pool, before=sigs[1], until=sigs[6], limit=3)
+    assert [e["signature"] for e in page] == sigs[2:5]
+    assert _page_of(non_d) == []
+
+
+def test_archival_preference_is_for_signatures_only_other_methods_use_every_provider(tmp_path):
+    scenario = _write_scenario(tmp_path, {"s00": FRESH})
+    pool, (non_d, arch_d) = _pool([_non("n", 12, scenario, skip=()), _arch("a", 1.0, scenario)])
+    for _ in range(13):
+        pool.get_account_info("acc", deadline=_deadline())
+    assert len(non_d.log) == 12 and len(arch_d.log) == 1  # getAccountInfo — SWRR 12 : 1 серед усіх провайдерів
+
+
+def test_archival_that_skips_signatures_is_not_suitable_so_nonarchival_is_the_fallback(tmp_path):
+    sigs = _sigs("s", 4)
+    scenario = _write_scenario(tmp_path, {s: FRESH for s in sigs})
+    pool, (non_d, pages_d) = _pool(
+        [_non("n", 12, scenario, skip=()), _arch("a", 100, scenario, skip={"getSignaturesForAddress"})]
+    )
+    page = _sig_page(pool, limit=4)  # повна сторінка: запасний неархівний її приймає
+    assert [e["signature"] for e in page] == sigs
+    assert len(_page_of(non_d)) == 1 and _page_of(pages_d) == []
+
+
+@pytest.mark.parametrize(
+    "limit, before, visible",
+    [
+        (4, None, 3),  # inner віддав f0,f1,f2,o3 → o3 за горизонтом → 3 < 4 (limit-1: ще коротка)
+        (5, None, 3),
+        (1000, None, 3),
+        (2, "f2", 0),  # лише давні записи за горизонтом → порожня сторінка
+    ],
+    ids=["limit_minus_one", "far_short", "page_size_1000", "empty"],
+)
+def test_nonarchival_short_page_raises_unavailable(tmp_path, limit, before, visible):
+    scenario = _write_scenario(tmp_path, {"f0": FRESH, "f1": FRESH, "f2": FRESH, "o3": OLD, "o4": OLD})
+    pool, (non_d,) = _pool([_non("n", 12, scenario, skip=())])
+
+    with pytest.raises(RpcUnavailable) as info:
+        _sig_page(pool, before=before, limit=limit)
+
+    exc = info.value
+    assert type(exc) is RpcUnavailable and str(exc) == RETENTION_TEXT and exc.detail == RETENTION_TEXT
+    assert exc.__cause__ is None and exc.__context__ is None  # raise — поза except
+    assert len(_page_of(non_d)) == 1  # одне звернення; перебирання нема (T-140)
+    assert pool._not_found_escalations == [1]  # передано б архівному, якби він був
+    assert len(pool._age) == 0  # відкинута сторінка кеш віку не наповнює
+    assert not pool._state_lock.locked()
+
+
+def test_nonarchival_short_page_from_stub_is_never_final_whatever_its_content():
+    # Сторінка без жодного запису, з одним записом, і «не список»: для неархівного — все коротке.
+    for page in ([], [_entry("a", FRESH)], None, "garbage"):
+        class Src:
+            name = "src"
+
+            def get_signatures_for_address(self, address, *, before, until, limit, deadline):
+                return page
+
+        pool = PooledRpcSource(
+            [Provider("n", Src(), 1.0, False, 100.0)], clock=FakeClock(wall_start=NOW),
+            rate_limit_cooldown_seconds=30.0, age_cache_entries=10, runner=SequentialRunner(),
+        )
+        with pytest.raises(RpcUnavailable) as info:
+            _fetch_page(pool)
+        assert str(info.value) == RETENTION_TEXT
+
+
+def test_nonarchival_full_page_accepted(tmp_path):
+    scenario = _write_scenario(tmp_path, {"f0": FRESH, "f1": FRESH, "f2": FRESH, "o3": OLD, "o4": OLD})
+    pool, (non_d,) = _pool([_non("n", 12, scenario, skip=())])
+
+    page = _sig_page(pool, limit=3)  # len == limit: вузол мав би що віддати далі → довіряємо
+
+    assert [e["signature"] for e in page] == ["f0", "f1", "f2"]
+    assert len(_page_of(non_d)) == 1
+    assert list(pool._age) == ["f0", "f1", "f2"]  # прийнята сторінка наповнює кеш віку
+    assert pool._not_found_escalations == [0]
+
+
+def test_nonarchival_only_the_first_short_page_stops_the_paging(tmp_path):
+    scenario = _write_scenario(tmp_path, {"f0": FRESH, "f1": FRESH, "f2": FRESH, "f3": FRESH, "o4": OLD})
+    pool, (non_d,) = _pool([_non("n", 12, scenario, skip=())])
+    first = _sig_page(pool, limit=2)
+    second = _sig_page(pool, before=first[-1]["signature"], limit=2)
+    assert [e["signature"] for e in first + second] == ["f0", "f1", "f2", "f3"]  # обидві сторінки повні
+    with pytest.raises(RpcUnavailable):  # далі лишився тільки давній o4 за горизонтом → порожня сторінка
+        _sig_page(pool, before="f3", limit=2)
+    assert pool._not_found_escalations == [1]
+
+
+def test_archival_short_or_empty_page_is_final_and_never_escalates(tmp_path):
+    scenario = _write_scenario(tmp_path, {"f0": FRESH, "f1": FRESH})
+    pool, (non_d, arch_d) = _pool([_non("n", 12, scenario, skip=()), _arch("a", 1.0, scenario)])
+    assert [e["signature"] for e in _sig_page(pool, limit=1000)] == ["f0", "f1"]  # коротка від архівного — кінець історії
+    assert _sig_page(pool, before="f1", limit=1000) == []  # порожня — теж
+    assert pool._not_found_escalations == [0, 0] and _page_of(non_d) == []
+
+
+def test_short_page_escalation_is_counted_on_the_provider_that_gave_it(tmp_path):
+    scenario = _write_scenario(tmp_path, {"f0": FRESH, "f1": FRESH, "o2": OLD})
+    pool, (pages_d, non_d) = _pool([
+        _arch("pages", 100, scenario, skip={"getSignaturesForAddress"}),  # непридатний для підписів архівний
+        _non("n", 1, scenario, skip=()),
+    ])
+    with pytest.raises(RpcUnavailable):
+        _sig_page(pool)  # [f0, f1] — o2 за горизонтом: 2 < 1000
+    assert _page_of(pages_d) == [] and len(_page_of(non_d)) == 1
+    assert pool._not_found_escalations == [0, 1]
+
+
+@pytest.mark.parametrize("method", ["getAccountInfo", "getSignaturesForAddress", "getTokenAccountsByOwner"])
+def test_skip_methods_respected(tmp_path, method):
+    scenario = _write_scenario(tmp_path, {"s00": FRESH, "s01": FRESH})
+    # `skipper` має найбільшу вагу й першим у конфігу: без поваги до skip_methods брав би майже все
+    pool, (skip_d, b_d, c_d) = _pool([
+        _arch("skipper", 100, scenario, skip={method}),
+        _arch("b", 1.0, scenario),
+        _arch("c", 1.0, scenario),
+    ])
+    calls = {
+        "getAccountInfo": lambda: pool.get_account_info("acc", deadline=_deadline()),
+        "getSignaturesForAddress": lambda: _sig_page(pool),
+        "getTokenAccountsByOwner": lambda: pool.get_token_accounts_by_owner("owner", deadline=_deadline()),
+    }
+    for _ in range(10):
+        calls[method]()
+    assert [m for m, _ in skip_d.log] == []  # skipper цей метод не отримав жодного разу
+    assert len([m for m, _ in b_d.log if m == method]) == 5 and len([m for m, _ in c_d.log if m == method]) == 5
+
+
+def test_skip_methods_are_per_method_not_per_provider(tmp_path):
+    scenario = _write_scenario(tmp_path, {"s00": FRESH})
+    pool, (a_d, b_d) = _pool([
+        _arch("a", 100, scenario, skip={"getAccountInfo"}),
+        _arch("b", 1, scenario, skip={"getTokenAccountsByOwner"}),
+    ])
+    pool.get_account_info("acc", deadline=_deadline())
+    pool.get_token_accounts_by_owner("owner", deadline=_deadline())
+    _sig_page(pool)
+    assert [m for m, _ in a_d.log] == ["getTokenAccountsByOwner", "getSignaturesForAddress"]  # a: усе, крім getAccountInfo
+    assert [m for m, _ in b_d.log] == ["getAccountInfo"]  # b: getAccountInfo (a його пропускає) і лише він
+
+
+# --------------------------------------------------------------------------- T-136: вік навчається від архівних сторінок
+
+
+def _interleaved_ages(count: int) -> dict[str, int]:
+    return {f"s{i:02d}": (OLD if i % 2 == 0 else FRESH) for i in range(count)}
+
+
+def test_ages_learned_from_archival_signature_pages_route_interleaved_transactions(tmp_path):
+    # Підписи пройшли через пул → пішли архівним (повні сторінки, з blockTime давніх) → вік відомий усім 16.
+    # Якби сторінку віддав неархівний (горизонт відсікає давні), їхній вік лишився б невідомим, а плани —
+    # іншими. Позиції чергуються (парні давні): плани часток НЕ суцільні, відповідь — за позицією.
+    ages = _interleaved_ages(16)
+    sigs = list(ages)
+    scenario = _write_scenario(tmp_path, ages)
+    pool, (non_d, a1_d, a2_d) = _pool(
+        [_non("n", 12, scenario, skip=()), _arch("a1", 4.5, scenario), _arch("a2", 4.5, scenario)]
+    )
+    page = _sig_page(pool)
+    assert [e["signature"] for e in page] == sigs and _page_of(non_d) == []
+    assert list(pool._age) == sigs  # усі 16 — з blockTime архівної сторінки
+
+    got = pool.get_transactions(sigs, deadline=_deadline())
+
+    assert _signatures_of(got) == sigs  # кожна відповідь — на своєму місці
+    # давні (8, парні): apportion(8, [4.5, 4.5]) = [4, 4]; свіжі (8, непарні): apportion(8, [12, 4.5, 4.5]) = [4, 2, 2]
+    assert _tx_calls(non_d) == [("s01", "s03", "s05", "s07")]
+    assert _tx_calls(a1_d) == [("s00", "s02", "s04", "s06", "s09", "s11")]
+    assert _tx_calls(a2_d) == [("s08", "s10", "s12", "s13", "s14", "s15")]
+    assert pool._not_found_escalations == [0, 0, 0]  # ніхто не відповів None: підтверджувати нічого
+
+
+@pytest.mark.parametrize("order", ["forward", "reverse", [2, 0, 1], [1, 2, 0]])
+def test_interleaved_answers_do_not_depend_on_completion_order_after_signature_paging(tmp_path, order):
+    ages = _interleaved_ages(16)
+    sigs = list(ages)
+    scenario = _write_scenario(tmp_path, ages)
+    pool, doubles = _pool(
+        [_non("n", 12, scenario, skip=()), _arch("a1", 4.5, scenario), _arch("a2", 4.5, scenario)],
+        runner=SequentialRunner(order),
+    )
+    _sig_page(pool)
+    assert _signatures_of(pool.get_transactions(sigs, deadline=_deadline())) == sigs
+    assert [_tx_calls(d) for d in doubles] == [
+        [("s01", "s03", "s05", "s07")],
+        [("s00", "s02", "s04", "s06", "s09", "s11")],
+        [("s08", "s10", "s12", "s13", "s14", "s15")],
+    ]
+
+
+def test_confirmation_round_after_signature_paging_with_forgotten_ages_lands_answers_in_place(tmp_path):
+    # Кеш віку на 1 запис: пам'ять про 15 з 16 підписів втрачено (FIFO лишає останній — s15, свіжий). Вік невідомий →
+    # неархівний бере свою частку серед усіх, давні (парні) від нього — None → підтвердження лише архівними, і
+    # позиції підтверджувального раунду (0, 2, 4, 6, 8) чергуються з рештою (1, 3, 5, 7 …).
+    ages = _interleaved_ages(16)
+    sigs = list(ages)
+    scenario = _write_scenario(tmp_path, ages)
+    pool, (non_d, a1_d, a2_d) = _pool(
+        [_non("n", 12, scenario, skip=()), _arch("a1", 4.5, scenario), _arch("a2", 4.5, scenario)],
+        age_cache_entries=1,
+    )
+    _sig_page(pool)
+    assert list(pool._age) == ["s15"]
+
+    got = pool.get_transactions(sigs, deadline=_deadline())
+
+    assert _signatures_of(got) == sigs
+    # Усі 16 придатні всім (s15 відомо свіжий, решта — вік забуто) → одна група: apportion(16, [12, 4.5, 4.5]) = [9, 4, 3].
+    assert _tx_calls(non_d)[0] == tuple(sigs[:9])
+    assert _tx_calls(a1_d)[0] == tuple(sigs[9:13]) and _tx_calls(a2_d)[0] == tuple(sigs[13:])
+    # Давні серед 0..8 — парні (0, 2, 4, 6, 8): від неархівного None → підтвердження лише архівним, apportion(5, [4.5, 4.5]) = [3, 2];
+    # позиції раунду чергуються з рештою (1, 3, 5, 7 вже мають дані), тож план НЕ суцільний.
+    assert _tx_calls(a1_d)[1] == ("s00", "s02", "s04") and _tx_calls(a2_d)[1] == ("s06", "s08")
+    assert len(_tx_calls(non_d)) == 1 and pool._not_found_escalations == [5, 0, 0]

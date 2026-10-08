@@ -9,7 +9,7 @@
 збирається за ПОЗИЦІЄЮ підпису. Тож результат залежить лише від вхідних даних і складу пулу, а не від порядку
 завершення потоків чи від того, який провайдер що обслужив (FR-007-04).
 
-Статус реалізації (T-132, T-133, T-135): `Provider`, `apportion`, `ThreadRunner`, конструктор, `get_transactions`
+Статус реалізації (T-132, T-133, T-135, T-136): `Provider`, `apportion`, `ThreadRunner`, конструктор, `get_transactions`
 раундами БЕЗ перебирання, одиночні методи (`get_account_info`, `get_signatures_for_address`,
 `get_token_accounts_by_owner`) і `name`/`__repr__`. Одиночний виклик — один провайдер за згладженим зваженим
 round-robin (SWRR, стан спільний для трьох методів: кошик адаптера глобальний, тож навантаження рахується
@@ -27,9 +27,16 @@ round-robin (SWRR, стан спільний для трьох методів: �
 глибину всіх неархівних, а придатного архівного немає; або нікому підтвердити `None`) —
 `RpcUnavailable("history beyond provider retention")` без звернень цього раунду. Кеш віку — лише оптимізація
 маршруту: правильність (чесна неповнота) тримається на правилі підтвердження, а не на кеші.
-Ще не реалізовано (наступні задачі): правила `getSignaturesForAddress` для неархівних — до T-136 сторінка від
-будь-якого провайдера вважається остаточною (безпечно лише для архівних); перебирання, паузи після 429 і класи
-помилок (T-140); лічильники й `close()` (T-141). Відмова частки (будь-якого раунду) піднімається як є.
+
+Підписи (T-136, FR-007-06/07, research R-5). Коротка сторінка неархівного вузла каже «у моєму сховищі більше нічого»,
+а не «в адреси більше нічого» (а ядро читає порожню сторінку як кінець історії). Тому `get_signatures_for_address`
+іде ЛИШЕ архівним, поки є придатний архівний (архівний, що не пропускає метод); неархівний — запасний, і тоді
+приймається лише повна сторінка (`len >= limit`); коротка/порожня — `RpcUnavailable("history beyond provider
+retention")` (чесна неповнота, а не «історія скінчилась»), що рахується в `not_found_escalations`. Сторінка архівного
+остаточна, яка б не була. Решта одиночних методів обирає серед усіх, хто не пропускає метод (`skip_methods`).
+
+Ще не реалізовано (наступні задачі): перебирання, паузи після 429 і класи помилок (T-140); лічильники й `close()`
+(T-141). Відмова частки (будь-якого раунду) і одиночного виклику піднімається як є.
 
 Потоки: адаптер `HttpRpcSource` однопотоковий, тож кожен провайдер викликається ЛИШЕ під власним
 `threading.Lock` (кошик лімітера провайдера — один на всіх викликачів). Шматок роботи раунду — одна задача на
@@ -179,7 +186,8 @@ class PooledRpcSource:
         return f"PooledRpcSource(providers={tuple(p.name for p in self._providers)!r})"  # лише імена
 
     def get_account_info(self, address: str, *, deadline: Deadline) -> AccountInfo | None:
-        return self._single("getAccountInfo", deadline, lambda s: s.get_account_info(address, deadline=deadline))
+        _, info = self._single("getAccountInfo", deadline, lambda s: s.get_account_info(address, deadline=deadline))
+        return info
 
     def get_signatures_for_address(
         self,
@@ -190,20 +198,29 @@ class PooledRpcSource:
         limit: int,
         deadline: Deadline,
     ) -> list[SignatureInfo]:
-        page = self._single(
+        index, page = self._single(
             "getSignaturesForAddress",
             deadline,
             lambda s: s.get_signatures_for_address(
                 address, before=before, until=until, limit=limit, deadline=deadline
             ),
         )
+        if not self._providers[index].archival and (
+            not isinstance(page, (list, tuple)) or len(page) < limit
+        ):
+            # Запасний неархівний: коротка/порожня сторінка не доводить кінця історії адреси (R-5). Сторінку відкидаємо
+            # (вік з неї не кешуємо); `raise` — поза `except` і після відпущених локів.
+            with self._state_lock:
+                self._not_found_escalations[index] += 1
+            raise RpcUnavailable(_RETENTION_ERROR)
         self._remember_ages(page)  # після виклику: лок провайдера вже відпущено; відмова сюди не доходить
         return page
 
     def get_token_accounts_by_owner(self, owner: str, *, deadline: Deadline) -> list[TokenAccountInfo]:
-        return self._single(
+        _, accounts = self._single(
             "getTokenAccountsByOwner", deadline, lambda s: s.get_token_accounts_by_owner(owner, deadline=deadline)
         )
+        return accounts
 
     def get_transactions(
         self, signatures: Sequence[str], *, deadline: Deadline
@@ -272,13 +289,16 @@ class PooledRpcSource:
 
     # --- внутрішнє -----------------------------------------------------------------------
 
-    def _single(self, method: str, deadline: Deadline, call: Callable[[Any], Any]) -> Any:
-        """Одиночний виклик: один провайдер за SWRR, у викликаючому потоці, під його локом. Без перебирання."""
+    def _single(self, method: str, deadline: Deadline, call: Callable[[Any], Any]) -> tuple[int, Any]:
+        """Одиночний виклик: один провайдер за SWRR, у викликаючому потоці, під його локом. Без перебирання.
+
+        Повертає `(індекс провайдера, відповідь)`: `get_signatures_for_address` має знати, чия це сторінка.
+        """
         if deadline.expired():
             raise RpcBudgetTimeout()  # нуль звернень; ротацію не зсуваємо
         index = self._pick(method)
         with self._locks[index]:  # `_state_lock` тут уже відпущено
-            return call(self._providers[index].source)  # RpcError піднімається як є, поза `except`
+            return index, call(self._providers[index].source)  # RpcError піднімається як є, поза `except`
 
     def _pick(self, method: str) -> int:
         """Згладжений зважений round-robin серед провайдерів, що обслуговують метод; нічия — порядок конфігу.
@@ -295,8 +315,16 @@ class PooledRpcSource:
         return best
 
     def _serving(self, method: str) -> list[int]:
-        """Індекси провайдерів, що обслуговують метод (порядок конфігу)."""
-        return [i for i, p in enumerate(self._providers) if method not in p.skip_methods]
+        """Індекси провайдерів, що обслуговують метод (порядок конфігу).
+
+        `getSignaturesForAddress`: лише архівні, поки є бодай один придатний архівний; неархівні — запасні (R-5).
+        """
+        serving = [i for i, p in enumerate(self._providers) if method not in p.skip_methods]
+        if method == "getSignaturesForAddress":
+            archival = [i for i in serving if self._providers[i].archival]
+            if archival:
+                return archival
+        return serving
 
     def _age_snapshot(self, sigs: Sequence[str]) -> tuple[dict[str, int], int]:
         """Відомі `blockTime` підписів виклику й «зараз» пулу (`clock.wall()`) — одним знімком під `_state_lock`."""

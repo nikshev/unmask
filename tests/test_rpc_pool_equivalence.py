@@ -628,3 +628,190 @@ def test_core_rpc_calls_unchanged_by_pool(name):
     assert [sum(len(keys) for m, keys in d.log if m == "getTransaction") for d in doubles] == expected_load
     core_tx_calls = sum(1 for m, _ in spy.calls if m == "getTransaction")
     assert core_tx_calls < len(shares) <= core_tx_calls * len(WEIGHTS)  # справжнє розкладання, не більше ніж на всіх
+
+
+# =========================================================================== T-136: підписи — архівним (SC-004)
+# verifies: FR-007-04, FR-007-06, FR-007-07
+#
+# Неархівний вузол (`ScriptedProvider(horizon_block_time=H)`) відсікає від сторінок підписів записи старші за
+# горизонт — сторінка коротшає — і віддає `None` на транзакції за горизонтом. `FR-007-06/07`, `SC-004`: пул
+# віддає підписи лише архівному, поки той є, а коротку/порожню сторінку неархівного не вважає кінцем історії.
+# Без цього ядро (порожня сторінка = кінець історії) мовчки обірвало б історію mint на горизонті вузла, і найперші
+# покупці (найстаріші!) зникли б із «complete»-результату (принцип V). Неархівний дубль тут НЕ пропускає підписи
+# (`skip_methods` порожній): захищає правило пулу, а не конфіг.
+
+RETENTION_TEXT = "history beyond provider retention"
+
+
+def _hidden_setup(name):
+    """(каталог, mint, cfg, now, horizon): горизонт — медіана blockTime транзакцій, тобто приблизно половина «давніша»."""
+    directory, mint, values = CASES[name]
+    times = sorted(
+        tx["blockTime"]
+        for tx in json.loads((directory / "rpc.json").read_text(encoding="utf-8"))["getTransaction"].values()
+        if isinstance(tx, dict) and isinstance(tx.get("blockTime"), int)
+    )
+    horizon = times[len(times) // 2]
+    assert times[0] < horizon <= times[-1]  # горизонт справді посередині історії
+    return directory, mint, _cfg(values), times[-1] + 10, horizon
+
+
+def _hidden_pool(directory, now, horizon, *, age_cache_entries=1000, runner=None):
+    """Неархівний (вага 12, глибина `now - horizon`, горизонт у дубля) + архівний (вага 4,5)."""
+    non_d = ScriptedProvider(FixtureRpcSource(directory), horizon_block_time=horizon)
+    arch_d = ScriptedProvider(FixtureRpcSource(directory))
+    pool = PooledRpcSource(
+        [Provider("rpcfast", non_d, 12.0, False, float(now - horizon)), Provider("helius", arch_d, 4.5, True, None)],
+        clock=FakeClock(wall_start=now), rate_limit_cooldown_seconds=30.0, age_cache_entries=age_cache_entries,
+        runner=runner if runner is not None else SequentialRunner("reverse"),
+    )
+    return pool, non_d, arch_d
+
+
+def _methods(double, method):
+    return [keys for m, keys in double.log if m == method]
+
+
+@pytest.mark.parametrize("name", ["basic", "hub"])
+def test_nonarchival_hidden_history_equals_single(name):
+    directory, mint, cfg, now, horizon = _hidden_setup(name)
+    single = IngestService(cfg, FixtureRpcSource(directory), FakeClock(wall_start=now)).collect(mint)
+    pool, non_d, arch_d = _hidden_pool(directory, now, horizon)
+
+    pooled = IngestService(cfg, pool, FakeClock(wall_start=now)).collect(mint)
+
+    assert isinstance(single, IngestResult) and isinstance(pooled, IngestResult)
+    assert single.completeness.status is CompletenessStatus.COMPLETE and single.buyers
+    assert to_json(pooled) == to_json(single)  # побайтово: найстаріші покупці на місці, статус той самий (SC-004)
+    # маршрут: усі сторінки підписів — архівному; неархівний працює (свіжі транзакції), давні — тільки архівному
+    assert _methods(non_d, "getSignaturesForAddress") == []
+    assert _methods(arch_d, "getSignaturesForAddress")
+    assert _methods(non_d, "getTransaction") and _methods(arch_d, "getTransaction")
+    assert pool._not_found_escalations == [0, 0]  # вік відомий з архівних сторінок: нічого підтверджувати не довелось
+
+
+@pytest.mark.parametrize("name", ["basic", "hub"])
+def test_hidden_history_scenario_is_not_vacuous(name):
+    # Той самий неархівний вузол «сам по собі» дає інший результат: тест вище справді щось доводить.
+    directory, mint, cfg, now, horizon = _hidden_setup(name)
+    single = IngestService(cfg, FixtureRpcSource(directory), FakeClock(wall_start=now)).collect(mint)
+    naive = IngestService(
+        cfg, ScriptedProvider(FixtureRpcSource(directory), horizon_block_time=horizon), FakeClock(wall_start=now)
+    ).collect(mint)
+    assert to_json(naive) != to_json(single)
+
+
+@pytest.mark.parametrize("name", ["basic", "hub"])
+def test_nonarchival_hidden_history_equals_single_when_ages_are_forgotten(name):
+    # Кеш віку на 1 запис: вік переважно невідомий → неархівному віддають і давні, його None підтверджує архівний.
+    directory, mint, cfg, now, horizon = _hidden_setup(name)
+    single = IngestService(cfg, FixtureRpcSource(directory), FakeClock(wall_start=now)).collect(mint)
+    pool, non_d, arch_d = _hidden_pool(directory, now, horizon, age_cache_entries=1)
+
+    pooled = IngestService(cfg, pool, FakeClock(wall_start=now)).collect(mint)
+
+    assert to_json(pooled) == to_json(single)
+    assert _methods(non_d, "getSignaturesForAddress") == []
+    assert pool._not_found_escalations[0] > 0  # підтверджувальні раунди справді були, і їхні плани не суцільні
+
+
+@pytest.mark.parametrize("cache_entries", [1000, 1], ids=["age_known", "age_forgotten"])
+@pytest.mark.parametrize("name", ["basic", "hub"])
+def test_nonarchival_hidden_history_result_independent_of_completion_order(name, cache_entries):
+    # SC-003 на НЕсуцільних планах: прямий/зворотний/випадкові порядки й справжній ThreadRunner → той самий JSON.
+    directory, mint, cfg, now, horizon = _hidden_setup(name)
+    reference = IngestService(cfg, FixtureRpcSource(directory), FakeClock(wall_start=now)).collect(mint)
+    runners = [_OrderedRunner("forward"), _OrderedRunner("reverse")]
+    runners += [_OrderedRunner("shuffle", seed) for seed in (1, 2, 3)]
+    runners.append(ThreadRunner(2))
+    for runner in runners:
+        try:
+            pool, *_ = _hidden_pool(directory, now, horizon, age_cache_entries=cache_entries, runner=runner)
+            pooled = IngestService(cfg, pool, FakeClock(wall_start=now)).collect(mint)
+        finally:
+            if isinstance(runner, ThreadRunner):
+                runner.close()
+        assert to_json(pooled) == to_json(reference)
+        if isinstance(runner, _OrderedRunner) and runner is not runners[0]:
+            assert any(len(order) >= 2 for order in runner.orders)  # раунди з кількома частками справді були
+
+
+def _only_nonarchival_pool(directory, now, *, horizon, shape):
+    """Пул, де підписи може віддати лише неархівний: він єдиний або архівний пропускає getSignaturesForAddress."""
+    depth = float(max(1, now - horizon)) if horizon is not None else float(now)  # без горизонту — глибина «вся історія»
+    non_d = ScriptedProvider(FixtureRpcSource(directory), horizon_block_time=horizon)
+    providers = [Provider("rpcfast", non_d, 12.0, False, depth)]
+    doubles = [non_d]
+    if shape == "archival_skips_signatures":
+        arch_d = ScriptedProvider(FixtureRpcSource(directory))
+        providers.append(Provider("helius", arch_d, 4.5, True, None, frozenset({"getSignaturesForAddress"})))
+        doubles.append(arch_d)
+    pool = PooledRpcSource(
+        providers, clock=FakeClock(wall_start=now), rate_limit_cooldown_seconds=30.0, age_cache_entries=1000,
+        runner=SequentialRunner("reverse"),
+    )
+    return pool, doubles
+
+
+@pytest.mark.parametrize("page_size", [1000, 1], ids=["page_1000", "page_1"])
+@pytest.mark.parametrize("hidden", ["mid", "nothing", "everything"])
+@pytest.mark.parametrize("shape", ["only_nonarchival", "archival_skips_signatures"])
+@pytest.mark.parametrize("name", ["basic", "hub", "swapsend"])
+def test_only_nonarchival_pool_is_incomplete_not_clean(name, shape, hidden, page_size):
+    _, mint, values = CASES[name]
+    directory, _, cfg, now, horizon_mid = _hidden_setup(name)
+    cfg = dataclasses.replace(cfg, rpc=dataclasses.replace(cfg.rpc, page_size=page_size))
+    horizon = {"mid": horizon_mid, "nothing": None, "everything": now + 1}[hidden]
+    single = IngestService(cfg, FixtureRpcSource(directory), FakeClock(wall_start=now)).collect(mint)
+    pool, doubles = _only_nonarchival_pool(directory, now, horizon=horizon, shape=shape)
+
+    pooled = IngestService(cfg, pool, FakeClock(wall_start=now)).collect(mint)
+
+    assert isinstance(pooled, IngestResult)
+    assert single.completeness.status is CompletenessStatus.COMPLETE
+    # Навіть коли вузол нічого не відсікає: його порожня сторінка не доводить кінця історії → не «complete».
+    assert pooled.completeness.status is CompletenessStatus.INCOMPLETE
+    buyers = pooled.completeness.buyers
+    assert buyers.complete is False and buyers.reason.value == "unavailable"  # причина — недоступність
+    assert RETENTION_TEXT in buyers.detail  # чесна мітка пулу дійшла до результату
+    assert _methods(doubles[0], "getSignaturesForAddress")  # підписи справді питали у неархівного (запасний)
+    if shape == "archival_skips_signatures":
+        assert _methods(doubles[1], "getSignaturesForAddress") == []  # непридатний архівний не обслуговує
+    assert pool._not_found_escalations[0] >= 1
+
+
+@pytest.mark.parametrize("name", ["basic", "hub"])
+def test_two_nonarchival_depths_plus_archival_equals_single(name):
+    # Три множини придатних провайдерів за віком (свіжі: усі; середні: глибший неархівний + архівний; давні: лише
+    # архівний) → плани часток НЕ суцільні (частка глибшого неархівного — два відрізки з різних груп із чужою часткою
+    # між ними), а відповідь має скластися за ПОЗИЦІЄЮ підпису, не за порядком провайдерів (мутація T-134/T-136).
+    # На `basic` (22 транзакції) пачки замалі для чергування — там це лише рівність; розрізнює мутацію `hub`.
+    directory, mint, cfg, now, horizon_mid = _hidden_setup(name)
+    times = sorted(
+        tx["blockTime"]
+        for tx in json.loads((directory / "rpc.json").read_text(encoding="utf-8"))["getTransaction"].values()
+        if isinstance(tx, dict) and isinstance(tx.get("blockTime"), int)
+    )
+    horizon_shallow, horizon_deep = times[(len(times) * 3) // 4], times[len(times) // 4]
+    assert horizon_deep < horizon_shallow
+    single = IngestService(cfg, FixtureRpcSource(directory), FakeClock(wall_start=now)).collect(mint)
+
+    shallow = ScriptedProvider(FixtureRpcSource(directory), horizon_block_time=horizon_shallow)
+    deep = ScriptedProvider(FixtureRpcSource(directory), horizon_block_time=horizon_deep)
+    arch = ScriptedProvider(FixtureRpcSource(directory))
+    pool = PooledRpcSource(
+        [
+            Provider("shallow", shallow, 12.0, False, float(now - horizon_shallow)),
+            Provider("deep", deep, 4.5, False, float(now - horizon_deep)),
+            Provider("helius", arch, 4.5, True, None),
+        ],
+        clock=FakeClock(wall_start=now), rate_limit_cooldown_seconds=30.0, age_cache_entries=1000,
+        runner=SequentialRunner("reverse"),
+    )
+
+    pooled = IngestService(cfg, pool, FakeClock(wall_start=now)).collect(mint)
+
+    assert single.completeness.status is CompletenessStatus.COMPLETE and single.buyers
+    assert to_json(pooled) == to_json(single)
+    assert _methods(shallow, "getSignaturesForAddress") == [] and _methods(deep, "getSignaturesForAddress") == []
+    assert all(_methods(d, "getTransaction") for d in (shallow, deep, arch))  # усі троє справді обслуговували

@@ -89,7 +89,7 @@ T-131 → T-132 → T-133 → T-134 → T-135 → T-136 → T-137 → T-138 → 
   межі `retention_seconds` червоніє; файли: `pool.py`, `tests/test_rpc_pool_routing.py`
   (`# verifies: FR-007-06, FR-007-07`).
 
-- [ ] T-136 [FR-007-06, FR-007-07, FR-007-04] critical: Підписи — архівним; коротка сторінка неархівного не
+- [x] T-136 [FR-007-06, FR-007-07, FR-007-04] critical: Підписи — архівним; коротка сторінка неархівного не
   остаточна. `pool.py`: `get_signatures_for_address` — лише архівні, поки є придатний архівний; неархівний —
   запасний, коротка/порожня сторінка → `RpcUnavailable("history beyond provider retention")`; `skip_methods`
   в одиночних методах. — тест: `tests/test_rpc_pool_routing.py::test_signatures_go_to_archival_when_present`,
