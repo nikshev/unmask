@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **116** · задач: **146** (виконано 142) · вимог у роботі: **7** · порушень: **0**
+Вимог: **116** · задач: **146** (виконано 143) · вимог у роботі: **7** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -151,9 +151,9 @@
 | `FR-008-04` | Система MUST NOT запроваджувати автентифікацію чи авторизацію (чинна вимога фічі 004 про відсутність авторизац | `T-166` | `src/unmask/delivery/http.py` | `tests/test_delivery_http_protection.py` |
 | `FR-008-05` | Адреса клієнта за зворотним проксі MUST визначатися з довіреного заголовка лише коли з'єднання від налаштовано | `T-165` | `src/unmask/delivery/http.py` | `tests/test_delivery_client_ip.py` |
 | `FR-008-06` | Слот важкого аналізу MUST звільнятися за будь-якого завершення (успіх, помилка, таймаут бюджету, виняток). | `T-162`, `T-163`, `T-164` | `src/unmask/delivery/service.py`, `src/unmask/delivery/limits.py` | `tests/test_delivery_limits.py`, `tests/test_delivery_service_slots.py` |
-| `FR-008-07` | Для бота MUST діяти обмеження на користувача (кількість важких аналізів за вікно та один одночасний аналіз) і  | `T-162`, `T-168`, `T-169` | `src/unmask/delivery/limits.py` | `tests/test_delivery_limits.py` |
+| `FR-008-07` | Для бота MUST діяти обмеження на користувача (кількість важких аналізів за вікно та один одночасний аналіз) і  | `T-162`, `T-168`, `T-169` | `src/unmask/delivery/limits.py`, `src/unmask/delivery/main.py`, `src/unmask/delivery/bot.py` | `tests/test_delivery_main.py`, `tests/test_delivery_limits.py`, `tests/test_delivery_bot_limits.py` |
 | `FR-008-08` | Усі межі (запитів на вікно, довжина вікна, одночасних аналізів, значення `Retry-After`, довірені адреси проксі | `T-161`, `T-167` | `config/protection.yaml`, `src/unmask/delivery/limits.py`, `src/unmask/delivery/main.py`, `src/unmask/delivery/config.py` | `tests/test_delivery_main.py`, `tests/test_delivery_limits.py`, `tests/test_protection_config.py` |
-| `FR-008-09` | Відповіді про перевантаження MUST бути чесними: `429`/`503` ніколи не маскуються під результат аналізу («чисто | `T-164`, `T-166`, `T-169`, `T-173` | `src/unmask/delivery/service.py`, `src/unmask/delivery/http.py` | `tests/test_delivery_http_protection.py`, `tests/test_delivery_service_slots.py` |
+| `FR-008-09` | Відповіді про перевантаження MUST бути чесними: `429`/`503` ніколи не маскуються під результат аналізу («чисто | `T-164`, `T-166`, `T-169`, `T-173` | `src/unmask/delivery/service.py`, `src/unmask/delivery/http.py`, `src/unmask/delivery/bot.py` | `tests/test_delivery_http_protection.py`, `tests/test_delivery_bot_limits.py`, `tests/test_delivery_service_slots.py` |
 | `FR-008-10` | Контракт відповіді API MUST описувати нові види помилок (`rate_limited`, `busy`) і заголовок `Retry-After`; чи | `T-166` | `src/unmask/delivery/http.py` | `tests/test_delivery_http_protection.py` |
 | `FR-008-11` | Репозиторій MUST містити юніт автозапуску з перезапуском при збої й змінними середовища з файлу оператора (без | `T-170` | `deploy/smoke.sh` | `tests/test_deploy_artifacts.py` |
 | `FR-008-12` | Репозиторій MUST містити приклад конфігурації зворотного проксі з TLS, що передає адресу клієнта довіреним заг | `T-170`, `T-171` | `deploy/smoke.sh` | `tests/test_nginx_example.py` |

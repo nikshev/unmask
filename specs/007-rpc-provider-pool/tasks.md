@@ -174,7 +174,7 @@ T-131 → T-132 → T-133 → T-134 → T-135 → T-136 → T-137 → T-138 → 
   `::test_pool_config_does_not_import_hubs`; файли: `tests/test_rpc_pool_boundaries.py`
   (`# verifies: FR-007-01`).
 
-- [ ] T-143 [FR-007-14] [P] Воркер експерименту через пул. `scripts/screen_worker.py` (у git попри шапку):
+- [x] T-143 [FR-007-14] [P] Воркер експерименту через пул. `scripts/screen_worker.py` (у git попри шапку):
   винести `build_source(environ)` → `build_rpc_source(ROOT / "config" / "rpc_pool.yaml", cfg, environ,
   fallback_profile="helius_free")`; у `main()` використати його й після кожного токена
   `print(src.stats_line(), flush=True)`; шапку виправити («committed; source via rpc pool»), додати `FR-007-14`

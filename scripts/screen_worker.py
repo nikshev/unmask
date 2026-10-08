@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-# impl: FR-006-02, FR-006-05
-"""006 screening worker (NOT committed): fixture-profile live run over a mint shard.
+# impl: FR-006-02, FR-006-05, FR-007-14
+"""006 screening worker (committed; source via rpc pool): fixture-profile live run over a mint shard.
 
-Usage: UNMASK_RPC_URL=<key> uv run python screen_worker.py <mints.jsonl> <out.csv> <key_index>
+Usage: UNMASK_RPC_URL=<key> [UNMASK_RPC_URL_ALT1=<key>] ... uv run python screen_worker.py <mints.jsonl> <out.csv> <key_index>
+Джерело — пул за config/rpc_pool.yaml (FR-007-14); змінні провайдерів — див. .env.example.
+УВАГА: UNMASK_RPC_URL — це RPC Fast (неархівний, профіль rpcfast_start); ключ Helius кладіть у UNMASK_RPC_URL_ALT*.
+Лише UNMASK_RPC_URL воркер не запустить (немає провайдера для getTokenAccountsByOwner).
 Reads ONLY mint strings from the input; appends one summary row per token.
 Resume-safe: skips mints already present in out.csv. Never prints the URL.
 """
@@ -24,7 +27,7 @@ from unmask.clusters.service import ClusterService
 from unmask.graph.service import GraphService
 from unmask.hubs.config import load_hub_config
 from unmask.ingest.config import load_config
-from unmask.ingest.rpc.http import HttpRpcSource
+from unmask.ingest.rpc.pool_config import build_rpc_source
 from unmask.ingest.service import IngestService
 
 
@@ -45,10 +48,18 @@ def main() -> int:
     hub = load_hub_config(ROOT / "config" / "hubs.yaml",
                           ROOT / "config" / "hub_addresses.yaml")
     clu = load_cluster_config(ROOT / "config" / "clusters.yaml")
-    src = HttpRpcSource(os.environ["UNMASK_RPC_URL"], cfg.rpc,
-                        commitment=cfg.commitment, profile="helius_free")
-    svc = DeliveryService(IngestService(cfg, src), GraphService(hub),
-                          ClusterService(clu), DeliveryCache())
+    src = build_rpc_source(ROOT / "config" / "rpc_pool.yaml", cfg, os.environ,
+                           fallback_profile="helius_free")
+    try:
+        svc = DeliveryService(IngestService(cfg, src), GraphService(hub),
+                              ClusterService(clu), DeliveryCache())
+        _run_mints(src, svc, mints, done, out, new_file, key_index)
+    finally:
+        src.close()
+    return 0
+
+
+def _run_mints(src, svc, mints, done, out, new_file, key_index) -> None:
     with open(out, "a", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["mint", "risk_score", "band",
                                           "clusters_count", "max_share",
@@ -94,8 +105,7 @@ def main() -> int:
             print(f"[{key_index}] {i + 1}/{len(mints)} {mint[:8]} "
                   f"risk={last_risk} "
                   f"elapsed={round(time.time() - t0, 1)}s", flush=True)
-    src.close()
-    return 0
+            print(src.stats_line(), flush=True)
 
 
 if __name__ == "__main__":
