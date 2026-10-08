@@ -30,7 +30,7 @@ RpcPoolConfig (frozen)
 ```text
 Provider (frozen; repr лише name)
   name: str
-  source: RpcSource         # HttpRpcSource у роботі, дубль у тестах
+  source: Any               # RpcSource за протоколом: HttpRpcSource у роботі, дубль у тестах
   weight: float             # rate_per_second профілю; > 0, скінченне (math.inf профілю → 1e6)
   archival: bool
   retention_seconds: float | None
@@ -39,18 +39,21 @@ Provider (frozen; repr лише name)
 ProviderStats (frozen знімок)
   requests: int             # звернень до провайдера (будь-який метод; частка = 1)
   units: int                # одиниць: частка get_transactions = к-сть підписів; інші = 1
-  failures: Mapping[str, int]   # rate_limited | timeout | budget | unavailable | other
-  not_found_escalations: int    # позицій, переданих архівному після None/короткої сторінки
+  failures: Mapping[str, int]   # незмінний; завжди всі п'ять: budget | timeout | rate_limited | unavailable | other
+  not_found_escalations: int    # позицій, справді переданих архівному після None (на початку раунду),
+                                #   плюс відкинуті короткі сторінки підписів неархівного
   cooldowns: int
 
 PooledRpcSource — внутрішній стан
-  _providers: tuple[Provider, ...]          # порядок конфігу = порядок нічиїх
-  _provider_locks: tuple[Lock, ...]         # по одному на провайдера
-  _state_lock: Lock                          # кеш віку, паузи, SWRR, лічильники
+  _providers: tuple[Provider, ...]          # порядок конфігу = порядок нічиїх; індекс = ключ усього стану нижче
+  _locks: tuple[Lock, ...]                  # по одному на провайдера
+  _state_lock: Lock                          # кеш віку, паузи, SWRR, лічильники; не разом із _locks
   _age: OrderedDict[str, int]                # signature -> blockTime, FIFO ≤ age_cache_entries
-  _cooldown_until: dict[str, float]          # name -> clock.monotonic()
-  _swrr_current: list[Fraction]               # стан згладженого round-robin за індексом провайдера (точна арифметика)
-  _stats: dict[str, _MutableStats]
+  _cooldown_until: dict[int, float]          # індекс провайдера -> clock.monotonic() кінця паузи
+  _swrr_current: list[Fraction]              # стан згладженого round-robin за індексом провайдера (точна арифметика)
+  _requests, _units, _not_found_escalations, _cooldown_count: list[int]   # лічильники за індексом
+  _failures: list[dict[str, int]]            # за індексом; ключі FAILURE_CLASSES
+  _closed: bool                              # close() ідемпотентний
 ```
 
 ## Похідні правила
@@ -62,5 +65,6 @@ PooledRpcSource — внутрішній стан
   `getSignaturesForAddress` — спершу архівні, неархівні лише якщо архівних не лишилось.
 - **Пауза**: провайдер на паузі (`now < cooldown_until`) непридатний, якщо є придатні не на паузі.
 - **Остаточність**: `RawTransaction` від будь-кого — остаточна; `None` — остаточне лише від архівного;
-  сторінка підписів — остаточна від архівного або повна (`len == limit`) від неархівного.
+  сторінка підписів — остаточна від архівного або повна (`len >= limit`) від неархівного; коротку/не-список
+  від неархівного відкинуто (вік із неї не кешується).
 - **Ім'я пулу**: спільне `source.name` усіх провайдерів, інакше `"pool"`.

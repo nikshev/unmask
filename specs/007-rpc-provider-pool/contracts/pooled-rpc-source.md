@@ -1,8 +1,15 @@
 # Contract: `PooledRpcSource` — пул провайдерів за протоколом `RpcSource`
 
-Файл: `src/unmask/ingest/rpc/pool.py`. Імпортує лише stdlib, `unmask.ingest.rpc.protocol`,
-`unmask.ingest.budget` (`Clock`). НЕ імпортує `httpx`, `rpc.http`, `rpc.fixture`, `graph`, `hubs`,
-`clusters`, `delivery`, `yaml`, `os` (AST-тест T-142).
+Файл: `src/unmask/ingest/rpc/pool.py`.
+
+| Імпортує | Що саме |
+|---|---|
+| stdlib | `logging`, `math`, `threading`, `collections` (`OrderedDict`), `concurrent.futures` (`ThreadPoolExecutor`), `dataclasses`, `fractions` (`Fraction`), `types` (`MappingProxyType`), `typing` |
+| `unmask.ingest.budget` | `Clock` |
+| `unmask.ingest.rpc.protocol` | `AccountInfo`, `Deadline`, `RawTransaction`, `SignatureInfo`, `TokenAccountInfo`, `RpcError` і підкласи (`RpcBudgetTimeout`, `RpcRateLimited`, `RpcTimeout`, `RpcUnavailable`) |
+
+НЕ імпортує `httpx`, `rpc.http`, `rpc.fixture`, `graph`, `hubs`, `clusters`, `delivery`, `yaml`, `os`
+(AST-тест T-142).
 
 ## Інтерфейс
 
@@ -10,7 +17,7 @@
 @dataclass(frozen=True)
 class Provider:
     name: str
-    source: RpcSource
+    source: Any                        # RpcSource за протоколом (типізовано Any: пул не імпортує адаптер)
     weight: float                      # > 0, скінченне
     archival: bool
     retention_seconds: float | None    # None ⇔ archival
@@ -36,8 +43,8 @@ class PooledRpcSource:                   # реалізує RpcSource
     #            get_token_accounts_by_owner, name
     def stats(self) -> Mapping[str, ProviderStats]: ...   # знімок, ключі в порядку конфігу
     def stats_line(self) -> str: ...
-    def close(self) -> None: ...        # ідемпотентно: runner.close, source.close (якщо є), лог stats_line
-    def __enter__/__exit__
+    def close(self) -> None: ...        # ідемпотентно; див. «Закриття»
+    def __enter__/__exit__              # __exit__ викликає close() і не ковтає виняток блоку (повертає None)
     def __repr__(self) -> str: ...      # "PooledRpcSource(providers=('rpcfast', 'helius_1'))"
 ```
 
@@ -50,27 +57,50 @@ class PooledRpcSource:                   # реалізує RpcSource
 ## `get_transactions(signatures, *, deadline)` — раунди
 
 ```
-якщо signatures порожній -> [] (нуль звернень)
+якщо signatures порожній -> [] (нуль звернень, дедлайн не перевіряється)
 pending = усі позиції; confirm = ∅; excluded = ∅; last_error = {}
+said_none = {}            # позиція -> неархівний, що відповів None (ще не передана архівному)
+excluded_errors = {}      # провайдер -> помилка, що його виключила (порядок виключення)
 поки pending:
-  якщо deadline.expired(): raise RpcBudgetTimeout()          # нуль звернень у цьому раунді
+  rounds += 1; якщо rounds > 2n + 2: raise RuntimeError("pool: failover round limit exceeded")   # запобіжник, дефект
+  якщо deadline.expired(): raise RpcBudgetTimeout()          # свіжий об'єкт, нуль звернень у цьому раунді
   для кожної позиції i ∈ pending: E(i) = придатні провайдери (data-model «Придатність»),
       без excluded; якщо i ∈ confirm — лише архівні; фільтр паузи (якщо лишається хоч один не на паузі)
-  якщо ∃ i з E(i) = ∅: для найменшої такої i -> raise last_error[i] якщо є,
-      інакше RpcUnavailable("history beyond provider retention")          # до будь-якого звернення
+  якщо ∃ i з E(i) = ∅, для найменшої такої i (до будь-якого звернення цього раунду):
+      last_error[i] є                           -> raise last_error[i]
+      інакше (позиція сама не падала, напр. чекає підтвердження None):
+        S = придатні для i без урахування excluded і паузи
+        ∃ p ∈ S в excluded_errors              -> raise помилку НАЙПІЗНІШЕ виключеного такого p
+        інакше                                  -> raise RpcUnavailable("history beyond provider retention")
+  для кожної i ∈ pending з i ∈ said_none: escalations[said_none.pop(i)] += 1
+      # лічильник — у момент, коли позицію справді передано архівному (початок раунду), а не коли отримано None
   групи = позиції з однаковим E (у порядку першої позиції); кожну групу apportion() за вагами членів
       E у порядку конфігу; частка провайдера = зростаючі позиції з усіх груп
   задачі (порядок конфігу): lambda: with lock[p]: p.source.get_transactions([sig...], deadline=deadline)
   outcomes = runner(задачі)
+  len(outcomes) != len(задачі) -> raise RuntimeError("runner: must return one outcome per task")   # дефект runner
+  requests[p] += 1, units[p] += len(частки) для кожної частки
   обробка outcomes у порядку конфігу (головний потік, під _state_lock для лічильників/пауз):
-    не-RpcError -> запамʼятати перший такий; після циклу raise (дефект, не маскується)
-    RpcError    -> excluded += p; last_error[i] = exc для позицій частки; лічильник класу;
-                   RpcRateLimited -> пауза p до now + max(cooldown, retry_after or 0)
-    len(result) != len(частки) -> як RpcUnavailable("unexpected response shape: pool share length")
+    результат без винятку, але не list або len != len(частки)
+                -> як RpcUnavailable("unexpected response shape: pool share length")
+    не-RpcError -> запамʼятати перший такий; після циклу raise (дефект, не маскується, не перебирається)
+    RpcError (зокрема RpcBudgetTimeout частки)
+                -> excluded += p; excluded_errors[p] = exc; last_error[i] = exc для позицій частки;
+                   лічильник класу; RpcRateLimited -> пауза p до now + max(cooldown, retry_after or 0)
     інакше для кожної позиції: tx не None -> остаточно; None і p.archival -> остаточно None;
-                   None і не архівний -> confirm += i, лишається в pending, escalations += 1
+                   None і не архівний -> confirm += i, said_none[i] = p, лишається в pending
+  pending = (позиції часток, що впали) ∪ (позиції з None неархівного), зростаюче
 return results у порядку позицій
 ```
+
+`RpcBudgetTimeout` частки — стан кошика КОНКРЕТНОГО ключа (пейсер адаптера не вмістив запит у дедлайн), а не
+виклику: інший ключ може мати повний кошик. Тому він перебирається як інші `RpcError`, без паузи. Вичерпаний
+дедлайн самого виклику ловиться перевіркою `deadline.expired()` перед раундом — тоді свіжий `RpcBudgetTimeout()`
+без звернень.
+
+Запобіжник `2n + 2` (n — кількість провайдерів) недосяжний у коректному коді: кожен раунд із відмовою виключає
+≥ 1 провайдера, раунд без відмов або завершує все, або лишає лише позиції підтвердження (найгірше — n + 2
+раунди). Його `RuntimeError` — дефект, а не `RpcError`.
 
 Гарантії:
 - **Порядок**: елемент i відповідає `signatures[i]` незалежно від того, хто і коли його обслужив.
@@ -80,9 +110,13 @@ return results у порядку позицій
 - **«Все або нічого»**: виклик або повертає повний список, або піднімає виняток; часткового результату
   немає (як в адаптера).
 - **Винятки**: піднімається сам об'єкт винятку адаптера (клас і фіксований текст збережені), поза блоком
-  `except` — `__cause__`/`__context__` порожні. Пул не додає тексту ззовні; власні тексти — константи:
+  `except` — `__cause__`/`__context__` порожні. Пул не додає тексту ззовні; власні тексти `RpcError` — константи:
   `history beyond provider retention`, `unexpected response shape: pool share length`,
   `no provider available`.
+- **Внутрішні дефекти** (`RuntimeError`, не `RpcError`, не перебираються й не рахуються як відмови провайдера):
+  `pool: failover round limit exceeded` (запобіжник раундів `get_transactions`, 2n + 2),
+  `pool: failover attempt limit exceeded` (запобіжник спроб одиночного методу, n + 1),
+  `runner: must return one outcome per task` (runner повернув не стільки outcomes, скільки задач).
 - **Потоки**: кожен провайдер викликається лише під своїм локом; `_state_lock` ніколи не береться разом із
   локом провайдера. Пул безпечний для одночасних викликів з кількох потоків.
 
@@ -93,17 +127,28 @@ return results у порядку позицій
 
 ```
 excluded = ∅; last = None
-цикл:
-  якщо deadline.expired(): raise RpcBudgetTimeout()
+не більше n + 1 спроб:
+  якщо deadline.expired(): raise RpcBudgetTimeout()      # свіжий об'єкт, нуль звернень; ротацію не зсуваємо
   cands = провайдери ∉ excluded, метод ∉ skip_methods
   для getSignaturesForAddress: якщо в cands є архівні -> лише вони
   фільтр паузи; якщо cands порожні -> raise last або RpcUnavailable("no provider available")
   p = SWRR(cands)           # згладжений зважений round-robin, нічия — порядок конфігу
-  виклик; RpcError -> excluded += p, last = exc, лічильник, пауза при 429; далі цикл (raise поза except)
-  getSignaturesForAddress: blockTime кожного запису (справжній int) -> кеш віку;
-      p не архівний і len(page) < limit -> escalations += 1; raise RpcUnavailable("history beyond provider retention")
-  повернути результат
+  requests[p] += 1; units[p] += 1                        # до виклику: невдале звернення теж рахується
+  виклик під lock[p]; RpcError (зокрема RpcBudgetTimeout ключа) -> excluded += p, last = exc, лічильник класу,
+      пауза лише при RpcRateLimited; далі цикл (raise поза except); не-RpcError — летить одразу (дефект)
+  повернути (p, результат)
+вичерпано n + 1 спроб -> raise RuntimeError("pool: failover attempt limit exceeded")   # недосяжно, дефект
+
+get_signatures_for_address після успішного _single:
+  p не архівний і (page не list/tuple або len(page) < limit):
+      # коротку/порожню сторінку неархівного ВІДКИНУТО: вік із неї НЕ кешується
+      escalations[p] += 1; raise RpcUnavailable("history beyond provider retention")
+  blockTime кожного запису (str підпис, справжній int) -> кеш віку    # лише ПІСЛЯ перевірки короткої сторінки
+  повернути page            # сторінка архівного — остаточна, яка б не була (розбір записів — справа ядра)
 ```
+
+«Повна» сторінка неархівного — `len(page) >= limit`. Відмова `RpcUnavailable` від запасного неархівного не
+перебирається далі всередині цього виклику (`_single` уже повернув успіх) — це чесна неповнота для ядра.
 
 ## Лічильники (FR-007-13)
 
@@ -112,6 +157,14 @@ excluded = ∅; last = None
 `other` (інший `RpcError`). `stats_line()`:
 `rpc_pool rpcfast requests=3 units=40 failures=0 escalations=1 cooldowns=0; helius_1 requests=…`
 — лише імена з конфігу й цілі числа. `close()` пише цей рядок у логер `unmask.ingest.rpc.pool` (INFO).
+
+## Закриття
+
+`close()` ідемпотентний (повторний виклик — нічого). Закриває `runner.close()` (якщо є) і `source.close()`
+кожного провайдера (якщо є); одне джерело під кількома іменами (той самий об'єкт) закривається один раз.
+Виняток (`Exception`) одного закриття не перериває решту: усі закриваються, потім рядок `stats_line()` пишеться
+в лог, і лише після цього піднімається ПЕРШИЙ виняток — той самий об'єкт, поза `except`. `__exit__` викликає
+`close()` і не ковтає виняток блоку `with`.
 
 ## Тестові дублі (`tests/rpc_pool_doubles.py`, `# impl: FR-007-15`)
 

@@ -46,8 +46,18 @@ providers:
 | `providers[i].retention_seconds` | `null` ⇔ `archival: true`; інакше int ≥ 1 |
 | `providers[i].skip_methods` | список без дублів ⊆ {`getAccountInfo`, `getSignaturesForAddress`, `getTransaction`, `getTokenAccountsByOwner`} |
 
-Плюс: кожен із чотирьох методів обслуговує ≥ 1 провайдер файла. Тексти помилок — шлях поля і правило,
-ніколи значення.
+Плюс: кожен із чотирьох методів обслуговує ≥ 1 провайдер файла, інакше
+`ConfigError("providers: no provider serves <method>")`. Тексти помилок — шлях поля і правило, ніколи значення.
+
+Обмеження розбору (усе — `ConfigError`, піднята поза `except`, без уривка файла):
+
+- файл ≤ 64 КіБ (`<path>: config is larger than 65536 bytes`); не UTF-8 → `<path>: config is not valid UTF-8`;
+  збій читання → `<path>: cannot read config (<клас OSError>)`;
+- якорі й аліаси відхиляються (`<path>: anchors and aliases are not allowed`); дубль ключа мапи, як і будь-яка
+  інша помилка розбору, → `<path>: invalid YAML (<клас винятку>)`;
+- невідомий ключ показується іменем лише якщо воно ідентифікатор `[A-Za-z_][A-Za-z0-9_]{0,63}`; інакше —
+  лише тип: `<str key>` (для не-рядкового ключа — `<int key>` тощо). Тож помилково вставлений
+  `https://…?api-key=…` як ключ у текст не потрапляє.
 
 ```python
 def load_rpc_pool_config(path: Path) -> RpcPoolConfig: ...   # журнал не читає
@@ -77,12 +87,18 @@ def build_rpc_source(config_path: Path, ingest_cfg: IngestConfig, environ: Mappi
    `logger.warning("rpc pool: provider %s skipped: %s not set", name, url_env)` (лише імена); інакше
    `HttpRpcSource.from_env(ingest_cfg.rpc, commitment=ingest_cfg.commitment, environ=environ,
    url_var=url_env, profile=profile, clock=clock, sleep=sleep, transport=transport_factory(name) або None)`
-   — невалідний URL → `ConfigError` з ім'ям змінної (гучно).
+   — невалідний URL → `ConfigError` з ім'ям змінної (гучно); транспорт від `transport_factory`, якщо
+   `from_env` його не прийняв, закривається.
 3. Не лишилось жодного → `ConfigError("rpc_pool.yaml: no RPC provider available (set one of: UNMASK_RPC_URL,
    UNMASK_RPC_URL_ALT, …)")`; лишились, але якийсь метод ніхто не обслуговує →
    `ConfigError("rpc_pool.yaml: no available provider serves <method>")`.
 4. `weight = RPC_PROFILES[profile]["rate_per_second"]`; `PooledRpcSource(..., clock=clock or SystemClock())`.
-5. `logger.info("rpc pool v%d: %s", version, "rpcfast(rpcfast_start, non-archival), helius_1(…)")`.
+5. Лише коли файл є: `logger.info("rpc pool v%d: %s", version, "rpcfast(rpcfast_start, non-archival),
+   helius_1(…)")` (перелічено лише збудованих). Режим без файла (крок 1) цього рядка не пише.
+
+Будь-який збій кроків 2–4 (зокрема `ConfigError` кроку 3 чи `ValueError` конструктора пулу) закриває вже
+збудовані `HttpRpcSource` (а з ними їхні клієнти й транспорти) і піднімає виняток далі; відкритих клієнтів
+не лишається.
 
 Логер: `unmask.ingest.rpc.pool_config`. URL і ключі не потрапляють у винятки, логи, `repr`.
 

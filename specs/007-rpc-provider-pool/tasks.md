@@ -178,7 +178,7 @@ T-131 → T-132 → T-133 → T-134 → T-135 → T-136 → T-137 → T-138 → 
   винести `build_source(environ)` → `build_rpc_source(ROOT / "config" / "rpc_pool.yaml", cfg, environ,
   fallback_profile="helius_free")`; у `main()` використати його й після кожного токена
   `print(src.stats_line(), flush=True)`; шапку виправити («committed; source via rpc pool»), додати `FR-007-14`
-  до `# impl:`. `.env.example`: + `UNMASK_RPC_URL_ALT=`, `_2=`, `_3=` з коментарем (без значень). — тест:
+  до `# impl:`. `.env.example`: + `UNMASK_RPC_URL_ALT=`, `UNMASK_RPC_URL_ALT1=`, `UNMASK_RPC_URL_ALT2=` з коментарем (без значень). — тест:
   `tests/test_screen_worker_source.py::test_worker_builds_pool_from_config` (імпорт через
   `importlib.util.spec_from_file_location`, env з двома змінними → `PooledRpcSource`, 2 провайдери);
   файли: `scripts/screen_worker.py`, `.env.example`, `tests/test_screen_worker_source.py` (`# verifies: FR-007-14`).
