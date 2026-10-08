@@ -58,6 +58,7 @@ REQUIRED_TERMS = [
     "Restart=always",
     "proxy_read_timeout 660s",
     "code 2",
+    "--host 127.0.0.1",
 ]
 
 # Файли, на які розділ має посилатися і які мають існувати в репозиторії.
@@ -196,6 +197,11 @@ def test_readme_matches_deploy_artifacts():
     assert m, "у прикладі nginx немає proxy_read_timeout"
     assert f"proxy_read_timeout {m.group(1)}s" in deploy, "README має інший proxy_read_timeout"
 
+    m = re.search(r"^ExecStart=.*?--host (\S+)", unit, re.MULTILINE)
+    assert m, "у ExecStart юніта немає --host"
+    assert m.group(1) == "127.0.0.1", "юніт має слухати лише loopback (nginx на тій самій машині)"
+    assert f"--host {m.group(1)} --port {port}" in deploy, "ручний запуск у README має збігатися з юнітом"
+
     assert "--local" in smoke, "smoke.sh не має режиму --local"
     assert "smoke.sh --local" in deploy
 
@@ -215,3 +221,18 @@ def test_readme_rpc_pool_matches_config():
         assert method in deploy, f"README не пояснює, що rpcfast не обслуговує {method}"
     assert "code 2" in deploy
     assert "код 2" in RPC_QUICKSTART.read_text(encoding="utf-8"), "джерело для коду 2 змінилось"
+
+
+def test_readme_does_not_claim_host_flag_is_missing():
+    """T-167: `--host` існує. README не радить фаєрвол як єдиний захист 18080 і не каже «поки немає»."""
+    deploy = _deploy_section(_read_readme())
+    lowered = deploy.lower()
+    for stale in ("until a `--host`", "flag is added", "listens on all interfaces at port"):
+        assert stale not in lowered, f"застаріле застереження в README: {stale!r}"
+    known = deploy[deploy.index("### Known limitations"):]
+    assert "--host 127.0.0.1" in known, "Known limitations має пояснити прив'язку до loopback"
+    assert "0.0.0.0" in known, "Known limitations має згадати умовчання --host (усі інтерфейси)"
+    # кожен приклад запуску serve_unmask.py в розділі Deploy на порту 18080 несе --host 127.0.0.1
+    for line in deploy.splitlines():
+        if "scripts/serve_unmask.py" in line and "--port 18080" in line:
+            assert "--host 127.0.0.1" in line, f"ручний запуск без --host: {line!r}"

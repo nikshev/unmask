@@ -157,6 +157,18 @@ def test_comments_explain_trusted_proxy_and_loopback_bind() -> None:
     assert "config/protection.yaml" in comments, "коментар має посилатися на довірені адреси"
     assert "127.0.0.1" in comments and "::1" in comments, "коментар має назвати довірені адреси проксі"
     lowered = comments.lower()
-    assert "18080" in comments and ("фаєрвол" in lowered or "ufw" in lowered), (
-        "коментар має пояснити, як закрити порт 18080 до появи --host"
+    assert "18080" in comments and "--host 127.0.0.1" in comments, (
+        "коментар має пояснити, що юніт слухає 18080 лише на loopback через --host 127.0.0.1"
     )
+    assert "фаєрвол" in lowered or "ufw" in lowered, (
+        "коментар має пояснити, як закрити порт 18080 при запуску вручну без --host"
+    )
+    for stale in ("Поки прапорця", "Після появи", "задача T-167"):
+        assert stale not in comments, f"застарілий коментар про відсутній --host: {stale}"
+
+
+def test_comment_host_matches_unit_execstart() -> None:
+    unit = (Path(__file__).resolve().parents[1] / "deploy" / "unmask.service").read_text(encoding="utf-8")
+    exec_line = next(line for line in unit.splitlines() if line.startswith("ExecStart="))
+    assert "--host 127.0.0.1" in exec_line
+    assert "--host 127.0.0.1" in _read(), "коментар прикладу має називати той самий --host, що й юніт"

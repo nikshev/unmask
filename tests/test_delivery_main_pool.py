@@ -18,8 +18,9 @@ from unmask.delivery.main import main
 from unmask.ingest.rpc.pool import PooledRpcSource
 
 CONFIG = Path(__file__).resolve().parents[1] / "config"
-# Файли, які `main` читає разом із rpc_pool.yaml (delivery, ingest, hubs + hub_addresses, clusters).
-COPIED = ("delivery.yaml", "ingest.yaml", "hubs.yaml", "hub_addresses.yaml", "clusters.yaml")
+# Файли, які `main` читає разом із rpc_pool.yaml (delivery, ingest, hubs + hub_addresses, clusters, protection — 008 T-167).
+COPIED = ("delivery.yaml", "ingest.yaml", "hubs.yaml", "hub_addresses.yaml", "clusters.yaml",
+          "protection.yaml")
 
 VAR_A = "UNMASK_RPC_URL_A"
 VAR_B = "UNMASK_RPC_URL_B"
@@ -69,7 +70,7 @@ def seen(monkeypatch: pytest.MonkeyPatch, no_network) -> dict:
 
     monkeypatch.setattr(main_mod, "IngestService", RecIngest)
     monkeypatch.setattr(main_mod, "DeliveryService", RecDelivery)
-    monkeypatch.setattr(main_mod, "serve", lambda service, port: record.setdefault("served", True))
+    monkeypatch.setattr(main_mod, "serve", lambda service, port, **kwargs: record.setdefault("served", True))
     return record
 
 

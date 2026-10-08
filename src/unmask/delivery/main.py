@@ -1,9 +1,14 @@
-# impl: FR-004-10, FR-007-14
+# impl: FR-004-10, FR-007-14, FR-008-08
 """Точка входу доставки: env → YAML → сервіси → HTTP-потік + polling-бот.
 
 Секрети — лише з оточення (`UNMASK_BOT_TOKEN` і змінні RPC-провайдерів з `config/rpc_pool.yaml`,
 а без нього `UNMASK_RPC_URL`); відсутня змінна —
 fail-fast із назвою змінної ДО відкриття портів. У репозиторії секретів немає.
+
+Межі навантаження (FR-008-08) — лише з `config/protection.yaml`; помилка конфігу — fail-fast (код 2, назва
+поля) ДО порту й потоку бота. `Protection` будується РІВНО ОДИН раз і діляться ним сервіс (слоти) і HTTP (вікно
+запитів, довірені проксі): бот береться за тим самим сервісом, тож глобальна межа важких аналізів спільна.
+Прапорець `--host` — адреса прив'язки (умовчання `0.0.0.0`; за nginx на тій самій машині — `127.0.0.1`).
 """
 
 from __future__ import annotations
@@ -19,8 +24,9 @@ from unmask.clusters.config import load_cluster_config
 from unmask.clusters.service import ClusterService
 from unmask.delivery.bot import HttpxBotTransport, run_polling
 from unmask.delivery.cache import DeliveryCache
-from unmask.delivery.config import load_delivery_config
+from unmask.delivery.config import load_delivery_config, load_protection_config
 from unmask.delivery.http import serve
+from unmask.delivery.limits import build_protection
 from unmask.delivery.render import render_png
 from unmask.delivery.service import DeliveryService
 from unmask.graph.service import GraphService
@@ -40,6 +46,8 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
     """Запустити доставку. Повертає код виходу; блокється в `serve_forever` до Ctrl-C."""
     parser = argparse.ArgumentParser(description="Unmask: API і Telegram-бот кластерів токена")
     parser.add_argument("--port", type=int, default=None)
+    parser.add_argument("--host", default="0.0.0.0",
+                        help="interface to bind (default: all; behind nginx on the same host use 127.0.0.1)")
     parser.add_argument("--no-bot", action="store_true")
     parser.add_argument("--config-dir", default=None)
     args = parser.parse_args(argv)
@@ -52,6 +60,7 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
         ingest_cfg = load_config(config_dir / "ingest.yaml")
         hub_cfg = load_hub_config(config_dir / "hubs.yaml", config_dir / "hub_addresses.yaml")
         cluster_cfg = load_cluster_config(config_dir / "clusters.yaml")
+        protection_cfg = load_protection_config(config_dir / "protection.yaml")
     except (HubConfigError, IngestConfigError) as exc:
         print(f"serve: bad config: {exc}", file=sys.stderr)
         return 2
@@ -65,11 +74,13 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
         print(f"serve: {exc}", file=sys.stderr)
         return 2
 
+    protection = build_protection(protection_cfg)  # один на процес: сервіс і HTTP ділять його
     service = DeliveryService(
         IngestService(ingest_cfg, source),
         GraphService(hub_cfg),
         ClusterService(cluster_cfg),
         DeliveryCache(),
+        slots=protection.slots,
     )
     render = lambda doc: render_png(doc, delivery_cfg)  # noqa: E731 — wiring, не логіка
 
@@ -80,7 +91,7 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
             kwargs={"render": render, "evidence_limit": delivery_cfg.evidence_preview_limit},
             daemon=True)
         thread.start()
-    serve(service, args.port or delivery_cfg.http_port)
+    serve(service, args.port or delivery_cfg.http_port, host=args.host, protection=protection)
     return 0
 
 

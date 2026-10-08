@@ -76,7 +76,7 @@ treats an unquoted `&` as a background operator. Prefer a URL without `&`.
 ```bash
 cd /opt/unmask
 set -a; . ./.env; set +a
-uv run python scripts/serve_unmask.py --port 18080
+uv run python scripts/serve_unmask.py --host 127.0.0.1 --port 18080
 ```
 
 In a second shell: `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18080/healthz`
@@ -190,9 +190,11 @@ the Start tier, so the service exits with code 2. Set at least one `UNMASK_RPC_U
 - Limit state (request windows and busy slots) is kept in the memory of the service
   process. A restart (`systemctl restart`, a crash, or a reboot) resets all counters, so
   a client can start a fresh window right after a restart.
-- Until a `--host` flag is added to the service, it listens on all interfaces at port
-  18080. Block that port from outside, for example `sudo ufw deny 18080`. Once the flag
-  binds the service to `127.0.0.1`, nginx is the only entry point.
+- The unit starts the service with `--host 127.0.0.1`, so port 18080 listens on the
+  loopback interface only and nginx on the same machine is the only entry point. Without
+  `--host` the service listens on all interfaces (`0.0.0.0`, the default): when you run it
+  by hand, pass `--host 127.0.0.1` or block the port from outside, for example
+  `sudo ufw deny 18080`.
 
 Demo instance: `<DEMO_URL>` (added by the operator)
 

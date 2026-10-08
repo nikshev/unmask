@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **116** · задач: **146** (виконано 141) · вимог у роботі: **8** · порушень: **0**
+Вимог: **116** · задач: **146** (виконано 142) · вимог у роботі: **7** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -138,7 +138,7 @@
 | `FR-007-11` | Недоступну (не задану в середовищі) змінну провайдера MUST бути пропущено з попередженням без значень; якщо пр | `T-138` | `src/unmask/ingest/rpc/pool_config.py` | `tests/test_rpc_pool_config.py` |
 | `FR-007-12` | URL і ключі провайдерів MUST NOT потрапляти в повідомлення про помилки, логи, `repr`, результати й кеші (діє ч | `T-138`, `T-140`, `T-141` | `src/unmask/ingest/rpc/pool.py`, `src/unmask/ingest/rpc/pool_config.py` | `tests/test_rpc_pool_stats.py`, `tests/test_rpc_pool_config.py`, `tests/test_rpc_pool_failover.py` |
 | `FR-007-13` | Пул MUST надавати оператору лічильники запитів за провайдерами (без URL і ключів), щоб було видно, що кожен пр | `T-141`, `T-145` | `src/unmask/ingest/rpc/pool.py` | `tests/test_rpc_pool_stats.py` |
-| `FR-007-14` | Сервіс доставки й воркер експерименту MUST створювати джерело через пул за конфігом; чинні тести доставки лиша | `T-139`, `T-143`, `T-145` | `src/unmask/delivery/main.py` | `tests/test_delivery_main_pool.py` |
+| `FR-007-14` | Сервіс доставки й воркер експерименту MUST створювати джерело через пул за конфігом; чинні тести доставки лиша | `T-139`, `T-143`, `T-145` | `scripts/screen_worker.py`, `src/unmask/delivery/main.py` | `tests/test_screen_worker_source.py`, `tests/test_delivery_main_pool.py` |
 | `FR-007-15` | Тести MUST працювати без мережі на фікстурних провайдерах із керованими затримками й відмовами (принцип II). | `T-131`, `T-144` | `tests/rpc_pool_doubles.py` | `tests/test_rpc_pool_perf.py`, `tests/test_rpc_pool_doubles.py` |
 
 ## 008-api-protection-ops
@@ -244,6 +244,6 @@
 - `T-164` (008-api-protection-ops) — виконано
 - `T-165` (008-api-protection-ops) — виконано
 - `T-166` (008-api-protection-ops) — виконано
-- `T-167` (008-api-protection-ops) — у роботі
+- `T-167` (008-api-protection-ops) — виконано
 - `T-168` (008-api-protection-ops) — виконано
 - `T-169` (008-api-protection-ops) — у роботі

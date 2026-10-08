@@ -79,6 +79,26 @@ def test_unit_execstart_uses_venv_python_not_uv_run():
     assert "uv" not in cmd.split(), cmd
 
 
+def test_unit_execstart_binds_localhost_via_venv():
+    """T-167: прапорець `--host` існує, тож юніт слухає лише loopback (nginx на тій самій машині)."""
+    (cmd,) = _unit_values(_read(UNIT), "ExecStart")
+    tokens = cmd.split()
+    assert tokens[0] == "/opt/unmask/.venv/bin/python", tokens
+    assert tokens[1] == "scripts/serve_unmask.py", tokens
+    assert tokens.count("--host") == 1, tokens
+    assert tokens[tokens.index("--host") + 1] == "127.0.0.1", tokens
+    assert tokens.count("--port") == 1 and tokens[tokens.index("--port") + 1] == "18080", tokens
+    assert "0.0.0.0" not in tokens and "::" not in tokens, tokens
+
+
+def test_unit_comments_do_not_claim_host_flag_is_missing():
+    text = _read(UNIT)
+    comments = "\n".join(line for line in text.splitlines() if line.lstrip().startswith("#"))
+    for stale in ("Доки його немає", "Залежність від іншої задачі", "після того, як прапорець з'явиться"):
+        assert stale not in comments, stale
+    assert "--host 127.0.0.1" in comments
+
+
 def test_unit_working_dir_and_hardening():
     text = _read(UNIT)
     assert _unit_values(text, "WorkingDirectory") == ["/opt/unmask"]
