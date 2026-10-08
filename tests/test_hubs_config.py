@@ -262,8 +262,8 @@ def test_shipped_changelog_has_hubs_sections_with_matching_sha256_and_keeps_inge
     # непорожнім рядком був `sha256:`; будь-який розділ після ingest зламав би цей тест.
     assert sorted(headings) == sorted(["# config/ingest.yaml", "# config/hubs.yaml", "# config/hub_addresses.yaml",
                                          "# config/clusters.yaml", "# config/delivery.yaml",
-                                         "# config/rpc_pool.yaml"])
-    assert len(headings) == 6
+                                         "# config/rpc_pool.yaml", "# config/protection.yaml"])
+    assert len(headings) == 7
 
     def section(name: str) -> str:
         start = lines.index(f"# config/{name}")

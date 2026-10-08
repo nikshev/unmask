@@ -62,6 +62,14 @@ cooldown=5 с, age_cache_entries=200000. rpcfast (UNMASK_RPC_URL, rpcfast_start,
 Чому: набір провайдерів і горизонт історії визначають, що побачить аналіз (принцип III). Горизонт — один вимір.
 sha256: 3f8c9d6b546f96ed2bbc4332c15fef598037f3e36eabf62e47e6305c7bc6202f
 
+# config/protection.yaml
+
+## 1 — 2026-10-08
+Початкова версія (фіча 008, T-161; research R-5, R-7): межі захисту публічного API — api.requests_per_window=30 за
+api.window_seconds=60; heavy.max_concurrent=3, heavy.busy_retry_after_seconds=60; proxy.trusted=[127.0.0.1, ::1];
+bot.checks_per_window=5 за bot.window_seconds=600. Значення не змінюють кластери, оцінку чи смугу (FR-008-08).
+sha256: 13212e00027fb65d16abdf5ab8fe67e57d5042104176c68a7c90b2bb6d12ece2
+
 # config/ingest.yaml
 
 ## 1 — 2026-10-03

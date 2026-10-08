@@ -1,4 +1,4 @@
-# impl: FR-004-11
+# impl: FR-004-11, FR-008-08
 """Завантаження й валідація `config/delivery.yaml` (принцип III; specs/004-api-bot-delivery/data-model.md).
 
 Лише показові й операційні сталі — жодна не змінює кластери, впевненість, `risk_score`
@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +18,7 @@ import yaml
 
 from unmask.hubs.config import ConfigError, content_digest
 
-__all__ = ["DeliveryConfig", "load_delivery_config"]
+__all__ = ["DeliveryConfig", "ProtectionConfig", "load_delivery_config", "load_protection_config"]
 
 _COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -97,5 +98,83 @@ def load_delivery_config(path: Path) -> DeliveryConfig:
         cluster_palette=tuple(palette),
         address_prefix_len=data["address_prefix_len"],
         evidence_preview_limit=data["evidence_preview_limit"],
+        digest=digest,
+    )
+
+
+@dataclass(frozen=True)
+class ProtectionConfig:
+    """Межі захисту публічного API (`config/protection.yaml`, FR-008-08). Жодна не змінює висновок аналізу."""
+
+    version: int
+    api_requests_per_window: int
+    api_window_seconds: int
+    max_concurrent_analyses: int
+    busy_retry_after_seconds: int
+    trusted_proxies: tuple[str, ...]
+    bot_checks_per_window: int
+    bot_window_seconds: int
+    digest: str  # sha256 канонічного вмісту файла
+
+
+def _positive_int(value: Any, where: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"{where}: expected int")
+    if value < 1:
+        raise ConfigError(f"{where}: must satisfy >= 1")
+    return value
+
+
+def _is_network(text: str) -> bool:
+    try:
+        ipaddress.ip_network(text, strict=False)
+    except ValueError:
+        return False
+    return True
+
+
+def _trusted(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise ConfigError("proxy.trusted: expected a list")
+    items: list[str] = []
+    for i, item in enumerate(value):
+        if not isinstance(item, str):
+            raise ConfigError(f"proxy.trusted[{i}]: expected an IP address or network string")
+        items.append(item)
+    for i, item in enumerate(items):
+        # перевірка поза except: виняток ipaddress містить текст адреси, його не можна чіпляти до помилки
+        if not _is_network(item):
+            raise ConfigError(f"proxy.trusted[{i}]: not an IP address or network")
+    return tuple(items)
+
+
+def load_protection_config(path: Path) -> ProtectionConfig:
+    """Прочитати `config/protection.yaml`; некоректне → `ConfigError` з шляхом поля."""
+    path = Path(path)
+    try:
+        digest = content_digest(path)
+    except OSError as exc:
+        raise ConfigError(f"{path}: cannot read: {exc}") from exc
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ConfigError(f"{path}: cannot read: {exc}") from exc
+    except Exception:
+        raise ConfigError(f"{path}: invalid YAML") from None
+    data = _check_keys(raw, ("version", "api", "heavy", "proxy", "bot"), "")
+    api = _check_keys(data["api"], ("requests_per_window", "window_seconds"), "api")
+    heavy = _check_keys(data["heavy"], ("max_concurrent", "busy_retry_after_seconds"), "heavy")
+    proxy = _check_keys(data["proxy"], ("trusted",), "proxy")
+    bot = _check_keys(data["bot"], ("checks_per_window", "window_seconds"), "bot")
+    return ProtectionConfig(
+        version=_positive_int(data["version"], "version"),
+        api_requests_per_window=_positive_int(api["requests_per_window"], "api.requests_per_window"),
+        api_window_seconds=_positive_int(api["window_seconds"], "api.window_seconds"),
+        max_concurrent_analyses=_positive_int(heavy["max_concurrent"], "heavy.max_concurrent"),
+        busy_retry_after_seconds=_positive_int(heavy["busy_retry_after_seconds"],
+                                               "heavy.busy_retry_after_seconds"),
+        trusted_proxies=_trusted(proxy["trusted"]),
+        bot_checks_per_window=_positive_int(bot["checks_per_window"], "bot.checks_per_window"),
+        bot_window_seconds=_positive_int(bot["window_seconds"], "bot.window_seconds"),
         digest=digest,
     )
