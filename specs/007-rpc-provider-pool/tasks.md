@@ -167,7 +167,7 @@ T-131 → T-132 → T-133 → T-134 → T-135 → T-136 → T-137 → T-138 → 
   `::test_close_logs_stats_line_once_without_urls`; файли: `pool.py`, `tests/test_rpc_pool_stats.py`
   (`# verifies: FR-007-13, FR-007-12`).
 
-- [ ] T-142 [FR-007-01] [P] AST-тест меж `pool.py`: імпорти лише stdlib, `unmask.ingest.rpc.protocol`,
+- [x] T-142 [FR-007-01] [P] AST-тест меж `pool.py`: імпорти лише stdlib, `unmask.ingest.rpc.protocol`,
   `unmask.ingest.budget`; заборонені `httpx`, `yaml`, `os`, `unmask.ingest.rpc.http`, `unmask.ingest.rpc.fixture`,
   `unmask.graph*`, `unmask.hubs*`, `unmask.clusters*`, `unmask.delivery*`; `pool_config.py` не імпортує
   `unmask.hubs*`. — тест: `tests/test_rpc_pool_boundaries.py::test_pool_imports_only_protocol_and_budget`,
@@ -183,9 +183,10 @@ T-131 → T-132 → T-133 → T-134 → T-135 → T-136 → T-137 → T-138 → 
   `importlib.util.spec_from_file_location`, env з двома змінними → `PooledRpcSource`, 2 провайдери);
   файли: `scripts/screen_worker.py`, `.env.example`, `tests/test_screen_worker_source.py` (`# verifies: FR-007-14`).
 
-- [ ] T-144 [FR-007-15, FR-007-02] [P] Perf-тест реального паралелізму (`@pytest.mark.perf`, поза
-  типовим прогоном). Три `ScriptedProvider` з `time.sleep(0.02)` на виклик `get_transactions` + `ThreadRunner`
-  vs одиночний; `collect` на `hub` — стінний час пулу ≤ 0,5 × одиночного. — тест:
+- [x] T-144 [FR-007-15, FR-007-02] [P] Perf-тест реального паралелізму (`@pytest.mark.perf`, поза
+  типовим прогоном). Три рівні `ScriptedProvider` з моделлю rate-limit (затримка `getTransaction` пропорційна числу підписів
+  у пакеті, а не фіксована на виклик — фіксована латентність не дає виграшу при послідовних пакетах hub) + `ThreadRunner`
+  vs одиночний; нерівні ваги порогом не покриті; `collect` на `hub` — стінний час пулу ≤ 0,5 × одиночного. — тест:
   `tests/test_rpc_pool_perf.py::test_pool_wall_time_at_most_half_of_single` (маркер `perf`); файли:
   `tests/test_rpc_pool_perf.py` (`# verifies: FR-007-02, FR-007-15`).
 
