@@ -74,7 +74,7 @@ tests/
 
 | Модуль | Що робить | Інтерфейс | Залежить від |
 |---|---|---|---|
-| `delivery.limits` | примітиви обмеження, потокобезпечні, без I/O | `SlidingWindowLimiter.hit(key)`, `HeavySlots.try_acquire()`, `UserGate.try_enter/leave`, `build_protection(cfg, clock)` | stdlib; тип `ProtectionConfig` |
+| `delivery.limits` | примітиви обмеження, потокобезпечні, без I/O | `SlidingWindowLimiter.hit(key)`, `HeavySlots.try_acquire()`, `UserGate.try_enter/leave/refund`, `build_protection(cfg, clock)` | stdlib; тип `ProtectionConfig` |
 | `delivery.config` | + завантаження `protection.yaml` | `load_protection_config(path)` | `yaml`, `hubs.config` |
 | `delivery.service` | + слот для власника холодного аналізу | `DeliveryService(..., slots=None)`, `needs_analysis(mint)` | `cache`, `limits.HeavySlots`, `ingest.addresses.is_valid_address` |
 | `delivery.http` | + адреса клієнта, ліміт запитів, 429/503, `Retry-After` | `client_address(...)`, `handle_get(...)`, `serve(..., host, protection)` | `limits`, `service` |
