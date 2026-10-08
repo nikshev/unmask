@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # trace: ignore-file
-"""Точка входу доставки 004 (FR-004-10): `uv run python scripts/serve_unmask.py [--port N] [--no-bot]`."""
+"""Точка входу доставки 004 (FR-004-10): `uv run python scripts/serve_unmask.py [--port N] [--host ADDR] [--no-bot] [--config-dir DIR]`."""
 
 import sys
 
