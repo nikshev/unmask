@@ -1,0 +1,322 @@
+{
+ "updates": [
+  {
+   "update_id": 1,
+   "message": {
+    "message_id": 1,
+    "chat": {
+     "id": 7
+    },
+    "text": "/start"
+   }
+  },
+  {
+   "update_id": 2,
+   "message": {
+    "message_id": 2,
+    "chat": {
+     "id": 7
+    },
+    "text": "/check 3JZKYE9RyjVzGjW6ACfAQHqsxFyFQfu2gJZUyZwspump"
+   }
+  },
+  {
+   "update_id": 3,
+   "message": {
+    "message_id": 3,
+    "chat": {
+     "id": 7
+    },
+    "text": "/check 3JZKYE9RyjVzGjW6ACfAQHqsxFyFQfu2gJZUyZwspump"
+   }
+  },
+  {
+   "update_id": 4,
+   "message": {
+    "message_id": 4,
+    "chat": {
+     "id": 7
+    },
+    "text": "/check !!!"
+   }
+  },
+  {
+   "update_id": 5,
+   "message": {
+    "message_id": 5,
+    "chat": {
+     "id": 7
+    },
+    "text": "/check"
+   }
+  },
+  {
+   "update_id": 6,
+   "message": {
+    "message_id": 6,
+    "chat": {
+     "id": 7
+    },
+    "text": "привіт"
+   }
+  },
+  {
+   "update_id": 7,
+   "message": {
+    "message_id": 7,
+    "chat": {
+     "id": 7
+    },
+    "text": "/help"
+   }
+  },
+  {
+   "update_id": 8,
+   "callback_query": {
+    "id": "q1",
+    "data": "evidence:3JZKYE9R:0",
+    "message": {
+     "chat": {
+      "id": 7
+     }
+    }
+   }
+  },
+  {
+   "update_id": 9,
+   "callback_query": {
+    "id": "q2",
+    "data": "evidence:dead:0",
+    "message": {
+     "chat": {
+      "id": 7
+     }
+    }
+   }
+  },
+  {
+   "update_id": 10,
+   "message": {
+    "message_id": 10,
+    "chat": {
+     "id": 8
+    },
+    "text": "/check DwxtQ9nMu2as4GL3axZ11m8YjK6vQ3t5NrkgPjzbpump",
+    "from": {
+     "id": 99
+    }
+   }
+  }
+ ],
+ "registry": {
+  "3JZKYE9R:0": "3JZKYE9RyjVzGjW6ACfAQHqsxFyFQfu2gJZUyZwspump",
+  "3JZKYE9R:1": "3JZKYE9RyjVzGjW6ACfAQHqsxFyFQfu2gJZUyZwspump",
+  "DwxtQ9nM:2": "DwxtQ9nMu2as4GL3axZ11m8YjK6vQ3t5NrkgPjzbpump"
+ },
+ "calls": [
+  [
+   "send_message",
+   [
+    7,
+    "Send /check <mint> to analyze a token."
+   ],
+   {
+    "reply_markup": null
+   }
+  ],
+  [
+   "send_message",
+   [
+    7,
+    "🔄 Collecting data..."
+   ],
+   {
+    "reply_markup": null
+   }
+  ],
+  [
+   "send_message",
+   [
+    7,
+    "🔄 Building funding graph..."
+   ],
+   {
+    "reply_markup": null
+   }
+  ],
+  [
+   "send_message",
+   [
+    7,
+    "🔄 Finding clusters..."
+   ],
+   {
+    "reply_markup": null
+   }
+  ],
+  [
+   "send_message",
+   [
+    7,
+    "🔄 Building report..."
+   ],
+   {
+    "reply_markup": null
+   }
+  ],
+  [
+   "send_message",
+   [
+    7,
+    "risk 54/100 — high concentration\n#1: 14 wallets, share 0.7455\ndata: ingest v2 hubs v3 clusters v2, incomplete"
+   ],
+   {
+    "reply_markup": {
+     "inline_keyboard": [
+      [
+       {
+        "text": "evidence",
+        "callback_data": "evidence:3JZKYE9R:0"
+       }
+      ]
+     ]
+    }
+   }
+  ],
+  [
+   "send_message",
+   [
+    7,
+    "risk 54/100 — high concentration\n#1: 14 wallets, share 0.7455\ndata: ingest v2 hubs v3 clusters v2, incomplete"
+   ],
+   {
+    "reply_markup": {
+     "inline_keyboard": [
+      [
+       {
+        "text": "evidence",
+        "callback_data": "evidence:3JZKYE9R:1"
+       }
+      ]
+     ]
+    }
+   }
+  ],
+  [
+   "send_message",
+   [
+    7,
+    "🔄 Collecting data..."
+   ],
+   {
+    "reply_markup": null
+   }
+  ],
+  [
+   "send_message",
+   [
+    7,
+    "doesn't look like a Solana address — check the mint"
+   ],
+   {
+    "reply_markup": null
+   }
+  ],
+  [
+   "send_message",
+   [
+    7,
+    "Send /check <mint> to analyze a token."
+   ],
+   {
+    "reply_markup": null
+   }
+  ],
+  [
+   "answer_callback",
+   [
+    "q1",
+    ""
+   ],
+   {}
+  ],
+  [
+   "send_message",
+   [
+    7,
+    "Cluster #1 (share 0.7455, confidence 0.728)\n• same_amounts: 3TzRKsND..., 4wE9fjpk..., 5X3oNudH..., 5m3A1PKs..., +7 more, window 318969180–318978416 (slot)\n• same_slot: 3TzRKsND..., 4wE9fjpk..., 5X3oNudH..., 5m3A1PKs..., +10 more, window 318981860–318981860 (slot)\n• shared_funder: 3TzRKsND..., 4wE9fjpk..., 5X3oNudH..., 5m3A1PKs..., +11 more, window 1738890484–1738890484 (block_time)"
+   ],
+   {
+    "reply_markup": null
+   }
+  ],
+  [
+   "answer_callback",
+   [
+    "q2",
+    ""
+   ],
+   {}
+  ],
+  [
+   "send_message",
+   [
+    7,
+    "request expired, send /check again"
+   ],
+   {
+    "reply_markup": null
+   }
+  ],
+  [
+   "send_message",
+   [
+    8,
+    "🔄 Collecting data..."
+   ],
+   {
+    "reply_markup": null
+   }
+  ],
+  [
+   "send_message",
+   [
+    8,
+    "🔄 Building funding graph..."
+   ],
+   {
+    "reply_markup": null
+   }
+  ],
+  [
+   "send_message",
+   [
+    8,
+    "🔄 Finding clusters..."
+   ],
+   {
+    "reply_markup": null
+   }
+  ],
+  [
+   "send_message",
+   [
+    8,
+    "🔄 Building report..."
+   ],
+   {
+    "reply_markup": null
+   }
+  ],
+  [
+   "send_message",
+   [
+    8,
+    "risk 0/100 — insufficient data\nno related groups found\ndata: ingest v2 hubs v3 clusters v2, incomplete"
+   ],
+   {
+    "reply_markup": null
+   }
+  ]
+ ]
+}

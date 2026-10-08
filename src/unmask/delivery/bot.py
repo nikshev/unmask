@@ -1,13 +1,21 @@
-# impl: FR-004-03, FR-004-04, FR-004-07, FR-004-09
+# impl: FR-004-03, FR-004-04, FR-004-07, FR-004-09, FR-008-07, FR-008-09
 """Telegram-бот доставки: polling-цикл, `/check`, callback «докази» (R-2, контракт `bot-messages.md`).
 
 Транспорт — межа (`BotTransport`): живий на сирих викликах Bot API через `httpx`,
 несправжній (журнальний) — у тестах. Форматування — дослівно за контрактом.
+
+Ліміти (фіча 008, R-9, `contracts/overload.md`): `run_polling(..., gate=None, spawn=None)`. Без `gate` цикл
+послідовний і побайтово такий, як у 004. З `gate` рішення про допуск `/check <mint>` приймається ТУТ, у
+потоці опитування (`gate.try_enter`, атомарно), а сам аналіз іде у воркері через `spawn`: тож другий `/check`
+того ж користувача отримує «ще виконується», поки перший триває. `gate.leave` викликається рівно раз на
+допуск — у `finally` воркера, а якщо `spawn` кинув до запуску воркера, то одразу тут (`_GateTicket`).
 """
 
 from __future__ import annotations
 
+import itertools
 import json
+import threading
 import time
 from typing import Any, Protocol
 
@@ -17,6 +25,7 @@ __all__ = [
     "BotTransport",
     "HttpxBotTransport",
     "JournalTransport",
+    "RequestRegistry",
     "format_check",
     "format_evidence",
     "handle_check",
@@ -34,6 +43,7 @@ BAND_WORDS = {
 _EVIDENCE_BUTTON = "evidence"
 _STALE_TEXT = "request expired, send /check again"
 _START_HINT = "Send /check <mint> to analyze a token."
+_IN_PROGRESS_TEXT = "your previous check is still running — please wait for its result"
 
 
 class BotTransport(Protocol):
@@ -140,6 +150,10 @@ def format_check(doc: dict[str, Any], request_id: str | None) -> tuple[str, Any]
     return "\n".join(lines), markup
 
 
+def _rate_limited_text(retry_after_seconds: int) -> str:
+    return f"too many checks — try again in {retry_after_seconds} s"
+
+
 def _format_error(error: Any) -> str:
     if not isinstance(error, dict):
         return "could not analyze the token"
@@ -148,6 +162,12 @@ def _format_error(error: Any) -> str:
         return "doesn't look like a Solana address — check the mint"
     if kind == "token_not_found":
         return "token not found"
+    retry = error.get("retry_after_seconds")
+    if type(retry) is int and retry >= 1:  # без коректного числа не вигадуємо його: нижче чесний загальний текст
+        if kind == "busy":
+            return f"service is busy with other analyses — try again in ~{retry} s"
+        if kind == "rate_limited":
+            return _rate_limited_text(retry)
     detail = error.get("detail", "")
     return f"incomplete data: {detail}" if detail else "could not analyze the token"
 
@@ -187,6 +207,53 @@ def format_evidence(doc: dict[str, Any], limit: int) -> list[str]:
     return chunks
 
 
+_MAX_REQUESTS = 1000  # межа реєстру callback-запитів; старі витісняються (шлях «застарів»)
+_PLAIN_REGISTRY_LOCK = threading.Lock()  # для голого `dict`, який передали напряму в `handle_check`
+
+
+class RequestRegistry(dict):
+    """Реєстр `request_id -> mint` для callback «докази»: потокобезпечний, обмежений (R-9).
+
+    Воркери `/check` пишуть сюди паралельно з потоком опитування, що читає (callback), тож додавання,
+    витіснення найстарішого й читання йдуть під одним замком; `request_id` береться з `itertools.count`
+    (унікальний і після витіснення, на відміну від `len(реєстр)`). Лічильник росте лише при реєстрації,
+    тож до першого витіснення id збігаються з 004 (`<8 символів mint>:<порядковий номер>`).
+    """
+
+    def __init__(self, limit: int | None = None) -> None:
+        super().__init__()
+        self._lock = threading.Lock()
+        self._ids = itertools.count()
+        self._limit = _MAX_REQUESTS if limit is None else limit
+
+    def add(self, mint: str) -> str:
+        with self._lock:
+            request_id = f"{mint[:8]}:{next(self._ids)}"
+            self[request_id] = mint
+            while len(self) > self._limit:
+                self.pop(next(iter(self)))
+            return request_id
+
+    def lookup(self, request_id: str) -> str | None:
+        with self._lock:
+            return dict.get(self, request_id)
+
+
+def _register(requests: dict[str, str], mint: str) -> str:
+    if isinstance(requests, RequestRegistry):
+        return requests.add(mint)
+    with _PLAIN_REGISTRY_LOCK:  # голий dict (тести 004, прямі виклики): поведінка 004
+        request_id = f"{mint[:8]}:{len(requests)}"
+        requests[request_id] = mint
+        return request_id
+
+
+def _lookup(requests: dict[str, str], request_id: str) -> str | None:
+    if isinstance(requests, RequestRegistry):
+        return requests.lookup(request_id)
+    return requests.get(request_id)
+
+
 def handle_check(text: str, service, transport: BotTransport, chat_id: Any,
                  requests: dict[str, str], *, render=None) -> str | None:
     """Обробка `/check <mint>`: фото + caption + кнопка. Повертає `request_id` або `None`.
@@ -208,8 +275,7 @@ def handle_check(text: str, service, transport: BotTransport, chat_id: Any,
         caption, _ = format_check(doc, None)
         transport.send_message(chat_id, caption)
         return None
-    request_id = f"{mint[:8]}:{len(requests)}"
-    requests[request_id] = mint
+    request_id = _register(requests, mint)
     caption, markup = format_check(doc, request_id)
     if render is None:
         transport.send_message(chat_id, caption, reply_markup=markup)
@@ -227,7 +293,7 @@ def handle_evidence(callback_data: str, callback_id: str, service, transport: Bo
     """
     transport.answer_callback(callback_id)
     kind, _, request_id = callback_data.partition(":")
-    mint = requests.get(request_id) if kind == "evidence" else None
+    mint = _lookup(requests, request_id) if kind == "evidence" else None
     if mint is None:
         transport.send_message(chat_id, _STALE_TEXT)
         return
@@ -243,20 +309,122 @@ def handle_evidence(callback_data: str, callback_id: str, service, transport: Bo
         transport.send_message(chat_id, chunk)
 
 
-_MAX_REQUESTS = 1000  # межа реєстру callback-запитів; старі витісняються (шлях «застарів»)
+def _spawn_thread(fn) -> None:
+    """Умовчання `spawn`: daemon-потік (не тримає процес при виході)."""
+    threading.Thread(target=fn, name="unmask-check", daemon=True).start()
+
+
+class _GateTicket:
+    """Один допуск воріт -> рівно один `gate.leave(user)`, що б не сталося між `ok` і кінцем воркера.
+
+    Стани: `pending` (допущено, воркер ще не стартував) -> `running` -> `done`, або `pending` -> `cancelled`.
+    Воркер, що почався, сам відповідає за `leave` (у `finally`); якщо `spawn` кинув до його старту, `abort`
+    звільняє користувача негайно, а запізнілий запуск покинутого воркера стає no-op (`begin` → `False`):
+    він ні не аналізує, ні не знімає позначку з наступного допуску того ж користувача.
+    """
+
+    __slots__ = ("_gate", "_user", "_lock", "_state")
+
+    def __init__(self, gate, user) -> None:
+        self._gate = gate
+        self._user = user
+        self._lock = threading.Lock()
+        self._state = "pending"
+
+    def begin(self) -> bool:
+        with self._lock:
+            if self._state != "pending":
+                return False
+            self._state = "running"
+            return True
+
+    def finish(self) -> None:
+        with self._lock:
+            if self._state == "running":
+                self._state = "done"
+                self._gate.leave(self._user)
+
+    def abort(self) -> None:
+        with self._lock:
+            if self._state == "pending":
+                self._state = "cancelled"
+                self._gate.leave(self._user)
+
+
+def _id_of(container: Any) -> Any:
+    """`id` з `from`/`chat`, якщо це `int`/`str` (не `bool`); інакше `None`."""
+    value = container.get("id") if isinstance(container, dict) else None
+    return value if type(value) in (int, str) else None
+
+
+def _user_key(message: dict[str, Any]) -> Any:
+    """Ключ користувача: `message.from.id`, за відсутності — `message.chat.id` (контракт overload.md)."""
+    user = _id_of(message.get("from"))
+    return user if user is not None else _id_of(message.get("chat"))
+
+
+def _check_gated(text: str, message: dict[str, Any], service, transport: BotTransport, chat_id: Any,
+                 requests: dict[str, str], render, gate, spawn) -> None:
+    """`/check` з воротами: допуск — тут (потік опитування), аналіз — у воркері через `spawn`."""
+    parts = text.strip().split()
+    if len(parts) < 2:  # `/check` без mint — не перевірка: підказка, як у 004, без воріт і аналізу
+        handle_check(text, service, transport, chat_id, requests, render=render)
+        return
+    user = _user_key(message)
+    if user is None:  # ні від кого, ні з якого чату: нема ключа, щоб лімітувати, і куди відповісти
+        return
+    counts = bool(service.needs_analysis(parts[1]))  # лише валідний холодний mint їсть вікно; тип — строго bool
+    decision = gate.try_enter(user, counts=counts)
+    if decision.kind == "in_progress":
+        transport.send_message(chat_id, _IN_PROGRESS_TEXT)
+        return
+    if decision.kind == "rate_limited":
+        transport.send_message(chat_id, _rate_limited_text(decision.retry_after_seconds))
+        return
+    if decision.kind != "ok":
+        raise ValueError(f"unexpected gate decision: {decision.kind!r}")  # не мовчки допускати невідоме
+
+    ticket = _GateTicket(gate, user)
+
+    def worker() -> None:
+        if not ticket.begin():
+            return
+        try:
+            try:
+                handle_check(text, service, transport, chat_id, requests, render=render)
+            except Exception as exc:  # як у 004: збій перевірки не лишає користувача без відповіді
+                try:
+                    if chat_id is not None:
+                        transport.send_message(chat_id, f"analysis error: {type(exc).__name__}")
+                except Exception:
+                    pass
+        finally:
+            ticket.finish()
+
+    try:
+        spawn(worker)
+    except BaseException:  # напр. RuntimeError: can't start new thread; воркер не стартував -> звільнити
+        ticket.abort()
+        raise
 
 
 def run_polling(transport: BotTransport, service, *, render=None, evidence_limit: int,
                 stop_after: int | None = None,
-                sleep=None) -> dict[str, str]:
+                sleep=None, gate=None, spawn=None) -> dict[str, str]:
     """Цикл опитування. `stop_after=N` — обробити N апдейтів і повернути реєстр (для тестів).
 
     `evidence_limit` — з `delivery.yaml` (без умовчання, FR-004-11). Збій `get_updates`
     (таймаут long-poll, мережа, 5xx) не вбиває цикл: пауза з нарощуванням і повтор.
+
+    `gate` (`UserGate` з `Protection.users`) вмикає ліміти користувача (FR-008-07): без нього — послідовна
+    поведінка 004 без змін, `spawn` ігнорується. `spawn(fn)` запускає воркер `/check` (умовчання — daemon-потік;
+    у тестах — синхронний або відкладений виклик). Callback «докази» ніколи не лімітується.
     """
     if sleep is None:
         sleep = time.sleep
-    requests: dict[str, str] = {}
+    if spawn is None:
+        spawn = _spawn_thread
+    requests = RequestRegistry()
     offset = 0
     processed = 0
     backoff = 1.0
@@ -285,10 +453,11 @@ def run_polling(transport: BotTransport, service, *, render=None, evidence_limit
                     text = message.get("text", "")
                     chat_id = message.get("chat", {}).get("id")
                     if text.startswith("/check"):
-                        if handle_check(text, service, transport, chat_id, requests,
-                                        render=render) is not None:
-                            while len(requests) > _MAX_REQUESTS:
-                                requests.pop(next(iter(requests)))
+                        if gate is None:
+                            handle_check(text, service, transport, chat_id, requests, render=render)
+                        else:
+                            _check_gated(text, message, service, transport, chat_id, requests,
+                                         render, gate, spawn)
                     elif text.startswith("/start"):
                         transport.send_message(chat_id, _START_HINT)
             except Exception as exc:

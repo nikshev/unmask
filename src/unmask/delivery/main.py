@@ -1,4 +1,4 @@
-# impl: FR-004-10, FR-007-14, FR-008-08
+# impl: FR-004-10, FR-007-14, FR-008-07, FR-008-08
 """Точка входу доставки: env → YAML → сервіси → HTTP-потік + polling-бот.
 
 Секрети — лише з оточення (`UNMASK_BOT_TOKEN` і змінні RPC-провайдерів з `config/rpc_pool.yaml`,
@@ -7,7 +7,8 @@ fail-fast із назвою змінної ДО відкриття портів.
 
 Межі навантаження (FR-008-08) — лише з `config/protection.yaml`; помилка конфігу — fail-fast (код 2, назва
 поля) ДО порту й потоку бота. `Protection` будується РІВНО ОДИН раз і діляться ним сервіс (слоти) і HTTP (вікно
-запитів, довірені проксі): бот береться за тим самим сервісом, тож глобальна межа важких аналізів спільна.
+запитів, довірені проксі): бот береться за тим самим сервісом, тож глобальна межа важких аналізів спільна, а ліміти
+користувача бота (`protection.users`) передаються в `run_polling(gate=...)` (FR-008-07).
 Прапорець `--host` — адреса прив'язки (умовчання `0.0.0.0`; за nginx на тій самій машині — `127.0.0.1`).
 """
 
@@ -88,7 +89,8 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
         transport = HttpxBotTransport(bot_token or "")
         thread = threading.Thread(
             target=run_polling, args=(transport, service),
-            kwargs={"render": render, "evidence_limit": delivery_cfg.evidence_preview_limit},
+            kwargs={"render": render, "evidence_limit": delivery_cfg.evidence_preview_limit,
+                    "gate": protection.users},
             daemon=True)
         thread.start()
     serve(service, args.port or delivery_cfg.http_port, host=args.host, protection=protection)

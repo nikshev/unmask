@@ -1,4 +1,4 @@
-# verifies: FR-004-10, FR-008-08
+# verifies: FR-004-10, FR-008-07, FR-008-08
 """Тести точки входу: fail-fast секретів, прапорці, відсутність літералів ключів (T-095).
 
 T-167 (FR-008-08): один `Protection` на процес із `config/protection.yaml`, fail-fast конфігу ДО порту й потоку
@@ -216,6 +216,23 @@ def test_bot_thread_runs_on_the_same_service_and_protection(config_dir: Path, wi
     assert thread.args[1] is call["service"]  # бот отримує спільні слоти через той самий сервіс
     assert thread.args[1]._slots is call["protection"].slots
     assert len(wired["build_calls"]) == 1
+
+
+def test_main_passes_shared_users_gate(config_dir: Path, wired: dict) -> None:
+    # T-169 (FR-008-07): потік бота отримує ворота користувачів ТОГО САМОГО Protection, що й сервіс і HTTP.
+    assert _run(config_dir) == 0
+
+    (call,) = wired["serve_calls"]
+    (thread,) = wired["threads"]
+    assert thread.target is main_mod.run_polling
+    assert thread.kwargs["gate"] is call["protection"].users
+    assert thread.kwargs["gate"] is wired["build_calls"][0]["result"].users
+    assert thread.args[1]._slots is call["protection"].slots  # і глобальні слоти спільні
+    assert len(wired["build_calls"]) == 1
+    # решта аргументів 004 не зачеплена
+    assert thread.kwargs["evidence_limit"] == yaml.safe_load(
+        (config_dir / "delivery.yaml").read_text(encoding="utf-8"))["evidence_preview_limit"]
+    assert callable(thread.kwargs["render"]) and thread.daemon is True
 
 
 def test_no_bot_flag_starts_no_thread(config_dir: Path, wired: dict) -> None:
