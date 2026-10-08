@@ -10,7 +10,7 @@ import pytest
 
 PKG = Path(__file__).resolve().parents[1] / "src" / "unmask" / "delivery"
 
-CORE = ["config", "report", "render", "cache", "service", "http", "bot", "main"]
+CORE = ["config", "report", "render", "cache", "limits", "service", "http", "bot", "main"]
 
 ALLOWED_UNMASK = {
     "unmask.ingest.model",
@@ -29,6 +29,7 @@ ALLOWED_UNMASK = {
     "unmask.delivery.report",
     "unmask.delivery.render",
     "unmask.delivery.cache",
+    "unmask.delivery.limits",
     "unmask.delivery.service",
     "unmask.delivery.http",
     "unmask.delivery.bot",
@@ -78,8 +79,8 @@ def _under(path: Path) -> ast.AST:
 
 def test_package_has_exactly_the_documented_modules() -> None:
     modules = sorted(p.stem for p in PKG.glob("*.py"))
-    assert modules == ["__init__", "bot", "cache", "config", "http", "main", "render",
-                       "report", "service"]
+    assert modules == ["__init__", "bot", "cache", "config", "http", "limits", "main",
+                       "render", "report", "service"]
 
 
 @pytest.mark.parametrize("module", CORE)
