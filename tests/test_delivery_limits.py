@@ -1902,3 +1902,450 @@ def test_build_protection_instances_are_independent() -> None:
     assert a.users is not b.users and a.slots is not b.slots and a.api is not b.api
     assert a.users.try_enter("u", counts=True) == OK
     assert b.users.try_enter("u", counts=True) == OK
+
+
+# --------------------------------------------------------------------------- рядок T-174
+# Повернення квоти: холодний /check, відхилений глобальним `busy`, не є «перевіркою» користувача.
+# `SlidingWindowLimiter.forget_last` + `UserGate.refund` (FR-008-07).
+
+
+def _stamps(g: UserGate, key: object) -> list[float]:
+    """Живі позначки ключа у вікні воріт (білий ящик: перевіряємо, ЩО саме видалено)."""
+    return list(g._window._hits.get(key, ()))  # type: ignore[attr-defined]
+
+
+# --- SlidingWindowLimiter.forget_last
+
+
+def test_forget_last_removes_only_the_newest_stamp_of_the_key() -> None:
+    lim, clock = make(3, 600)
+    for t in (0, 10, 20):
+        clock.now = t
+        assert lim.hit("a").allowed
+    assert lim.forget_last("a") is True
+    assert list(lim._hits["a"]) == [0, 10]  # type: ignore[attr-defined]
+    clock.now = 30
+    assert lim.hit("a").allowed  # слот повернуто
+    denied = lim.hit("a")
+    assert denied == Decision(False, 570)  # найстаріша (t=0) на місці: 0+600-30
+
+
+def test_forget_last_of_unknown_or_empty_key_is_noop() -> None:
+    lim, _ = make(2, 60)
+    assert lim.forget_last("nobody") is False
+    assert lim._hits == {}  # type: ignore[attr-defined]  # ключ не створено
+    assert lim.hit("a").allowed
+    assert lim.forget_last("a") is True
+    assert lim.forget_last("a") is False  # другий раз нічого видаляти
+
+
+def test_forget_last_drops_the_key_when_it_becomes_empty() -> None:
+    lim, _ = make(2, 60)
+    lim.hit("a")
+    lim.hit("b")
+    assert lim.forget_last("a") is True
+    assert "a" not in lim._hits and "b" in lim._hits  # type: ignore[attr-defined]
+
+
+def test_forget_last_does_not_touch_other_keys() -> None:
+    lim, clock = make(2, 600)
+    lim.hit("a")
+    clock.now = 5
+    lim.hit("b")
+    clock.now = 6
+    lim.hit("a")
+    assert lim.forget_last("a") is True
+    assert list(lim._hits["b"]) == [5]  # type: ignore[attr-defined]
+    assert list(lim._hits["a"]) == [0]  # type: ignore[attr-defined]
+
+
+def test_forget_last_never_resurrects_an_expired_stamp() -> None:
+    lim, clock = make(1, 60)
+    lim.hit("a")
+    clock.now = 60  # мітка t=0 випала з вікна (≤ now − window)
+    assert lim.forget_last("a") is False  # нема чого повертати: «живу» позначку не видалено
+    assert "a" not in lim._hits  # type: ignore[attr-defined]
+    assert lim.hit("a").allowed
+    assert lim.hit("a") == Decision(False, 60)  # нова мітка t=60 цілa
+
+
+def test_forget_last_after_clock_regress_removes_exactly_one() -> None:
+    lim, clock = make(3, 60, start=1000.0)
+    lim.hit("a")
+    clock.now = 1010.0
+    lim.hit("a")
+    clock.now = 5.0  # годинник стрибнув назад: мітки з «майбутнього» затискаються до now
+    assert lim.forget_last("a") is True
+    assert len(lim._hits["a"]) == 1  # type: ignore[attr-defined]
+    assert lim.hit("a").allowed and lim.hit("a").allowed
+    denied = lim.hit("a")
+    assert not denied.allowed and 1 <= denied.retry_after_seconds <= 60
+
+
+def test_forget_last_holds_the_limiter_lock() -> None:
+    lim, _ = make(2, 60)
+    lim.hit("a")
+    lock = _CountingLock()
+    lim._lock = lock  # type: ignore[attr-defined,assignment]
+    assert lim.forget_last("a") is True
+    assert lock.acquisitions == 1 and not lock.locked()
+    assert lim.forget_last("a") is False
+    assert lock.acquisitions == 2 and not lock.locked()
+
+
+def test_forget_last_unhashable_key_raises_type_error_and_releases_lock() -> None:
+    lim, _ = make(2, 60)
+    with pytest.raises(TypeError):
+        lim.forget_last(["a"])  # type: ignore[arg-type]
+    assert not lim._lock.locked()  # type: ignore[attr-defined]
+
+
+# --- UserGate.refund (рядок T-174)
+
+
+def test_refund_restores_one_slot_in_window() -> None:
+    g, _ = gate(checks=1, window=600)
+    assert g.try_enter("u", counts=True) == OK
+    assert g.refund("u") is True
+    g.leave("u")
+    assert g.try_enter("u", counts=True) == OK  # без refund було б rate_limited(600)
+    g.leave("u")
+    assert g.try_enter("u", counts=True) == GateDecision("rate_limited", 600)
+
+
+def test_refund_restores_exactly_one_slot_not_more() -> None:
+    g, clock = gate(checks=2, window=600)
+    for t in (0, 1):
+        clock.now = t
+        assert g.try_enter("u", counts=True) == OK
+        g.leave("u")
+    assert g.try_enter("u", counts=True).kind == "rate_limited"  # обидва слоти зайняті
+    # а тепер третя спроба недоступна; перевіряємо refund на другому допуску нового циклу
+    clock.now = 700  # обидві мітки випали
+    assert g.try_enter("u", counts=True) == OK
+    assert g.refund("u") is True
+    assert g.refund("u") is False  # один допуск — одне повернення
+    g.leave("u")
+    assert _stamps(g, "u") == []
+    for _ in range(2):  # вікно знову на 2 слоти, не на 3
+        assert g.try_enter("u", counts=True) == OK
+        g.leave("u")
+    assert g.try_enter("u", counts=True).kind == "rate_limited"
+
+
+def test_refund_noop_without_admission() -> None:
+    g, _ = gate(checks=1, window=600)
+    assert g.refund("never-seen") is False  # не кидає, нічого не створює
+    assert "never-seen" not in g._window._hits  # type: ignore[attr-defined]
+    assert g._active == set()  # type: ignore[attr-defined]
+    assert g.try_enter("never-seen", counts=True) == OK
+    g.leave("never-seen")
+    assert g.refund("never-seen") is False  # після leave допуску вже нема
+    assert g.try_enter("never-seen", counts=True).kind == "rate_limited"  # мітка не знята
+
+
+def test_refund_after_leave_is_forbidden_and_keeps_the_stamp() -> None:
+    g, _ = gate(checks=2, window=600)
+    assert g.try_enter("u", counts=True) == OK
+    g.leave("u")
+    assert g.try_enter("u", counts=True) == OK  # новий допуск того ж користувача
+    assert g.refund("u") is True
+    assert g.refund("u") is False
+    assert len(_stamps(g, "u")) == 1  # лишилась мітка першого допуску
+
+
+def test_refund_of_uncounted_admission_does_not_touch_older_stamps() -> None:
+    g, _ = gate(checks=1, window=600)
+    assert g.try_enter("u", counts=True) == OK
+    g.leave("u")  # у вікні є мітка попереднього допуску
+    assert g.try_enter("u", counts=False) == OK  # кеш-хіт: мітки не пише
+    assert g.refund("u") is False  # цей допуск нічого не списав -> нічого повертати
+    g.leave("u")
+    assert g.try_enter("u", counts=True) == GateDecision("rate_limited", 600)  # стара мітка цiла
+
+
+def test_refund_only_last_stamp_of_that_user() -> None:
+    g, clock = gate(checks=3, window=600)
+    for t in (0, 10):
+        clock.now = t
+        assert g.try_enter("a", counts=True) == OK
+        g.leave("a")
+    clock.now = 5
+    assert g.try_enter("b", counts=True) == OK
+    g.leave("b")
+    clock.now = 20
+    assert g.try_enter("a", counts=True) == OK
+    assert g.refund("a") is True
+    g.leave("a")
+    assert _stamps(g, "a") == [0, 10]  # знято саме мітку цього допуску (t=20), не найстаршу
+    assert _stamps(g, "b") == [5]  # чужий користувач недоторканий
+    clock.now = 30
+    assert g.try_enter("a", counts=True) == OK
+    g.leave("a")
+    assert g.try_enter("a", counts=True) == GateDecision("rate_limited", 570)  # 0+600-30
+
+
+def test_refund_other_user_is_noop_while_someone_else_is_active() -> None:
+    g, _ = gate(checks=1, window=600)
+    assert g.try_enter("a", counts=True) == OK
+    assert g.try_enter("b", counts=True) == OK
+    assert g.refund("c") is False  # c не допущений
+    assert _stamps(g, "a") == [0] and _stamps(g, "b") == [0]
+    assert g.refund("a") is True
+    assert _stamps(g, "a") == [] and _stamps(g, "b") == [0]
+
+
+def test_refund_keeps_the_user_active_until_leave() -> None:
+    g, _ = gate(checks=2, window=600)
+    assert g.try_enter("u", counts=True) == OK
+    assert g.refund("u") is True
+    assert g.try_enter("u", counts=True) == IN_PROGRESS  # «один одночасний» діє до leave
+    g.leave("u")
+    assert g.try_enter("u", counts=True) == OK
+
+
+def test_refund_when_stamp_already_left_the_window_is_noop_and_safe() -> None:
+    g, clock = gate(checks=1, window=60)
+    assert g.try_enter("u", counts=True) == OK  # мітка t=0
+    clock.now = 61  # аналіз тривав довше за вікно: мітка випала
+    assert g.refund("u") is False  # не видаляємо нічого «живого»
+    g.leave("u")
+    assert g.try_enter("u", counts=True) == OK  # нова мітка t=61
+    g.leave("u")
+    assert _stamps(g, "u") == [61]
+    assert g.try_enter("u", counts=True) == GateDecision("rate_limited", 60)
+
+
+def test_refund_after_older_stamp_expired_removes_only_own() -> None:
+    g, clock = gate(checks=2, window=60)
+    assert g.try_enter("u", counts=True) == OK  # t=0
+    g.leave("u")
+    clock.now = 50
+    assert g.try_enter("u", counts=True) == OK  # t=50 — наш допуск
+    clock.now = 70  # t=0 випала, t=50 жива
+    assert g.refund("u") is True
+    assert _stamps(g, "u") == []
+    g.leave("u")
+
+
+def test_refund_with_clock_going_backwards() -> None:
+    g, clock = gate(checks=2, window=60, start=1000.0)
+    assert g.try_enter("u", counts=True) == OK
+    g.leave("u")
+    clock.now = 1010.0
+    assert g.try_enter("u", counts=True) == OK
+    clock.now = 3.0  # годинник назад
+    assert g.refund("u") is True
+    g.leave("u")
+    assert len(_stamps(g, "u")) == 1
+    assert g.try_enter("u", counts=True) == OK  # слот повернуто, блокування ≤ вікна
+    g.leave("u")
+    denied = g.try_enter("u", counts=True)
+    assert denied.kind == "rate_limited" and 1 <= denied.retry_after_seconds <= 60
+
+
+def test_refund_clock_failure_leaves_gate_consistent() -> None:
+    state = {"fail": False}
+
+    def clock() -> float:
+        if state["fail"]:
+            raise RuntimeError("clock failed")
+        return 0.0
+
+    g = UserGate(2, 60, clock)
+    assert g.try_enter("u", counts=True) == OK
+    state["fail"] = True
+    with pytest.raises(RuntimeError):
+        g.refund("u")
+    assert not g._lock.locked() and not g._window._lock.locked()  # type: ignore[attr-defined]
+    state["fail"] = False
+    g.leave("u")  # користувач не застряг
+    assert g.try_enter("u", counts=True) == OK
+
+
+def test_refund_unhashable_user_raises_type_error_and_keeps_state() -> None:
+    g, _ = gate()
+    with pytest.raises(TypeError):
+        g.refund(["u"])  # type: ignore[arg-type]
+    assert not g._lock.locked()  # type: ignore[attr-defined]
+
+
+def test_refund_user_keys_one_and_str_one_differ() -> None:
+    g, _ = gate(checks=1)
+    assert g.try_enter(1, counts=True) == OK
+    assert g.refund("1") is False
+    assert _stamps(g, 1) == [0]
+    assert g.refund(1) is True
+
+
+def test_refund_holds_the_single_gate_lock_exactly_once() -> None:
+    g, _ = gate(checks=5)
+    lock = _CountingLock()
+    g._lock = lock  # type: ignore[attr-defined,assignment]
+    assert g.try_enter("u", counts=True) == OK
+    before = lock.acquisitions
+    assert g.refund("u") is True
+    assert lock.acquisitions - before == 1
+    before = lock.acquisitions
+    assert g.refund("u") is False  # навіть ні-оп іде під замком
+    assert lock.acquisitions - before == 1
+    assert not lock.locked()
+
+
+def test_counted_marker_is_bounded_by_live_admissions() -> None:
+    g, _ = gate(checks=1000, window=600)
+    for i in range(300):
+        assert g.try_enter(i, counts=True) == OK
+        if i % 2:
+            g.refund(i)
+        g.leave(i)
+    assert g._active == set()  # type: ignore[attr-defined]
+    assert g._counted == set()  # type: ignore[attr-defined]
+
+
+def test_refund_concurrent_with_enter() -> None:
+    # refund і try_enter того ж користувача одночасно: допуск ще не звільнено, тож try_enter завжди
+    # in_progress і НЕ пише мітку; refund знімає рівно мітку допуску, а не мітку «сусіда».
+    for _ in range(50):
+        g, clock = gate(checks=5, window=600)
+        assert g.try_enter("u", counts=True) == OK
+        g.leave("u")
+        clock.now = 1
+        assert g.try_enter("u", counts=True) == OK  # допуск, який повертаємо (мітка t=1)
+        barrier = threading.Barrier(2, timeout=10)
+        got: dict[str, object] = {}
+
+        def do_refund() -> None:
+            barrier.wait()
+            got["refund"] = g.refund("u")
+
+        def do_enter() -> None:
+            barrier.wait()
+            got["enter"] = g.try_enter("u", counts=True)
+
+        ts = [threading.Thread(target=f, daemon=True) for f in (do_refund, do_enter)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join(timeout=10)
+        assert not any(t.is_alive() for t in ts)
+        assert got == {"refund": True, "enter": IN_PROGRESS}
+        assert _stamps(g, "u") == [0]
+
+
+@pytest.mark.parametrize("wait_on", [1, 2, 3])
+def test_refund_check_and_remove_are_atomic_deterministic_race(wait_on: int) -> None:
+    # Два refund-и ОДНОГО допуску. Без єдиного замка обидва пройшли б перевірку «допуск рахований»,
+    # зустрілися на Barrier і обидва зняли б по мітці — друга зняла б мітку ПОПЕРЕДНЬОГО допуску.
+    g, clock = gate(checks=5, window=600)
+    stored = _RendezvousUser(threading.Barrier(1), 10_000)  # ключ допуску: рівний і з тим же хешем
+    assert g.try_enter(stored, counts=True) == OK
+    g.leave(stored)
+    clock.now = 1
+    assert g.try_enter(stored, counts=True) == OK  # t=1 — наш допуск
+    barrier = threading.Barrier(2, timeout=0.3)
+    results: list[bool] = []
+    out = threading.Lock()
+
+    def worker() -> None:
+        r = g.refund(_RendezvousUser(barrier, wait_on))
+        with out:
+            results.append(r)
+
+    ts = [threading.Thread(target=worker, daemon=True) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(timeout=10)
+    assert not any(t.is_alive() for t in ts)
+    assert sorted(results) == [False, True]
+    assert _stamps(g, stored) == [0]  # мітка попереднього допуску не зачеплена
+
+
+def test_refund_not_split_across_lock_holds_deterministic_race() -> None:
+    g, clock = gate(checks=5, window=600)
+    assert g.try_enter("u", counts=True) == OK
+    g.leave("u")
+    clock.now = 1
+    assert g.try_enter("u", counts=True) == OK
+    g._lock = _RendezvousLock(threading.Barrier(2, timeout=0.3))  # type: ignore[attr-defined,assignment]
+    results: list[bool] = []
+    out = threading.Lock()
+
+    def worker() -> None:
+        r = g.refund("u")
+        with out:
+            results.append(r)
+
+    ts = [threading.Thread(target=worker, daemon=True) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(timeout=10)
+    assert not any(t.is_alive() for t in ts)
+    assert sorted(results) == [False, True]
+    assert _stamps(g, "u") == [0]
+
+
+def test_refund_and_window_removal_are_one_critical_section() -> None:
+    # forget_last викликається ПІД замком воріт (як і hit): інакше між перевіркою й зняттям
+    # можна вклинити leave+try_enter, і ми зняли б мітку чужого допуску
+    g, _ = gate(checks=5)
+    assert g.try_enter("u", counts=True) == OK
+    seen: list[bool] = []
+    real = g._window.forget_last  # type: ignore[attr-defined]
+
+    def spy(key):  # type: ignore[no-untyped-def]
+        seen.append(g._lock.locked())  # type: ignore[attr-defined]
+        return real(key)
+
+    g._window.forget_last = spy  # type: ignore[attr-defined,method-assign]
+    assert g.refund("u") is True
+    assert seen == [True]
+
+
+def test_concurrent_churn_with_refunds_stamps_equal_admissions_minus_refunds() -> None:
+    g, _ = gate(checks=10_000, window=10_000_000)  # вікно не тисне, годинник стоїть
+    users = ["a", "b", "c"]
+    threads = 12
+    iterations = 300
+    barrier = threading.Barrier(threads, timeout=10)
+    stats = {u: [0, 0] for u in users}  # [допущено з counts, повернено]
+    out = threading.Lock()
+    errors: list[BaseException] = []
+
+    def worker(n: int) -> None:
+        try:
+            barrier.wait()
+            for i in range(iterations):
+                u = users[(n + i) % len(users)]
+                counts = (i % 3) != 0
+                d = g.try_enter(u, counts=counts)
+                if d.kind != "ok":
+                    continue
+                refunded = False
+                if i % 2:
+                    refunded = g.refund(u)
+                g.leave(u)
+                with out:
+                    if counts:
+                        stats[u][0] += 1
+                    stats[u][1] += refunded
+                    assert refunded <= counts  # refund counts=False — ніколи
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    ts = [threading.Thread(target=worker, args=(n,), daemon=True) for n in range(threads)]
+    old = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join(timeout=30)
+    finally:
+        sys.setswitchinterval(old)
+    assert not any(t.is_alive() for t in ts) and not errors
+    for u in users:
+        assert len(_stamps(g, u)) == stats[u][0] - stats[u][1]
+    assert g._active == set() and g._counted == set()  # type: ignore[attr-defined]

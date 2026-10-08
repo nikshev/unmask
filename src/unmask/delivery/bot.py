@@ -9,6 +9,11 @@
 потоці опитування (`gate.try_enter`, атомарно), а сам аналіз іде у воркері через `spawn`: тож другий `/check`
 того ж користувача отримує «ще виконується», поки перший триває. `gate.leave` викликається рівно раз на
 допуск — у `finally` воркера, а якщо `spawn` кинув до запуску воркера, то одразу тут (`_GateTicket`).
+
+Повернення квоти (T-174): холодний `/check`, відхилений глобальним `busy` (слоти зайняті, аналізу не було),
+не на рахунку користувача. Воркер, побачивши `error.kind == "busy"`, викликає `gate.refund` рівно раз і лише
+для допуску, що списав квоту (`counts=True`), — ПЕРЕД `leave`; для покинутого воркера й кеш-хіту нічого не
+повертається.
 """
 
 from __future__ import annotations
@@ -254,12 +259,18 @@ def _lookup(requests: dict[str, str], request_id: str) -> str | None:
     return requests.get(request_id)
 
 
+def _is_busy(error: Any) -> bool:
+    """Відмова глобальної межі важких аналізів: лише за `error.kind == "busy"` (не за текстом)."""
+    return isinstance(error, dict) and error.get("kind") == "busy"
+
+
 def handle_check(text: str, service, transport: BotTransport, chat_id: Any,
-                 requests: dict[str, str], *, render=None) -> str | None:
+                 requests: dict[str, str], *, render=None, on_busy=None) -> str | None:
     """Обробка `/check <mint>`: фото + caption + кнопка. Повертає `request_id` або `None`.
 
     `render` — виклик `render_png(doc, config)` (інжектований точкою входу); без нього
-    надсилається лише текст із кнопкою.
+    надсилається лише текст із кнопкою. `on_busy` — виклик без аргументів, коли відповідь сервісу —
+    `busy` (аналіз не запускався): викликається ДО відповіді користувачу й не повинен кидати.
     """
     parts = text.strip().split()
     if len(parts) < 2 or not parts[0].startswith("/check"):
@@ -272,6 +283,8 @@ def handle_check(text: str, service, transport: BotTransport, chat_id: Any,
         transport.send_message(chat_id, f"analysis error: {type(exc).__name__}")
         return None
     if doc.get("error") is not None:
+        if on_busy is not None and _is_busy(doc["error"]):
+            on_busy()
         caption, _ = format_check(doc, None)
         transport.send_message(chat_id, caption)
         return None
@@ -321,15 +334,22 @@ class _GateTicket:
     Воркер, що почався, сам відповідає за `leave` (у `finally`); якщо `spawn` кинув до його старту, `abort`
     звільняє користувача негайно, а запізнілий запуск покинутого воркера стає no-op (`begin` → `False`):
     він ні не аналізує, ні не знімає позначку з наступного допуску того ж користувача.
+
+    Повернення квоти (`refund`): лише поки воркер `running` (отже, до `leave` і лише для СВОГО допуску), лише
+    якщо допуск списав квоту (`counts=True`) і не більше одного разу. Запізніле повернення (після `finish`/
+    `abort`, або воркера, що не стартував) — no-op: воно не зачепить мітку наступного допуску того ж користувача.
+    Збій самого повернення не перетворює чесну відповідь `busy` на «analysis error».
     """
 
-    __slots__ = ("_gate", "_user", "_lock", "_state")
+    __slots__ = ("_gate", "_user", "_counts", "_lock", "_state", "_refunded")
 
-    def __init__(self, gate, user) -> None:
+    def __init__(self, gate, user, *, counts: bool = False) -> None:
         self._gate = gate
         self._user = user
+        self._counts = counts is True  # рахований допуск лише за явним `True`
         self._lock = threading.Lock()
         self._state = "pending"
+        self._refunded = False
 
     def begin(self) -> bool:
         with self._lock:
@@ -337,6 +357,16 @@ class _GateTicket:
                 return False
             self._state = "running"
             return True
+
+    def refund(self) -> None:
+        with self._lock:
+            if self._state != "running" or not self._counts or self._refunded:
+                return
+            self._refunded = True  # позначаємо до виклику: збій не дає другої спроби
+            try:
+                self._gate.refund(self._user)
+            except Exception:  # квота не повернена — як до T-174; відповідь користувачу важливіша
+                pass
 
     def finish(self) -> None:
         with self._lock:
@@ -384,14 +414,15 @@ def _check_gated(text: str, message: dict[str, Any], service, transport: BotTran
     if decision.kind != "ok":
         raise ValueError(f"unexpected gate decision: {decision.kind!r}")  # не мовчки допускати невідоме
 
-    ticket = _GateTicket(gate, user)
+    ticket = _GateTicket(gate, user, counts=counts)
 
     def worker() -> None:
         if not ticket.begin():
             return
         try:
             try:
-                handle_check(text, service, transport, chat_id, requests, render=render)
+                handle_check(text, service, transport, chat_id, requests, render=render,
+                             on_busy=ticket.refund)
             except Exception as exc:  # як у 004: збій перевірки не лишає користувача без відповіді
                 try:
                     if chat_id is not None:

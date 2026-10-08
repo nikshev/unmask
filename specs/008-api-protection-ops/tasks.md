@@ -67,6 +67,8 @@
 
 - [ ] T-173 [FR-008-02, FR-008-09, FR-008-14] Наскрізно без мережі й реального часу (зібрати з готового): `tests/test_delivery_protection_e2e.py`: справжні `DeliveryService` (записані фікстури `tests/fixtures/real/*.json`) + `handle_get` + `run_polling` на `JournalTransport`, один `Protection` з `ManualClock` — `::test_n_plus_one_cold_exactly_one_503` (SC-002: N=3, 4 різні mint, блокувальний дубль збору на `Barrier`; кеш-хіт і `/healthz` під час насичення — 200), `::test_no_orphan_slots_after_mixed_outcomes` (SC-003: успіх/відмова/виняток/неповний → `in_use == 0`), `::test_http_busy_is_shared_with_bot` (HTTP займає всі слоти → бот отримує busy-текст), `::test_success_bytes_identical_with_and_without_protection` (SC-006: API `to_json` і журнал бота для кожної фікстури), `::test_no_wall_clock_used` (monkeypatch `time.monotonic`/`time.time` на виняток — прогін проходить); мутація: `slots=None` у сервісі e2e → червоний SC-002; файли: `tests/test_delivery_protection_e2e.py` (`# verifies: FR-008-02, FR-008-09, FR-008-14`)
 
+- [x] T-174 [FR-008-07] critical: Повернення квоти, коли холодний `/check` відхилено глобальним `busy` (знайдено ревʼю T-169: користувач, що слухняно повторює через `retry_after`, спалює квоту `bot.checks` без жодного аналізу — відмова системи не має бути на рахунку користувача). `limits.py`: `UserGate.refund(user)` — атомарно (під замком гейта) видаляє ОСТАННЮ позначку, записану цим користувачем у його вікні (потрібен метод `SlidingWindowLimiter.forget_last(key)` або еквівалент; відхилені не записуються, тож «остання» — це допуск, за який ми повертаємо; ідемпотентність: refund без жодного допуску — ні-оп; refund чужої/старої позначки заборонено — лише якщо цей допуск ще у вікні); `bot.py`: воркер, дізнавшись, що відповідь — `busy` (за `doc["error"]["kind"] == "busy"` або статусом, що повертає `handle_check`), викликає `refund` ПЕРЕД `leave`; `_GateTicket` зберігає, що допуск був рахований (`counts=True`), refund — не більше одного разу на допуск. — тест: `tests/test_delivery_limits.py::test_refund_restores_one_slot_in_window`, `::test_refund_noop_without_admission`, `::test_refund_only_last_stamp_of_that_user`, `::test_refund_concurrent_with_enter`, `tests/test_delivery_bot_limits.py::test_busy_reply_refunds_quota`, `::test_success_and_error_reply_do_not_refund`, `::test_cached_mint_busy_never_refunds_nothing_to_refund`, `::test_refund_at_most_once_per_admission`; мутація: refund не викликається → червоний `test_busy_reply_refunds_quota`; refund видаляє найстарішу замість останньої → червоний; файли: `src/unmask/delivery/limits.py`, `src/unmask/delivery/bot.py`, `tests/test_delivery_limits.py`, `tests/test_delivery_bot_limits.py`
+
 **Checkpoint (перед мержем)**: `uv run pytest -q` зелений; `python3 scripts/trace.py` (матриця перегенерована) зелений; `quickstart.md` §1–2; ревʼю фічі `reviewer` проти FR-008-01…14 і SC-001…006; встановлення на сервер — оператор (§3).
 
 ---
@@ -86,6 +88,7 @@
 | T-169 | T-164, T-167, T-168 | друга правка `main.py` |
 | T-170, T-171, T-172 | — | будь-коли; T-171 читає порт із юніта T-170, T-172 посилається на обидва |
 | T-173 | T-166, T-167, T-169 | останнім |
+| T-174 | T-168, T-169 | перед T-173 доцільно, але T-173 незалежний |
 
 Один файл — одна задача за раз: `limits.py` (T-162 → T-163 → T-167/T-168 послідовно), `http.py` (T-165 → T-166), `tests/test_delivery_limits.py` (так само, як `limits.py`), `tests/test_deploy_artifacts.py` (T-170 → T-171 → T-172), `tests/test_delivery_boundaries.py` (007 T-139 → T-162 → T-164).
 
@@ -105,7 +108,7 @@
 | FR-008-04 | T-166 |
 | FR-008-05 | T-165 |
 | FR-008-06 | T-163, T-164 |
-| FR-008-07 | T-168, T-169 |
+| FR-008-07 | T-168, T-169, T-174 |
 | FR-008-08 | T-161, T-167 |
 | FR-008-09 | T-164, T-166, T-169, T-173 |
 | FR-008-10 | T-166 |

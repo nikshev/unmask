@@ -94,6 +94,27 @@ class SlidingWindowLimiter:
                 return Decision(True, 0)
             return Decision(False, self._retry_after(stamps[0], now))
 
+    def forget_last(self, key: Hashable) -> bool:
+        """Атомарно: прибрати ОСТАННЮ мітку ключа (повернути слот); `True`, якщо щось прибрано.
+
+        Мітки впорядковані за часом, тож остання — найновіша. Спершу вікно нормалізується на
+        поточний час: мітка, що вже випала з вікна, нічого не повертає (а годинник назад
+        затискає «майбутні» мітки, як і в `hit`). Ключа немає або він порожній -> ні-оп
+        (`False`, ключ не створюється); порожній ключ прибирається. Викликач відповідає за те, що
+        остання мітка — саме та, яку треба повернути (`UserGate.refund` це гарантує).
+        """
+        with self._lock:
+            stamps = self._hits.get(key)
+            if stamps is None:
+                return False
+            self._normalize(stamps, self._clock())
+            removed = bool(stamps)
+            if removed:
+                stamps.pop()
+            if not stamps:
+                del self._hits[key]
+            return removed
+
     def _normalize(self, stamps: deque[float], now: float) -> None:
         """Відкинути мітки `≤ now − window`; мітки `> now` затиснути до `now`."""
         cutoff = now - self._window
@@ -257,7 +278,11 @@ class UserGate:
     3. інакше вікно рахує запит (лише при `counts=True`: кешований токен чи невалідна адреса
        квоту не їдять, але правило «один одночасний» діє й для них) і користувач стає активним.
 
-    `leave` ідемпотентний; квоту не повертає. Замок вікна вкладений у замок воріт (порядок
+    `leave` ідемпотентний; квоту не повертає. `refund` повертає її, але лише для ПОТОЧНОГО допуску, що
+    справді списав мітку (`counts=True`), і не більше разу: поки користувач активний, нових міток у
+    його вікні немає (повтор -> `in_progress`), тож остання мітка — саме мітка цього допуску. Після
+    `leave` допуску вже немає, і запізнілий `refund` не зачепить мітку наступного допуску того ж
+    користувача (відповідальність викликача — `refund` лише до `leave`, див. `_GateTicket`). Замок вікна вкладений у замок воріт (порядок
     завжди ворота -> вікно, зворотного немає), тож взаємного блокування не буде. Ключ користувача
     — довільний hashable (Telegram `from.id` / `chat.id`); `1` і `"1"` — різні ключі.
     Виклик `leave` лежить на викликачі (`finally` воркера): гейт сам активність не скидає.
@@ -269,6 +294,7 @@ class UserGate:
         self._window = SlidingWindowLimiter(checks_per_window, window_seconds, clock)
         self._lock = threading.Lock()
         self._active: set[Hashable] = set()
+        self._counted: set[Hashable] = set()  # активні, чий допуск записав мітку й ще не повернутий
 
     def try_enter(self, user: Hashable, *, counts: bool) -> GateDecision:
         """Атомарно: допустити користувача, відмовити через активний аналіз чи через вікно."""
@@ -282,12 +308,28 @@ class UserGate:
                 if not decision.allowed:
                     return GateDecision("rate_limited", decision.retry_after_seconds)
             self._active.add(user)
+            if counts:
+                self._counted.add(user)
             return _OK
+
+    def refund(self, user: Hashable) -> bool:
+        """Повернути квоту поточного допуску (відмова системи не на рахунку користувача).
+
+        Атомарно, під замком воріт: знімає мітку вікна лише якщо `user` зараз допущений і цей допуск
+        її записав (`counts=True`) та ще не повернув; інакше ні-оп. `True`, якщо слот повернуто
+        (мітка допуску ще була у вікні). Користувач лишається активним до `leave`.
+        """
+        with self._lock:
+            if user not in self._counted:  # ⊆ `_active`: `leave` прибирає обидва
+                return False
+            self._counted.discard(user)
+            return self._window.forget_last(user)
 
     def leave(self, user: Hashable) -> None:
         """Зняти позначку активності; для неактивного (або повторно) — нічого не робить."""
         with self._lock:
             self._active.discard(user)
+            self._counted.discard(user)
 
 
 @dataclass(frozen=True)

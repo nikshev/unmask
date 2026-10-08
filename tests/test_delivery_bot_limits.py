@@ -67,6 +67,13 @@ class SpyGate:
         self.log.append(("leave", user))
         self.inner.leave(user)
 
+    def refund(self, user):
+        self.log.append(("refund", user))
+        return self.inner.refund(user)
+
+    def refunds(self) -> list:
+        return [e for e in self.log if e[0] == "refund"]
+
     def leaves(self) -> list:
         return [e for e in self.log if e[0] == "leave"]
 
@@ -916,3 +923,301 @@ def test_busy_without_a_valid_retry_never_pretends_a_number(bad) -> None:
     text = bot_module._format_error({"kind": "busy", "detail": "d", "retry_after_seconds": bad})
     assert text == "incomplete data: d"  # чесне загальне повідомлення, не вигадане «~N»
     assert text != busy(0)
+
+
+# --------------------------------------------------------------------------- рядок T-174
+# Повернення квоти, коли холодний /check відхилено глобальним `busy` (FR-008-07).
+
+
+def busy_slots(retry: int = 37):
+    slots = HeavySlots(1, retry)
+    held = slots.try_acquire()
+    assert held is not None
+    return slots, held
+
+
+class DocService(StubService):
+    """`StubService`, що віддає наперед заданий документ (або кидає виняток)."""
+
+    def __init__(self, doc=None, *, needs=True, exc: BaseException | None = None) -> None:
+        super().__init__(needs)
+        self.doc = doc
+        self.exc = exc
+
+    def analyze(self, mint_: str, progress=None):
+        if self.exc is not None:
+            raise self.exc
+        if self.doc is not None:
+            self.analyzed.append(mint_)
+            return self.doc
+        return super().analyze(mint_, progress)
+
+
+BUSY_DOC = {"mint": "m", "error": {"kind": "busy", "detail": "d", "retry_after_seconds": 37}}
+
+
+def window_stamps(gate, user) -> list:
+    return list(gate.inner._window._hits.get(user, ()))
+
+
+def test_busy_reply_refunds_quota() -> None:
+    slots, held = busy_slots(37)
+    gate, clock = make_gate(1, 600)
+    service, ingest = make_service(slots=slots)
+    t = JournalTransport()
+
+    feed(t, service, gate, sync_spawn, check(1, mint("ins4"), frm=5))
+
+    # відповідь — лише busy; refund викликано рівно раз і ПЕРЕД leave
+    assert t.calls == [message_call(7, busy(37))]
+    assert gate.log == [("enter", 5, True), ("refund", 5), ("leave", 5)]
+    assert window_stamps(gate, 5) == []
+
+    # слухняний користувач повторює через retry_after (квота 1): аналіз іде, а не rate_limited
+    held.release()
+    clock.now = 37
+    sent = len(t.calls)
+    feed(t, service, gate, sync_spawn, check(2, mint("ins4"), frm=5))
+    assert ingest.calls == [mint("ins4")]
+    assert all(text != rate_limited(600) for text in texts(t)[sent:])
+    assert gate.inner.try_enter(5, counts=True).kind == "rate_limited"  # а тепер квота справді витрачена
+
+
+def test_repeated_busy_never_exhausts_the_quota() -> None:
+    slots, held = busy_slots()
+    gate, _ = make_gate(1, 600)
+    service, ingest = make_service(slots=slots)
+    t = JournalTransport()
+    feed(t, service, gate, sync_spawn, *[check(i, mint("ins4"), frm=5) for i in range(1, 8)])
+    assert replies(t) == [busy(37)] * 7  # жодного rate_limited
+    assert len(gate.refunds()) == 7 and ingest.calls == []
+
+
+def test_busy_refund_is_per_user() -> None:
+    slots, held = busy_slots()
+    gate, _ = make_gate(1, 600)
+    service, ingest = make_service(slots=slots)
+    t = JournalTransport()
+    held.release()
+    feed(t, service, gate, sync_spawn, check(1, mint("ins4"), frm=6))  # user 6 витрачає квоту по-справжньому
+    held = slots.try_acquire()
+    assert held is not None
+    feed(t, service, gate, sync_spawn, check(2, mint("cln1"), frm=5))  # user 5 — busy -> refund
+    assert gate.refunds() == [("refund", 5)]
+    assert len(window_stamps(gate, 6)) == 1 and window_stamps(gate, 5) == []
+
+
+def test_success_and_error_reply_do_not_refund() -> None:
+    # успіх, відмова збору, виняток сервісу, виняток рендера: аналіз відбувся (або впав) -> квота спалена
+    cases = [
+        ("success", make_service()[0], None),
+        ("rejection", make_service(labels=())[0], None),  # невалідний mint -> Rejection, не busy
+        ("incomplete", DocService({"mint": "m", "error": {"kind": "rpc_error", "detail": "limit"}}), None),
+        ("not_found", DocService({"mint": "m", "error": {"kind": "token_not_found", "detail": "x"}}), None),
+        ("exception", DocService(exc=RuntimeError("boom")), None),
+        ("render_error", make_service()[0], lambda doc: (_ for _ in ()).throw(RuntimeError("render"))),
+    ]
+    for name, service, render in cases:
+        gate, _ = make_gate(1, 600)
+        if name == "rejection":
+            service.needs_analysis = lambda _m: True  # type: ignore[method-assign]
+        t = JournalTransport()
+        feed(t, service, gate, sync_spawn, check(1, mint("ins4"), frm=5), render=render)
+        assert gate.refunds() == [], name
+        assert gate.leaves() == [("leave", 5)], name
+        assert len(window_stamps(gate, 5)) == 1, name
+
+
+def test_error_doc_with_busy_in_detail_or_other_field_does_not_refund() -> None:
+    # busy лише за `error.kind == "busy"`, не за текстом
+    for doc in (
+        {"mint": "m", "error": {"kind": "rpc_error", "detail": "busy busy busy"}},
+        {"mint": "m", "busy": True, "error": {"kind": "invalid_address", "detail": "busy"}},
+        {"mint": "m", "error": "busy"},
+        {"mint": "m", "error": {"kind": "BUSY", "detail": "x"}},
+    ):
+        gate, _ = make_gate(1, 600)
+        feed(JournalTransport(), DocService(doc), gate, sync_spawn, check(1, "x" * 5, frm=5))
+        assert gate.refunds() == [], doc
+
+
+def test_cached_mint_busy_never_refunds_nothing_to_refund() -> None:
+    # допуск counts=False (кеш-хіт) не списував квоту; якщо відповідь усе ж busy — повертати нічого,
+    # а мітка ПОПЕРЕДНЬОГО допуску цiла
+    gate, _ = make_gate(1, 600)
+    service = DocService(BUSY_DOC)
+    t = JournalTransport()
+    feed(t, service, gate, sync_spawn, check(1, "m1", frm=5))  # холодний busy -> refund
+    assert window_stamps(gate, 5) == []
+    gate.inner.try_enter(5, counts=True)  # користувач реально витратив квоту
+    gate.inner.leave(5)
+    service.needs = False
+    feed(t, service, gate, sync_spawn, check(2, "m1", frm=5))  # counts=False + busy-документ
+    assert [e[2] for e in gate.enters()] == [True, False]
+    assert gate.refunds() == [("refund", 5)]  # лише перший
+    assert len(window_stamps(gate, 5)) == 1
+    assert gate.inner.try_enter(5, counts=True).kind == "rate_limited"
+
+
+def test_cached_mint_busy_with_real_service_gate_stays_untouched() -> None:
+    service, ingest = make_service()
+    gate, _ = make_gate(1, 600)
+    t = JournalTransport()
+    feed(t, service, gate, sync_spawn, check(1, mint("ins4"), frm=5))
+    feed(t, service, gate, sync_spawn, check(2, mint("ins4"), frm=5))  # кеш-хіт
+    assert gate.refunds() == []
+    assert len(window_stamps(gate, 5)) == 1
+
+
+def test_refund_at_most_once_per_admission() -> None:
+    gate, _ = make_gate(2, 600)
+    ticket = bot_module._GateTicket(gate, 5, counts=True)
+    assert gate.inner.try_enter(5, counts=True).kind == "ok"
+    ticket.refund()  # воркер не стартував -> нема чого повертати
+    assert gate.refunds() == []
+    assert ticket.begin() is True
+    ticket.refund()
+    ticket.refund()
+    ticket.refund()
+    assert gate.refunds() == [("refund", 5)]
+    ticket.finish()
+    ticket.refund()  # після leave — заборонено
+    assert gate.refunds() == [("refund", 5)] and gate.leaves() == [("leave", 5)]
+
+
+def test_worker_calling_on_busy_many_times_refunds_once() -> None:
+    gate, _ = make_gate(1, 600)
+
+    original = bot_module.handle_check
+
+    def noisy(text, service, transport, chat_id, requests, *, render=None, on_busy=None):
+        assert on_busy is not None
+        on_busy()
+        on_busy()
+        on_busy()
+        return None
+
+    bot_module.handle_check = noisy  # type: ignore[assignment]
+    try:
+        feed(JournalTransport(), DocService(BUSY_DOC), gate, sync_spawn, check(1, "m1", frm=5))
+    finally:
+        bot_module.handle_check = original  # type: ignore[assignment]
+    assert gate.refunds() == [("refund", 5)]
+
+
+def test_ticket_without_counts_never_refunds() -> None:
+    gate, _ = make_gate(2, 600)
+    ticket = bot_module._GateTicket(gate, 5, counts=False)
+    assert ticket.begin() is True
+    ticket.refund()
+    assert gate.refunds() == []
+    # значення за умовчанням — не рахований допуск: без явного counts=True повернення неможливе
+    legacy = bot_module._GateTicket(gate, 5)
+    assert legacy.begin() is True
+    legacy.refund()
+    assert gate.refunds() == []
+
+
+def test_abandoned_late_worker_neither_analyzes_nor_refunds() -> None:
+    slots, held = busy_slots()
+    gate, _ = make_gate(3, 600)
+    service, ingest = make_service(slots=slots)
+    stash: list = []
+
+    def stores_then_fails(fn):
+        stash.append(fn)
+        raise RuntimeError("late failure")
+
+    t = JournalTransport()
+    feed(t, service, gate, stores_then_fails, check(1, mint("ins4"), frm=5))
+    assert gate.leaves() == [("leave", 5)] and gate.refunds() == []  # скасований допуск не повертає квоту
+
+    spawn = DeferredSpawn()
+    feed(t, service, gate, spawn, check(2, mint("cln1"), frm=5))  # новий допуск того ж користувача
+    assert len(spawn.workers) == 1
+    stamps = window_stamps(gate, 5)
+    assert len(stamps) == 2
+
+    stash[0]()  # запізнілий покинутий воркер: ні аналізу (отже ні busy-відповіді), ні refund
+    assert gate.refunds() == [] and ingest.calls == []
+    assert window_stamps(gate, 5) == stamps
+    feed(t, service, gate, spawn, check(3, mint("cln1"), frm=5))
+    assert texts(t)[-1] == IN_PROGRESS  # новий допуск не звільнено чужим воркером
+
+    spawn.run(0)  # справжній воркер отримує busy -> повертає саме свою мітку
+    assert gate.refunds() == [("refund", 5)]
+    assert len(window_stamps(gate, 5)) == 1
+
+
+def test_stale_ticket_refund_never_removes_the_stamp_of_a_newer_admission() -> None:
+    gate, _ = make_gate(5, 600)
+    assert gate.inner.try_enter(5, counts=True).kind == "ok"
+    old = bot_module._GateTicket(gate, 5, counts=True)
+    assert old.begin() is True
+    old.finish()  # leave
+    assert gate.inner.try_enter(5, counts=True).kind == "ok"  # новий допуск, його мітка
+    old.refund()  # запізніле повернення старого допуску
+    assert gate.refunds() == []
+    assert len(window_stamps(gate, 5)) == 2
+
+
+def test_refund_failure_never_turns_busy_reply_into_error() -> None:
+    slots, held = busy_slots()
+    gate, _ = make_gate(1, 600)
+
+    def broken_refund(user):
+        gate.log.append(("refund", user))
+        raise RuntimeError("refund exploded")
+
+    gate.refund = broken_refund  # type: ignore[method-assign]
+    service, _ = make_service(slots=slots)
+    t = JournalTransport()
+    feed(t, service, gate, sync_spawn, check(1, mint("ins4"), frm=5))
+    assert t.calls == [message_call(7, busy(37))]  # одна чесна busy-відповідь, без "analysis error"
+    assert gate.leaves() == [("leave", 5)]  # користувач не застряг
+
+
+def test_busy_refund_in_a_real_worker_thread_is_before_leave() -> None:
+    slots, held = busy_slots()
+    gate, _ = make_gate(1, 600)
+    service, ingest = make_service(slots=slots)
+    spawn = ThreadSpawn()
+    t = JournalTransport()
+    feed(t, service, gate, spawn, check(1, mint("ins4"), frm=5))
+    spawn.join_all()
+    assert [e[0] for e in gate.log] == ["enter", "refund", "leave"]
+    assert window_stamps(gate, 5) == []
+
+
+def test_handle_check_on_busy_is_called_only_for_busy_documents() -> None:
+    class Svc:
+        def __init__(self, doc):
+            self.doc = doc
+
+        def analyze(self, mint_, progress=None):
+            return self.doc
+
+    for doc, expected in (
+        (BUSY_DOC, 1),
+        ({"mint": "m", "error": {"kind": "busy", "detail": "d"}}, 1),  # busy без числа теж не аналіз
+        ({"mint": "m", "error": {"kind": "invalid_address", "detail": "d"}}, 0),
+        ({"mint": "m", "error": {"kind": "token_not_found", "detail": "d"}}, 0),
+        ({"mint": "m", "error": None, "risk_score": 0, "band": "clean", "clusters": [],
+          "provenance": {}}, 0),
+    ):
+        calls: list[int] = []
+        t = JournalTransport()
+        handle_check("/check abc", Svc(doc), t, 7, {}, on_busy=lambda: calls.append(len(t.calls)))
+        assert len(calls) == expected, doc
+        if expected:
+            assert calls == [0]  # повернення квоти — ДО відповіді користувачу
+
+
+def test_handle_check_without_on_busy_is_unchanged() -> None:
+    class Svc:
+        def analyze(self, mint_, progress=None):
+            return BUSY_DOC
+
+    t = JournalTransport()
+    assert handle_check("/check abc", Svc(), t, 7, {}) is None
+    assert t.calls == [message_call(7, busy(37))]
