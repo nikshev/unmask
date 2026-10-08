@@ -1,4 +1,4 @@
-# impl: FR-004-01, FR-004-07, FR-004-08
+# impl: FR-004-01, FR-004-07, FR-004-08, FR-008-05
 """HTTP-шар доставки: чисті функції маршруту й сокетна обгортка (R-1).
 
 Жодної авторизації: гілок 401/403 не існує (FR-004-08). Логіка тестується без сокетів.
@@ -6,14 +6,16 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
+from collections.abc import Iterable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlsplit, unquote
 
 from unmask.delivery.report import to_json
 
-__all__ = ["route", "handle_token_request", "handle_health", "serve"]
+__all__ = ["route", "handle_token_request", "handle_health", "client_address", "serve"]
 
 _TOKEN_PREFIX = "/api/token/"
 _HEALTH_PATH = "/healthz"
@@ -56,6 +58,99 @@ def handle_token_request(mint: str, service) -> tuple[int, dict[str, Any]]:
         return 200, doc
     kind = error.get("kind", "invalid_address") if isinstance(error, dict) else "invalid_address"
     return _ERROR_STATUS.get(kind, 400), doc
+
+
+# Захист від DoS (R-4): розбирається не більше цього числа символів заголовка, ЗПРАВА. Проксі дописує
+# справжню адресу в кінець, тож хвіст — єдина довірена частина; довший заголовок обрізається зліва
+# по межі ланки (напівобрізаний запис не стає адресою). Усе обрізане лівіше недоступне: якщо
+# довірений хвіст вичерпано — результат `peer`, а не прихований лівий клієнт.
+_XFF_MAX_LENGTH = 4096
+
+_IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+_IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+_MAPPED_PREFIX = 0xFFFF << 32  # ::ffff:0:0/96
+
+
+def _unmap(addr: _IPAddress) -> _IPAddress:
+    """IPv4-mapped IPv6 (`::ffff:a.b.c.d`) → IPv4; решта без змін; scope id відкидається."""
+    if isinstance(addr, ipaddress.IPv6Address):
+        mapped = addr.ipv4_mapped
+        if mapped is not None:
+            return mapped
+        if addr.scope_id is not None:
+            return ipaddress.IPv6Address(int(addr))
+    return addr
+
+
+def _parse_ip(text: str, *, allow_scope: bool) -> _IPAddress | None:
+    """Строга IP-адреса без порту, дужок і масок; `None` для будь-чого іншого (сміття)."""
+    if not allow_scope and "%" in text:
+        return None  # "fe80::1%a", "fe80::1%b" … були б необмеженою кількістю ключів
+    try:
+        return _unmap(ipaddress.ip_address(text))
+    except ValueError:
+        return None
+
+
+def _trusted_networks(trusted: Iterable[object]) -> list[_IPNetwork]:
+    """Нормалізувати `trusted` (мережі, адреси чи рядки). Некоректний запис ігнорується: менше довіри."""
+    networks: list[_IPNetwork] = []
+    for item in trusted:
+        try:
+            networks.append(ipaddress.ip_network(item, strict=False))  # type: ignore[arg-type]
+        except (ValueError, TypeError):
+            continue
+    return networks
+
+
+def _is_trusted(addr: _IPAddress, networks: list[_IPNetwork]) -> bool:
+    forms: list[_IPAddress] = [addr]
+    if isinstance(addr, ipaddress.IPv4Address):  # довірена мережа може бути записана як ::ffff:a.b.c.d/N
+        forms.append(ipaddress.IPv6Address(_MAPPED_PREFIX | int(addr)))
+    return any(form in net for net in networks for form in forms)
+
+
+def client_address(peer: str, forwarded_for: str | None, trusted: Iterable[object]) -> str:
+    """Адреса клієнта для ключа ліміту (FR-008-05, R-4): `str(ip_address)`.
+
+    `peer` — адреса TCP-зʼєднання; `forwarded_for` — значення `X-Forwarded-For` (кілька заголовків
+    викликач зливає через кому в порядку надходження) або `None`; `trusted` — довірені проксі
+    (`ProtectionConfig.trusted_proxies`: рядки IP/CIDR, або вже `ip_network`/`ip_address`).
+
+    Заголовок береться ЛИШЕ коли `peer` належить `trusted` (порожній `trusted` не довіряє нікому).
+    Тоді ланцюг розбирається справа наліво: довірені ланки пропускаються, перша недовірена
+    валідна IP — клієнт. Сміття (порт, дужки, маска, scope id, невалідний запис) зупиняє розбір:
+    результат `peer`. Порожні елементи ігноруються (RFC 9110 §5.6.1). Весь ланцюг довірений або
+    заголовка немає → `peer`. IPv4-mapped IPv6 нормалізується до IPv4 (інакше один клієнт мав би
+    два ключі, а dual-stack `::ffff:127.0.0.1` не збігався б з довіреним `127.0.0.1`).
+    Розбирається не більше `_XFF_MAX_LENGTH` символів заголовка справа (довжина — захист від DoS).
+    `peer`, що не є IP, повертається як є; функція не кидає винятків.
+    """
+    peer_ip = _parse_ip(peer, allow_scope=True)
+    if peer_ip is None:
+        return peer
+    if not forwarded_for:
+        return str(peer_ip)
+    networks = _trusted_networks(trusted)
+    if not _is_trusted(peer_ip, networks):
+        return str(peer_ip)
+
+    header = forwarded_for
+    if len(header) > _XFF_MAX_LENGTH:
+        header = header[-_XFF_MAX_LENGTH:]
+        cut = header.find(",")
+        header = header[cut + 1:] if cut >= 0 else ""
+    while header:
+        header, _, entry = header.rpartition(",")
+        entry = entry.strip()
+        if not entry:
+            continue
+        addr = _parse_ip(entry, allow_scope=False)
+        if addr is None:
+            return str(peer_ip)
+        if not _is_trusted(addr, networks):
+            return str(addr)
+    return str(peer_ip)
 
 
 class _Handler(BaseHTTPRequestHandler):
