@@ -23,7 +23,7 @@ T-131 → T-132 → T-133 → T-134 → T-135 → T-136 → T-137 → T-138 → 
 
 ## Phase 1: Ядро пулу (US1, P1)
 
-- [ ] T-131 [FR-007-15] Тестові дублі провайдерів. `tests/rpc_pool_doubles.py` (`# impl: FR-007-15`):
+- [x] T-131 [FR-007-15] Тестові дублі провайдерів. `tests/rpc_pool_doubles.py` (`# impl: FR-007-15`):
   `ScriptedProvider(inner, *, horizon_block_time=None, failures=(), barrier=None)`, `ScriptedFailure(method,
   calls, exc)`, `SequentialRunner(order="forward"|"reverse"|перестановка)` — точно за контрактом
   `pooled-rpc-source.md` «Тестові дублі». `log` пише кожен виклик (також невдалий) під власним
