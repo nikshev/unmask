@@ -9,15 +9,27 @@
 збирається за ПОЗИЦІЄЮ підпису. Тож результат залежить лише від вхідних даних і складу пулу, а не від порядку
 завершення потоків чи від того, який провайдер що обслужив (FR-007-04).
 
-Статус реалізації (T-132, T-133): `Provider`, `apportion`, `ThreadRunner`, конструктор, `get_transactions`
-одним раундом БЕЗ перебирання, одиночні методи (`get_account_info`, `get_signatures_for_address`,
+Статус реалізації (T-132, T-133, T-135): `Provider`, `apportion`, `ThreadRunner`, конструктор, `get_transactions`
+раундами БЕЗ перебирання, одиночні методи (`get_account_info`, `get_signatures_for_address`,
 `get_token_accounts_by_owner`) і `name`/`__repr__`. Одиночний виклик — один провайдер за згладженим зваженим
 round-robin (SWRR, стан спільний для трьох методів: кошик адаптера глобальний, тож навантаження рахується
 разом), у викликаючому потоці, під локом провайдера. Будь-який `RpcError` піднімається як є (той самий об'єкт
-адаптера, поза `except`: `__cause__`/`__context__` порожні). Ще не реалізовано (наступні задачі):
-маршрутизація за архівністю й підтвердження `None`/короткої сторінки (T-135, T-136), перебирання, паузи після
-429 і класи помилок (T-140), лічильники й `close()` (T-141). До T-135/T-136 відповідь `None` / сторінка від
-будь-якого провайдера вважається остаточною — безпечно лише для архівних провайдерів.
+адаптера, поза `except`: `__cause__`/`__context__` порожні).
+
+Вік і підтвердження «не знайдено» (T-135, FR-007-06/07, принцип V). Вік транзакції пул знає з `blockTime`
+відповідей `getSignaturesForAddress`, що пройшли через нього (кеш `підпис → blockTime`, FIFO ≤
+`age_cache_entries`, лише справжній `int`). Придатність провайдера для підпису: метод ∉ `skip_methods` і
+(архівний, або вік невідомий, або `вік <= retention_seconds` — межа ВКЛЮЧНО). Позиції групуються за множиною
+придатних провайдерів, кожна група ділиться окремо за вагами членів, тож частка провайдера — НЕ суцільний
+відрізок, а відповідь збирається строго за ПОЗИЦІЄЮ підпису. `None` від неархівного провайдера — не остаточне:
+позиція йде в наступний раунд «лише архівні» (`not_found_escalations`), і лише `None` від архівного
+остаточний; транзакція з даними від будь-кого остаточна. Немає придатного провайдера (відомо старша за
+глибину всіх неархівних, а придатного архівного немає; або нікому підтвердити `None`) —
+`RpcUnavailable("history beyond provider retention")` без звернень цього раунду. Кеш віку — лише оптимізація
+маршруту: правильність (чесна неповнота) тримається на правилі підтвердження, а не на кеші.
+Ще не реалізовано (наступні задачі): правила `getSignaturesForAddress` для неархівних — до T-136 сторінка від
+будь-якого провайдера вважається остаточною (безпечно лише для архівних); перебирання, паузи після 429 і класи
+помилок (T-140); лічильники й `close()` (T-141). Відмова частки (будь-якого раунду) піднімається як є.
 
 Потоки: адаптер `HttpRpcSource` однопотоковий, тож кожен провайдер викликається ЛИШЕ під власним
 `threading.Lock` (кошик лімітера провайдера — один на всіх викликачів). Шматок роботи раунду — одна задача на
@@ -35,10 +47,11 @@ from __future__ import annotations
 
 import math
 import threading
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from unmask.ingest.budget import Clock
 from unmask.ingest.rpc.protocol import (
@@ -60,6 +73,7 @@ Runner = Callable[[Sequence[Callable[[], Any]]], list[Outcome]]  # outcomes — 
 
 # Власні тексти пулу — лише константи (політика `detail` адаптера: жодного вільного тексту ззовні).
 _SHAPE_ERROR = "unexpected response shape: pool share length"
+_RETENTION_ERROR = "history beyond provider retention"
 
 
 @dataclass(frozen=True, repr=False)
@@ -146,6 +160,8 @@ class PooledRpcSource:
         self._state_lock = threading.Lock()  # стан SWRR (і далі: кеш віку, паузи, лічильники); не разом із _locks
         self._exact_weights = tuple(Fraction(p.weight) for p in providers)  # точні ваги: без шуму float
         self._swrr_current = [Fraction(0)] * len(providers)  # стан згладженого round-robin, за індексом
+        self._age: OrderedDict[str, int] = OrderedDict()  # підпис -> blockTime, FIFO ≤ age_cache_entries (_state_lock)
+        self._not_found_escalations = [0] * len(providers)  # позицій, переданих архівному після None (_state_lock)
         self._clock = clock
         self._cooldown_seconds = float(rate_limit_cooldown_seconds)
         self._age_cache_entries = age_cache_entries
@@ -174,13 +190,15 @@ class PooledRpcSource:
         limit: int,
         deadline: Deadline,
     ) -> list[SignatureInfo]:
-        return self._single(
+        page = self._single(
             "getSignaturesForAddress",
             deadline,
             lambda s: s.get_signatures_for_address(
                 address, before=before, until=until, limit=limit, deadline=deadline
             ),
         )
+        self._remember_ages(page)  # після виклику: лок провайдера вже відпущено; відмова сюди не доходить
+        return page
 
     def get_token_accounts_by_owner(self, owner: str, *, deadline: Deadline) -> list[TokenAccountInfo]:
         return self._single(
@@ -190,40 +208,66 @@ class PooledRpcSource:
     def get_transactions(
         self, signatures: Sequence[str], *, deadline: Deadline
     ) -> list[RawTransaction | None]:
-        """Раунд: поділ за вагами → частки одночасно → збирання за позицією. «Все або нічого»."""
+        """Раунди: поділ за придатністю й вагами → частки одночасно → збирання за позицією. «Все або нічого».
+
+        Раунд 1 — усі позиції; позиція, на яку неархівний відповів `None`, іде в раунд «лише архівні», де `None`
+        вже остаточний. Без перебирання: відмова частки будь-якого раунду піднімається (T-140 її перебере).
+        """
         sigs = list(signatures)
         if not sigs:
             return []  # нуль звернень, дедлайн не перевіряється
-        if deadline.expired():
-            raise RpcBudgetTimeout()  # нуль звернень у цьому раунді
-
-        shares = self._plan_round(list(range(len(sigs))), self._serving("getTransaction"))
-        tasks = [
-            self._share_task(index, [sigs[position] for position in positions], deadline)
-            for index, positions in shares
-        ]
-        outcomes = self._runner(tasks)
-        if len(outcomes) != len(tasks):
-            raise RuntimeError("runner: must return one outcome per task")  # дефект runner, не відмова RPC
-
+        ages, now = self._age_snapshot(sigs)  # один знімок на виклик: розподіл не залежить від переплетення потоків
         results: list[RawTransaction | None] = [None] * len(sigs)
-        failures: list[tuple[int, BaseException]] = []  # (найменша позиція частки, виняток)
-        defect: BaseException | None = None
-        for (_, positions), (value, exc) in zip(shares, outcomes):  # порядок конфігу, не завершення
-            if exc is None and (not isinstance(value, list) or len(value) != len(positions)):
-                exc = RpcUnavailable(_SHAPE_ERROR)  # частка не відповідає запиту: ніколи не вгадуємо
-            if exc is None:
-                for position, raw in zip(positions, value):
-                    results[position] = raw
-            elif isinstance(exc, RpcError):
-                failures.append((positions[0], exc))
-            elif defect is None:
-                defect = exc  # не-RpcError — дефект: не маскується відмовою іншого провайдера
-        # Усе `raise` — поза `except`: `__cause__`/`__context__` порожні (httpx-виняток тримав би URL).
-        if defect is not None:
-            raise defect
-        if failures:
-            raise min(failures, key=lambda failure: failure[0])[1]  # частка з найменшою позицією
+        pending = list(range(len(sigs)))
+        confirm: set[int] = set()  # позиції, на які неархівний сказав None: питати лише архівних
+
+        while pending:
+            if deadline.expired():
+                raise RpcBudgetTimeout()  # нуль звернень у цьому раунді
+            eligible = {
+                position: self._eligible_for_transaction(ages.get(sigs[position]), now, position in confirm)
+                for position in pending
+            }
+            if any(not providers for providers in eligible.values()):
+                raise RpcUnavailable(_RETENTION_ERROR)  # нікому віддати (або підтвердити): до звернень цього раунду
+
+            shares = self._plan_round(pending, eligible)
+            tasks = [
+                self._share_task(index, [sigs[position] for position in positions], deadline)
+                for index, positions in shares
+            ]
+            outcomes = self._runner(tasks)
+            if len(outcomes) != len(tasks):
+                raise RuntimeError("runner: must return one outcome per task")  # дефект runner, не відмова RPC
+
+            failures: list[tuple[int, BaseException]] = []  # (найменша позиція частки, виняток)
+            defect: BaseException | None = None
+            unconfirmed: list[tuple[int, int]] = []  # (провайдер, позиція): None від неархівного
+            for (index, positions), (value, exc) in zip(shares, outcomes):  # порядок конфігу, не завершення
+                if exc is None and (not isinstance(value, list) or len(value) != len(positions)):
+                    exc = RpcUnavailable(_SHAPE_ERROR)  # частка не відповідає запиту: ніколи не вгадуємо
+                if exc is None:
+                    archival = self._providers[index].archival
+                    for position, raw in zip(positions, value):
+                        results[position] = raw  # за ПОЗИЦІЄЮ підпису, не за порядком провайдерів
+                        if raw is None and not archival:
+                            unconfirmed.append((index, position))  # None неархівного — не остаточне
+                elif isinstance(exc, RpcError):
+                    failures.append((positions[0], exc))
+                elif defect is None:
+                    defect = exc  # не-RpcError — дефект: не маскується відмовою іншого провайдера
+            # Усе `raise` — поза `except`: `__cause__`/`__context__` порожні (httpx-виняток тримав би URL).
+            if defect is not None:
+                raise defect
+            if failures:
+                raise min(failures, key=lambda failure: failure[0])[1]  # частка з найменшою позицією
+
+            if unconfirmed:
+                with self._state_lock:
+                    for index, _ in unconfirmed:
+                        self._not_found_escalations[index] += 1
+                confirm.update(position for _, position in unconfirmed)
+            pending = sorted(position for _, position in unconfirmed)  # лише архівні, де None остаточний: ≤ 2 раунди
         return results
 
     # --- внутрішнє -----------------------------------------------------------------------
@@ -254,19 +298,69 @@ class PooledRpcSource:
         """Індекси провайдерів, що обслуговують метод (порядок конфігу)."""
         return [i for i, p in enumerate(self._providers) if method not in p.skip_methods]
 
-    def _plan_round(self, positions: list[int], eligible: list[int]) -> list[tuple[int, list[int]]]:
+    def _age_snapshot(self, sigs: Sequence[str]) -> tuple[dict[str, int], int]:
+        """Відомі `blockTime` підписів виклику й «зараз» пулу (`clock.wall()`) — одним знімком під `_state_lock`."""
+        with self._state_lock:
+            ages = {sig: self._age[sig] for sig in sigs if sig in self._age}
+        return ages, self._clock.wall()
+
+    def _remember_ages(self, page: object) -> None:
+        """Занести `blockTime` записів сторінки в кеш віку: лише `str` підпис і справжній `int` (не bool/None/float).
+
+        Кеш — оптимізація маршруту (R-2), не джерело істини: сміття в сторінці мовчки пропускається (розбір записів —
+        справа ядра), відповідь повертається викликачу як є. FIFO: наявний підпис оновлюється на місці, новий —
+        в кінець, а понад `age_cache_entries` витісняється найстаріший.
+        """
+        if not isinstance(page, (list, tuple)):
+            return
+        with self._state_lock:
+            for entry in page:
+                if not isinstance(entry, Mapping):
+                    continue
+                signature, block_time = entry.get("signature"), entry.get("blockTime")
+                if type(signature) is not str or type(block_time) is not int:
+                    continue
+                self._age[signature] = block_time  # наявний ключ зберігає позицію в черзі FIFO
+                while len(self._age) > self._age_cache_entries:
+                    self._age.popitem(last=False)
+
+    def _eligible_for_transaction(self, block_time: int | None, now: int, confirming: bool) -> tuple[int, ...]:
+        """Індекси провайдерів (порядок конфігу), яким можна віддати `getTransaction` підпису з відомим `blockTime`.
+
+        Архівний придатний завжди; неархівний — коли вік невідомий або `вік <= retention_seconds` (межа включно),
+        і ніколи у підтверджувальному раунді (там `None` має підтвердити лише архівний).
+        """
+        out = []
+        for index, provider in enumerate(self._providers):
+            if "getTransaction" in provider.skip_methods:
+                continue
+            if provider.archival:
+                out.append(index)
+            elif not confirming and (block_time is None or now - block_time <= provider.retention_seconds):
+                out.append(index)
+        return tuple(out)
+
+    def _plan_round(
+        self, positions: list[int], eligible: Mapping[int, tuple[int, ...]]
+    ) -> list[tuple[int, list[int]]]:
         """Частки раунду: `(індекс провайдера, зростаючі позиції)` у порядку конфігу; порожні — без запису.
 
-        Частка — суцільний відрізок `positions`; розмір — `apportion` за вагами придатних провайдерів.
+        Позиції групуються за множиною придатних провайдерів (групи — у порядку першої позиції); кожна група
+        ділиться окремо — `apportion` за вагами своїх членів, суцільними відрізками СВОЇХ позицій. Тож частка
+        провайдера — об'єднання відрізків із різних груп і, взагалі кажучи, не суцільна.
         """
-        counts = apportion(len(positions), [self._providers[i].weight for i in eligible])
-        shares: list[tuple[int, list[int]]] = []
-        offset = 0
-        for index, count in zip(eligible, counts):
-            if count:
-                shares.append((index, positions[offset : offset + count]))
-            offset += count
-        return shares
+        groups: dict[tuple[int, ...], list[int]] = {}
+        for position in positions:
+            groups.setdefault(eligible[position], []).append(position)
+        shares: dict[int, list[int]] = {}
+        for members, group in groups.items():
+            counts = apportion(len(group), [self._providers[i].weight for i in members])
+            offset = 0
+            for index, count in zip(members, counts):
+                if count:
+                    shares.setdefault(index, []).extend(group[offset : offset + count])
+                offset += count
+        return [(index, sorted(shares[index])) for index in sorted(shares)]
 
     def _share_task(self, index: int, batch: list[str], deadline: Deadline) -> Callable[[], Any]:
         provider, lock = self._providers[index], self._locks[index]
