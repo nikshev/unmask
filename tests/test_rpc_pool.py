@@ -3,14 +3,14 @@
 
 Розподіл за вагами (метод найбільших залишків), одночасне виконання часток, збирання відповіді за
 ПОЗИЦІЄЮ підпису (а не за порядком завершення), локи провайдерів, перевірка дедлайну перед раундом,
-відмова частки піднімається як є (без перебирання: перебирання — T-140). Паралелізм доводиться
+відмова частки піднімається як є, коли відмовили ВСІ провайдери (перебирання — T-140, `test_rpc_pool_failover.py`). Паралелізм доводиться
 `threading.Barrier` і `SequentialRunner`, а не вимірюванням часу (стінний час — лише `-m perf`, T-144).
 Мережі немає: `ScriptedProvider` поверх власних `FixtureRpcSource`.
 
 T-133 (нижче, розділ «одиночні методи»): `get_account_info`, `get_signatures_for_address`,
 `get_token_accounts_by_owner` — згладжений зважений round-robin (SWRR) за вагою, `name`, `repr`,
 потокобезпечність (лок на провайдера). Без маршрутизації за архівністю (T-135/T-136) і без перебирання
-(T-140): відмова провайдера піднімається як є.
+(T-140; його тести — `test_rpc_pool_failover.py`): тут відмова піднімається як є, коли відмовили усі провайдери.
 """
 
 import contextlib
@@ -471,7 +471,7 @@ def test_same_deadline_object_reaches_every_provider():
     assert all(probe.deadlines == [deadline] for probe in probes)
 
 
-# --------------------------------------------------------------------------- відмови частки (без перебирання)
+# --------------------------------------------------------------------------- відмови частки (усі провайдери; перебирання — T-140)
 
 
 @pytest.mark.parametrize(
@@ -480,7 +480,7 @@ def test_same_deadline_object_reaches_every_provider():
     ids=["rate_limited", "timeout", "unavailable", "budget"],
 )
 def test_share_error_is_raised_as_is_without_chain(scenario, exc):
-    failing = {1: {"failures": [ScriptedFailure("getTransaction", None, exc)]}}
+    failing = {i: {"failures": [ScriptedFailure("getTransaction", None, exc)]} for i in range(3)}  # T-140: відмовили всі
     pool, _ = _kit(scenario, [1, 1, 1], runner=SequentialRunner(), scripted=failing)
     with pytest.raises(type(exc)) as info:
         pool.get_transactions(_signatures(30), deadline=_deadline())
@@ -490,11 +490,11 @@ def test_share_error_is_raised_as_is_without_chain(scenario, exc):
 
 def test_failure_gives_no_partial_result_and_no_retry(scenario):
     exc = RpcUnavailable("http 5xx server error")
-    failing = {2: {"failures": [ScriptedFailure("getTransaction", None, exc)]}}
+    failing = {i: {"failures": [ScriptedFailure("getTransaction", None, exc)]} for i in range(3)}  # T-140: відмовили всі
     pool, doubles = _kit(scenario, [1, 1, 1], runner=SequentialRunner(), scripted=failing)
     with pytest.raises(RpcUnavailable):
         pool.get_transactions(_signatures(30), deadline=_deadline())
-    # без перебирання: кожен провайдер викликаний рівно раз, частку, що впала, ніхто не перебрав
+    # відмовлений провайдер не викликається вдруге: кожен рівно раз
     assert [len(d.log) for d in doubles] == [1, 1, 1]
 
 
@@ -503,6 +503,7 @@ def test_error_of_the_smallest_position_wins_regardless_of_runner_order(scenario
     first, last = RpcRateLimited(1.0), RpcTimeout("request timed out")
     failing = {
         0: {"failures": [ScriptedFailure("getTransaction", None, first)]},
+        1: {"failures": [ScriptedFailure("getTransaction", None, RpcUnavailable("http 5xx server error"))]},  # T-140
         2: {"failures": [ScriptedFailure("getTransaction", None, last)]},
     }
     pool, _ = _kit(scenario, [1, 1, 1], runner=SequentialRunner(order), scripted=failing)
@@ -515,7 +516,8 @@ def test_error_of_the_smallest_position_wins_with_real_threads(scenario):
     first, last = RpcRateLimited(1.0), RpcTimeout("request timed out")
     for _ in range(5):
         failing = {
-            1: {"failures": [ScriptedFailure("getTransaction", None, first)]},
+            0: {"failures": [ScriptedFailure("getTransaction", None, first)]},  # T-140: відмовляють усі, найменша позиція — p0
+            1: {"failures": [ScriptedFailure("getTransaction", None, RpcUnavailable("http 5xx server error"))]},
             2: {"failures": [ScriptedFailure("getTransaction", None, last)]},
         }
         pool, _ = _kit(scenario, [1, 1, 1], scripted=failing)
@@ -558,8 +560,7 @@ def test_wrong_share_shape_is_unavailable_not_a_result(scenario, bad):
         def get_transactions(self, signatures, *, deadline):
             return bad(signatures)
 
-    good = ScriptedProvider(FixtureRpcSource(scenario))
-    pool = _pool([_provider("good", good), _provider("broken", Broken())], runner=SequentialRunner())
+    pool = _pool([_provider("broken1", Broken()), _provider("broken", Broken())], runner=SequentialRunner())  # T-140: усі хибні
     with pytest.raises(RpcUnavailable) as info:
         pool.get_transactions(_signatures(10), deadline=_deadline())
     assert str(info.value) == SHAPE_TEXT
@@ -932,7 +933,7 @@ def test_pool_answers_like_the_plain_fixture_source_on_real_scenario():
     assert all(len(d.log) > 0 for d in doubles)
 
 
-# --------------------------------------------------------------------------- дедлайн і відмови (без перебирання)
+# --------------------------------------------------------------------------- дедлайн і відмови (усі провайдери; перебирання — T-140)
 
 
 @pytest.mark.parametrize("method", SINGLE_METHODS)
@@ -955,17 +956,18 @@ def test_single_call_with_expired_deadline_raises_budget_timeout_with_zero_calls
     [RpcRateLimited(2.5), RpcTimeout("request timed out"), RpcUnavailable("http 5xx server error"), RpcBudgetTimeout()],
     ids=["rate_limited", "timeout", "unavailable", "budget"],
 )
-def test_single_call_error_is_raised_as_is_without_failover(method, exc):
+def test_single_call_error_is_raised_as_is_when_every_provider_fails(method, exc):
     doubles = [
         ScriptedProvider(FixtureRpcSource(BASIC), failures=[ScriptedFailure(JSONRPC_OF[method], None, exc)]),
-        ScriptedProvider(FixtureRpcSource(BASIC)),
+        ScriptedProvider(FixtureRpcSource(BASIC), failures=[ScriptedFailure(JSONRPC_OF[method], None, exc)]),
     ]
     pool = _pool([_provider("a", doubles[0], 1.0), _provider("b", doubles[1], 1.0)])
     with pytest.raises(type(exc)) as info:
         _call_single(pool, method)
     assert info.value is exc  # сам об'єкт адаптера: клас і фіксований текст
     assert info.value.__cause__ is None and info.value.__context__ is None
-    assert len(doubles[0].log) == 1 and doubles[1].log == []  # перебирання — T-140, тут його немає
+    # T-140: відмовлений перебрано на другого (кожен рівно раз), і бюджет ключа теж
+    assert len(doubles[0].log) == 1 and len(doubles[1].log) == 1
 
 
 def test_single_call_defect_propagates_unchanged():

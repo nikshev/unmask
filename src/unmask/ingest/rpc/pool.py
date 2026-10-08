@@ -9,12 +9,25 @@
 збирається за ПОЗИЦІЄЮ підпису. Тож результат залежить лише від вхідних даних і складу пулу, а не від порядку
 завершення потоків чи від того, який провайдер що обслужив (FR-007-04).
 
-Статус реалізації (T-132, T-133, T-135, T-136): `Provider`, `apportion`, `ThreadRunner`, конструктор, `get_transactions`
-раундами БЕЗ перебирання, одиночні методи (`get_account_info`, `get_signatures_for_address`,
+Статус реалізації (T-132, T-133, T-135, T-136, T-140): `Provider`, `apportion`, `ThreadRunner`, конструктор,
+`get_transactions` раундами з перебиранням, одиночні методи (`get_account_info`, `get_signatures_for_address`,
 `get_token_accounts_by_owner`) і `name`/`__repr__`. Одиночний виклик — один провайдер за згладженим зваженим
 round-robin (SWRR, стан спільний для трьох методів: кошик адаптера глобальний, тож навантаження рахується
-разом), у викликаючому потоці, під локом провайдера. Будь-який `RpcError` піднімається як є (той самий об'єкт
-адаптера, поза `except`: `__cause__`/`__context__` порожні).
+разом), у викликаючому потоці, під локом провайдера.
+
+Перебирання й класи помилок (T-140, FR-007-05/08/12, research R-4). Відмова провайдера (`RpcRateLimited`,
+`RpcTimeout`, `RpcUnavailable`, а також хибна форма частки) переводить частку/запит на іншого придатного; провайдер,
+що відмовив, виключений до кінця ВИКЛИКУ (набір `excluded` лише зростає → завершення гарантоване, плюс жорсткий
+запобіжник на кількість раундів). `RpcRateLimited` додатково ставить провайдера на паузу
+`max(rate_limit_cooldown_seconds, retry_after)` за `clock.monotonic()` пулу: на паузі він не отримує нового, поки є
+інші (усі на паузі → пауза ігнорується). Коли придатних не лишилось, піднімається ОСТАННЯ помилка найменшої
+нерозвʼязаної позиції — той самий обʼєкт адаптера (клас і фіксований текст), поза `except`: `__cause__`/`__context__`
+порожні, пул тексту не дописує. Дефект (не-`RpcError`) пріоритетніший за все й не перебирається. `RpcBudgetTimeout`
+частки — це стан кошика КОНКРЕТНОГО ключа (пейсер не вмістив запит у дедлайн), тож перебирається як інші `RpcError`
+(інший ключ може мати повний кошик; SC-005), без паузи; прострочений дедлайн перед раундом/спробою — свіжий
+`RpcBudgetTimeout` без звернень.
+Придатність (вік, `skip_methods`, «лише архівні» для підтвердження) діє й при перебиранні: неархівний не стає
+запасним для давніх даних.
 
 Вік і підтвердження «не знайдено» (T-135, FR-007-06/07, принцип V). Вік транзакції пул знає з `blockTime`
 відповідей `getSignaturesForAddress`, що пройшли через нього (кеш `підпис → blockTime`, FIFO ≤
@@ -35,8 +48,7 @@ round-robin (SWRR, стан спільний для трьох методів: �
 retention")` (чесна неповнота, а не «історія скінчилась»), що рахується в `not_found_escalations`. Сторінка архівного
 остаточна, яка б не була. Решта одиночних методів обирає серед усіх, хто не пропускає метод (`skip_methods`).
 
-Ще не реалізовано (наступні задачі): перебирання, паузи після 429 і класи помилок (T-140); лічильники й `close()`
-(T-141). Відмова частки (будь-якого раунду) і одиночного виклику піднімається як є.
+Ще не реалізовано (наступні задачі): лічильники й `close()` (T-141).
 
 Потоки: адаптер `HttpRpcSource` однопотоковий, тож кожен провайдер викликається ЛИШЕ під власним
 `threading.Lock` (кошик лімітера провайдера — один на всіх викликачів). Шматок роботи раунду — одна задача на
@@ -67,6 +79,7 @@ from unmask.ingest.rpc.protocol import (
     RawTransaction,
     RpcBudgetTimeout,
     RpcError,
+    RpcRateLimited,
     RpcUnavailable,
     SignatureInfo,
     TokenAccountInfo,
@@ -81,6 +94,7 @@ Runner = Callable[[Sequence[Callable[[], Any]]], list[Outcome]]  # outcomes — 
 # Власні тексти пулу — лише константи (політика `detail` адаптера: жодного вільного тексту ззовні).
 _SHAPE_ERROR = "unexpected response shape: pool share length"
 _RETENTION_ERROR = "history beyond provider retention"
+_NO_PROVIDER_ERROR = "no provider available"
 
 
 @dataclass(frozen=True, repr=False)
@@ -169,6 +183,7 @@ class PooledRpcSource:
         self._swrr_current = [Fraction(0)] * len(providers)  # стан згладженого round-robin, за індексом
         self._age: OrderedDict[str, int] = OrderedDict()  # підпис -> blockTime, FIFO ≤ age_cache_entries (_state_lock)
         self._not_found_escalations = [0] * len(providers)  # позицій, переданих архівному після None (_state_lock)
+        self._cooldown_until: dict[int, float] = {}  # індекс провайдера -> clock.monotonic() кінця паузи (_state_lock)
         self._clock = clock
         self._cooldown_seconds = float(rate_limit_cooldown_seconds)
         self._age_cache_entries = age_cache_entries
@@ -228,7 +243,11 @@ class PooledRpcSource:
         """Раунди: поділ за придатністю й вагами → частки одночасно → збирання за позицією. «Все або нічого».
 
         Раунд 1 — усі позиції; позиція, на яку неархівний відповів `None`, іде в раунд «лише архівні», де `None`
-        вже остаточний. Без перебирання: відмова частки будь-якого раунду піднімається (T-140 її перебере).
+        вже остаточний. Перебирання (T-140, FR-007-08): частка, що впала з `RpcRateLimited`/`RpcTimeout`/
+        `RpcUnavailable` (або з хибною формою), іде в наступний раунд без цього провайдера — він виключений до кінця
+        ВИКЛИКУ (`excluded` лише зростає). Коли для позиції придатних не лишилось, піднімається ОСТАННЯ помилка цієї
+        позиції (найменша серед нерозвʼязаних), той самий обʼєкт адаптера (тут може бути й `RpcBudgetTimeout`). Дефект
+        (не-`RpcError`) не перебирається.
         """
         sigs = list(signatures)
         if not sigs:
@@ -237,17 +256,51 @@ class PooledRpcSource:
         results: list[RawTransaction | None] = [None] * len(sigs)
         pending = list(range(len(sigs)))
         confirm: set[int] = set()  # позиції, на які неархівний сказав None: питати лише архівних
+        excluded: set[int] = set()  # провайдери, що відмовили в цьому виклику: лише зростає → завершення гарантоване
+        last_error: dict[int, BaseException] = {}  # позиція -> помилка її останньої невдалої спроби
+        said_none: dict[int, int] = {}  # позиція підтвердження -> неархівний, що сказав None (рахується при передачі)
+        excluded_errors: dict[int, BaseException] = {}  # провайдер -> помилка, що його виключила (порядок виключення)
+        rounds = 0
 
         while pending:
+            # Жорсткий запобіжник. Кожен раунд із відмовою виключає ≥ 1 провайдера (≤ n таких раундів); раунд без відмов
+            # або завершує все, або лишає лише позиції підтвердження (там і далі працюють лише архівні, `None` остаточний),
+            # тож найгірший випадок — n + 2 раундів. Ліміт 2n + 2 недосяжний у коректному коді й семантики не змінює:
+            # це гучний дефект замість зависання потоку, що тримає запит.
+            rounds += 1
+            if rounds > 2 * len(self._providers) + 2:
+                raise RuntimeError("pool: failover round limit exceeded")
             if deadline.expired():
                 raise RpcBudgetTimeout()  # нуль звернень у цьому раунді
-            eligible = {
-                position: self._eligible_for_transaction(ages.get(sigs[position]), now, position in confirm)
-                for position in pending
-            }
-            if any(not providers for providers in eligible.values()):
-                raise RpcUnavailable(_RETENTION_ERROR)  # нікому віддати (або підтвердити): до звернень цього раунду
+            paused = self._paused_providers()
+            eligible: dict[int, tuple[int, ...]] = {}
+            for position in pending:
+                usable = tuple(
+                    index
+                    for index in self._eligible_for_transaction(ages.get(sigs[position]), now, position in confirm)
+                    if index not in excluded
+                )
+                awake = tuple(index for index in usable if index not in paused)
+                eligible[position] = awake or usable  # усі на паузі → пауза ігнорується: політика не валить збір
+            stuck = [position for position in pending if not eligible[position]]
+            if stuck:
+                # нікому віддати (або підтвердити): до звернень цього раунду; `raise` — поза `except`
+                position = min(stuck)
+                error = last_error.get(position)
+                if error is None:
+                    # Позиція сама не падала (напр. `None` неархівного чекає підтвердження), але придатні для неї
+                    # провайдери виключені відмовою: чесна причина — остання відмова серед них, а не «історія за межею».
+                    suitable = self._eligible_for_transaction(ages.get(sigs[position]), now, position in confirm)
+                    error = next((e for i, e in reversed(excluded_errors.items()) if i in suitable), None)
+                if error is not None:
+                    raise error
+                raise RpcUnavailable(_RETENTION_ERROR)  # нікого не було кому віддати: історія за межею всіх
 
+            handed_over = [position for position in pending if position in said_none]
+            if handed_over:
+                with self._state_lock:  # лічильник — коли позиція справді передається архівному, а не коли про це дізналися
+                    for position in handed_over:
+                        self._not_found_escalations[said_none.pop(position)] += 1
             shares = self._plan_round(pending, eligible)
             tasks = [
                 self._share_task(index, [sigs[position] for position in positions], deadline)
@@ -257,7 +310,7 @@ class PooledRpcSource:
             if len(outcomes) != len(tasks):
                 raise RuntimeError("runner: must return one outcome per task")  # дефект runner, не відмова RPC
 
-            failures: list[tuple[int, BaseException]] = []  # (найменша позиція частки, виняток)
+            failed: list[int] = []  # позиції часток, що впали (RpcError)
             defect: BaseException | None = None
             unconfirmed: list[tuple[int, int]] = []  # (провайдер, позиція): None від неархівного
             for (index, positions), (value, exc) in zip(shares, outcomes):  # порядок конфігу, не завершення
@@ -270,42 +323,64 @@ class PooledRpcSource:
                         if raw is None and not archival:
                             unconfirmed.append((index, position))  # None неархівного — не остаточне
                 elif isinstance(exc, RpcError):
-                    failures.append((positions[0], exc))
+                    excluded.add(index)
+                    excluded_errors[index] = exc
+                    failed.extend(positions)
+                    for position in positions:
+                        last_error[position] = exc
+                    if isinstance(exc, RpcRateLimited):
+                        self._cool_down(index, exc)
                 elif defect is None:
                     defect = exc  # не-RpcError — дефект: не маскується відмовою іншого провайдера
             # Усе `raise` — поза `except`: `__cause__`/`__context__` порожні (httpx-виняток тримав би URL).
             if defect is not None:
                 raise defect
-            if failures:
-                raise min(failures, key=lambda failure: failure[0])[1]  # частка з найменшою позицією
 
-            if unconfirmed:
-                with self._state_lock:
-                    for index, _ in unconfirmed:
-                        self._not_found_escalations[index] += 1
-                confirm.update(position for _, position in unconfirmed)
-            pending = sorted(position for _, position in unconfirmed)  # лише архівні, де None остаточний: ≤ 2 раунди
+            for index, position in unconfirmed:
+                said_none[position] = index
+                confirm.add(position)
+            pending = sorted({*failed, *(position for _, position in unconfirmed)})
         return results
 
     # --- внутрішнє -----------------------------------------------------------------------
 
     def _single(self, method: str, deadline: Deadline, call: Callable[[Any], Any]) -> tuple[int, Any]:
-        """Одиночний виклик: один провайдер за SWRR, у викликаючому потоці, під його локом. Без перебирання.
+        """Одиночний виклик: один провайдер за SWRR, у викликаючому потоці, під його локом, з перебиранням (T-140).
+
+        Провайдер, що відмовив `RpcRateLimited`/`RpcTimeout`/`RpcUnavailable`, виключається до кінця виклику, і
+        спроба йде далі; коли кандидатів не лишилось — піднімається ОСТАННЯ помилка (той самий обʼєкт, поза `except`).
+        Дефект не перебирається; `RpcBudgetTimeout` ключа — перебирається (без паузи). Ітерацій ≤ n + 1: кожна невдала виключає ще одного провайдера.
 
         Повертає `(індекс провайдера, відповідь)`: `get_signatures_for_address` має знати, чия це сторінка.
         """
-        if deadline.expired():
-            raise RpcBudgetTimeout()  # нуль звернень; ротацію не зсуваємо
-        index = self._pick(method)
-        with self._locks[index]:  # `_state_lock` тут уже відпущено
-            return index, call(self._providers[index].source)  # RpcError піднімається як є, поза `except`
+        excluded: set[int] = set()
+        last: BaseException | None = None
+        for _ in range(len(self._providers) + 1):
+            if deadline.expired():
+                raise RpcBudgetTimeout()  # нуль звернень; ротацію не зсуваємо
+            candidates = self._candidates(method, excluded)
+            if not candidates:
+                if last is not None:
+                    raise last
+                raise RpcUnavailable(_NO_PROVIDER_ERROR)
+            index = self._pick(candidates)
+            failure: RpcError | None = None
+            try:
+                with self._locks[index]:  # `_state_lock` тут уже відпущено
+                    return index, call(self._providers[index].source)
+            except RpcError as exc:
+                failure = exc  # лише запамʼятати: усе `raise` — нижче, поза `except`
+            excluded.add(index)
+            last = failure
+            if isinstance(failure, RpcRateLimited):
+                self._cool_down(index, failure)
+        raise RuntimeError("pool: failover attempt limit exceeded")  # недосяжно: кожна спроба виключає провайдера
 
-    def _pick(self, method: str) -> int:
-        """Згладжений зважений round-robin серед провайдерів, що обслуговують метод; нічия — порядок конфігу.
+    def _pick(self, candidates: Sequence[int]) -> int:
+        """Згладжений зважений round-robin серед кандидатів; нічия — порядок конфігу.
 
         Класичний SWRR: кожному кандидату `+вага`, переможцю `−сума ваг кандидатів`. Стан — точні дроби.
         """
-        candidates = self._serving(method)
         with self._state_lock:
             total = sum(self._exact_weights[i] for i in candidates)
             for i in candidates:
@@ -314,17 +389,43 @@ class PooledRpcSource:
             self._swrr_current[best] -= total
         return best
 
-    def _serving(self, method: str) -> list[int]:
-        """Індекси провайдерів, що обслуговують метод (порядок конфігу).
+    def _candidates(self, method: str, excluded: set[int]) -> list[int]:
+        """Індекси провайдерів, яким можна віддати одиночний виклик (порядок конфігу).
 
-        `getSignaturesForAddress`: лише архівні, поки є бодай один придатний архівний; неархівні — запасні (R-5).
+        Метод ∉ `skip_methods`, провайдер не виключений у цьому виклику. `getSignaturesForAddress`: лише архівні, поки
+        лишається бодай один придатний архівний; неархівні — запасні (R-5). Провайдери на паузі відкидаються, якщо
+        лишається хоч один не на паузі (усі на паузі → пауза ігнорується).
         """
-        serving = [i for i, p in enumerate(self._providers) if method not in p.skip_methods]
+        serving = [i for i, p in enumerate(self._providers) if method not in p.skip_methods and i not in excluded]
         if method == "getSignaturesForAddress":
             archival = [i for i in serving if self._providers[i].archival]
             if archival:
-                return archival
-        return serving
+                serving = archival
+        paused = self._paused_providers()
+        return [i for i in serving if i not in paused] or serving
+
+    def _paused_providers(self) -> frozenset[int]:
+        """Провайдери на паузі після `RpcRateLimited` (`now < кінець паузи` за `clock.monotonic()` пулу)."""
+        with self._state_lock:
+            now = self._clock.monotonic()
+            for index in [i for i, until in self._cooldown_until.items() if now >= until]:
+                del self._cooldown_until[index]  # пауза скінчилась (межа `now == until` — вже не пауза)
+            return frozenset(self._cooldown_until)
+
+    def _cool_down(self, index: int, exc: BaseException) -> None:
+        """Пауза після `RpcRateLimited`: `max(rate_limit_cooldown_seconds, retry_after)`.
+
+        `retry_after` — лише справжнє скінченне число (NaN, inf, не-число і `bool` ігноруються: сервер не вирішує, що
+        ключ мовчить вічно). Пауза не скорочується повторною відмовою. Кошик ліміту один на всі методи ключа, тож пауза —
+        на провайдера, а не на метод.
+        """
+        pause = self._cooldown_seconds
+        retry_after = getattr(exc, "retry_after", None)
+        if _is_number(retry_after) and math.isfinite(retry_after) and retry_after > pause:
+            pause = float(retry_after)
+        with self._state_lock:
+            until = self._clock.monotonic() + pause
+            self._cooldown_until[index] = max(until, self._cooldown_until.get(index, until))
 
     def _age_snapshot(self, sigs: Sequence[str]) -> tuple[dict[str, int], int]:
         """Відомі `blockTime` підписів виклику й «зараз» пулу (`clock.wall()`) — одним знімком під `_state_lock`."""
