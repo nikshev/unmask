@@ -1,5 +1,6 @@
-# verifies: FR-007-09
-"""Версіонований `config/rpc_pool.yaml` v1, його журнал і завантажувач `load_rpc_pool_config` (T-137, critical).
+# verifies: FR-007-03, FR-007-09, FR-007-10, FR-007-11, FR-007-12
+"""Версіонований `config/rpc_pool.yaml` v1, його журнал, завантажувач `load_rpc_pool_config` (T-137) і фабрика
+`build_rpc_source` (T-138), обидва critical.
 
 Принцип III: перелік провайдерів, профілі, архівність і глибина історії змінюють, ЩО побачить аналіз (чи
 дістане пул історію токена), тож живуть у YAML під git, і зміна без запису в `config/CHANGELOG.md` червонить
@@ -12,28 +13,44 @@
 - будь-яка зміна значення (кожен ключ верхнього рівня і кожен ключ кожного провайдера, додавання/видалення/
   перестановка провайдера) без запису → `ConfigError`; коментар файла дайджест не змінює;
 - схема завантажувача: невідомий/відсутній ключ, типи, межі, дублікати, `archival ⇔ retention null`, покриття
-  чотирьох методів; тексти помилок не відлунюють значень (сторожовий рядок).
+  чотирьох методів; тексти помилок не відлунюють значень (сторожовий рядок);
+- фабрика (T-138, кроки 1–5 контракту): без файла — один провайдер `UNMASK_RPC_URL` (як `HttpRpcSource.from_env`);
+  з файлом — провайдер на запис, відсутня змінна → пропуск із попередженням (лише імена), жоден не лишився →
+  `ConfigError` з іменами змінних, невалідний URL → гучна помилка з іменем змінної; кожен провайдер зі СВОЇМ
+  лімітером/профілем (віртуальний час, `httpx.MockTransport`, без мережі); секрети (URL, ключі) ніде: ні в логах,
+  ні в текстах помилок, ні в `repr`, ні в `__cause__`/`__context__`;
+- ім'я невідомого ключа в помилці завантажувача — лише якщо це ідентифікатор (як `hubs.config._key_name`).
 """
 
 from __future__ import annotations
 
 import ast
 import copy
+import dataclasses
 import hashlib
 import json
+import logging
 import math
 import re
+import traceback
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 
+import httpx
 import pytest
 import yaml
 
+import unmask.ingest.rpc.http as http_module
 import unmask.ingest.rpc.pool_config as pool_config_module
+from rpc_pool_doubles import SequentialRunner
 from unmask.hubs.config import ConfigError as HubsConfigError
 from unmask.hubs.config import changelog_entries, check_changelog, content_digest
-from unmask.ingest.config import ConfigError
-from unmask.ingest.rpc.http import RPC_PROFILES
+from unmask.ingest.budget import Deadline, FakeClock
+from unmask.ingest.config import ConfigError, load_config
+from unmask.ingest.rpc.http import RPC_PROFILES, HttpRpcSource
 from unmask.ingest.rpc.pool_config import ProviderSpec, RpcPoolConfig, load_rpc_pool_config
+from unmask.ingest.rpc.protocol import RpcError
 
 ROOT = Path(__file__).resolve().parents[1]
 CHANGELOG = ROOT / "config" / "CHANGELOG.md"
@@ -534,3 +551,544 @@ def test_loader_does_not_read_the_journal(tmp_path: Path) -> None:
     data["age_cache_entries"] = 7
     cfg = load_rpc_pool_config(_write(tmp_path, data))
     assert cfg.age_cache_entries == 7
+
+
+# ------------------------------------------------------------------ ім'я невідомого ключа (ревʼю T-137, FR-007-12)
+
+
+def _unknown_key_message(tmp_path: Path, key, *, nested: bool) -> str:
+    data = copy.deepcopy(GOLDEN)
+    (data["providers"][1] if nested else data)[key] = 1
+    with pytest.raises(ConfigError) as err:
+        load_rpc_pool_config(_write(tmp_path, data))
+    return str(err.value)
+
+
+# Ключ-URL з ключем доступу, текст не за ідентифікатором, межі довжини, юнікод, службові символи.
+SECRET_LOOKING_KEYS = [
+    f"https://x.io/?api-key={SENTINEL}",
+    f"api-key={SENTINEL}",
+    f"{SENTINEL}",  # дефіси: не ідентифікатор
+    "1" + "a" * 10,  # починається з цифри
+    "a" * 65,  # на символ довший за межу
+    "імʼя",
+    "",
+    "a b",
+    "a\nb",
+    "a.b",
+]
+
+
+@pytest.mark.parametrize("key", SECRET_LOOKING_KEYS)
+@pytest.mark.parametrize("nested", [False, True])
+def test_unknown_key_that_is_not_an_identifier_is_never_echoed(tmp_path: Path, key: str, nested: bool) -> None:
+    message = _unknown_key_message(tmp_path, key, nested=nested)
+    prefix = "providers[1]." if nested else ""
+    assert message == f"{prefix}<str key>: unknown field"
+    assert SENTINEL not in message and "x.io" not in message
+
+
+@pytest.mark.parametrize("key", ["no_such_key", "_x", "A", "a" * 64, "Key9_z"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_unknown_key_that_is_an_identifier_is_named(tmp_path: Path, key: str, nested: bool) -> None:
+    prefix = "providers[1]." if nested else ""
+    assert _unknown_key_message(tmp_path, key, nested=nested) == f"{prefix}{key}: unknown field"
+
+
+@pytest.mark.parametrize("key, label", [(5, "int"), (1.5, "float"), (None, "NoneType"), (True, "bool")])
+def test_unknown_non_string_key_is_named_by_type_only(tmp_path: Path, key, label: str) -> None:
+    assert _unknown_key_message(tmp_path, key, nested=False) == f"<{label} key>: unknown field"
+    assert _unknown_key_message(tmp_path, key, nested=True) == f"providers[1].<{label} key>: unknown field"
+
+
+# ------------------------------------------------------------------------------------------- фабрика build_rpc_source
+
+INGEST = load_config(ROOT / "config" / "ingest.yaml")
+ENV_VARS = {"rpcfast": "UNMASK_RPC_URL", "helius_1": "UNMASK_RPC_URL_ALT", "helius_2": "UNMASK_RPC_URL_ALT1",
+            "helius_3": "UNMASK_RPC_URL_ALT2"}
+NAMES = list(ENV_VARS)
+PROFILE_OF = {"rpcfast": "rpcfast_start", "helius_1": "helius_free", "helius_2": "helius_free",
+              "helius_3": "helius_free"}
+TOKEN_PROGRAMS = 2  # getTokenAccountsByOwner = два запити (Token, Token-2022)
+
+
+def build_rpc_source(*args, **kwargs):
+    return pool_config_module.build_rpc_source(*args, **kwargs)
+
+
+def _url(name: str) -> str:
+    """URL провайдера зі сторожовим «ключем»: хост ідентифікує провайдера, ключ — секрет."""
+    return f"https://{name.replace('_', '-')}.example/rpc/?api-key={SENTINEL}"
+
+
+def _env(*names: str) -> dict[str, str]:
+    return {ENV_VARS[name]: _url(name) for name in (names or NAMES)}
+
+
+def _providers(pool):
+    # Єдине місце зв'язку з внутрішністю пулу (T-132): публічного переліку провайдерів у контракті немає.
+    return pool._providers
+
+
+@dataclasses.dataclass(frozen=True)
+class Req:
+    name: str
+    at: float
+    units: int
+    method: str
+    host: str
+
+
+class _SpyTransport(httpx.MockTransport):
+    def __init__(self, handler, on_close) -> None:
+        super().__init__(handler)
+        self._on_close = on_close
+
+    def close(self) -> None:
+        self._on_close()
+        super().close()
+
+
+class Net:
+    """Підставна «мережа» всіх провайдерів: журнал запитів за іменем провайдера, віртуальний час, режими збоїв."""
+
+    def __init__(self, clock: FakeClock | None = None, mode: str = "ok") -> None:
+        self.clock = clock if clock is not None else FakeClock()
+        self.mode = mode
+        self.requests: list[Req] = []
+        self.built: list[str] = []
+        self.closed: list[str] = []
+
+    def factory(self, name: str) -> httpx.BaseTransport:
+        self.built.append(name)
+        return _SpyTransport(lambda request: self._handle(name, request), lambda: self.closed.append(name))
+
+    def of(self, name: str) -> list[Req]:
+        return [r for r in self.requests if r.name == name]
+
+    def _handle(self, name: str, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        batch = isinstance(body, list)
+        method = "getTransaction" if batch else body["method"]
+        self.requests.append(Req(name, self.clock.monotonic(), len(body) if batch else 1, method, request.url.host))
+        if self.mode != "ok":
+            return self._fail(request)
+        if batch:
+            return httpx.Response(200, json=[{"jsonrpc": "2.0", "id": e["id"], "result": None} for e in body])
+        result = {"getAccountInfo": {"context": {"slot": 1}, "value": None}, "getSignaturesForAddress": [],
+                  "getTokenAccountsByOwner": {"value": []}}[method]
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": body["id"], "result": result})
+
+    def _fail(self, request: httpx.Request) -> httpx.Response:
+        mode = self.mode
+        if mode == "http_503":
+            return httpx.Response(503, text=f"upstream {SENTINEL} {request.url}")
+        if mode == "http_429":
+            return httpx.Response(429, headers={"retry-after": "1"}, text=f"{SENTINEL} {request.url}")
+        if mode == "http_401":
+            return httpx.Response(401, text=f"bad key {SENTINEL}")
+        if mode == "connect_error":
+            raise httpx.ConnectError(f"cannot reach {request.url}", request=request)
+        if mode == "read_timeout":
+            raise httpx.ReadTimeout(str(request.url), request=request)
+        if mode == "bad_json":
+            return httpx.Response(200, text=f"not json {SENTINEL} {request.url}")
+        if mode == "jsonrpc_error":
+            error = {"code": -32000, "message": f"leak {SENTINEL}", "data": {"url": str(request.url)}}
+            return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "error": error})
+        raise AssertionError(mode)
+
+
+def _build(net: Net, environ, path: Path = SHIPPED, **kwargs):
+    kwargs.setdefault("runner", SequentialRunner())
+    return build_rpc_source(path, INGEST, environ, clock=net.clock, sleep=net.clock.advance,
+                            transport_factory=net.factory, **kwargs)
+
+
+def _deadline(net: Net) -> Deadline:
+    return Deadline(net.clock, 100_000)
+
+
+def _chain(exc: BaseException) -> list[BaseException]:
+    seen: list[BaseException] = []
+    stack: list[BaseException | None] = [exc]
+    while stack:
+        current = stack.pop()
+        if current is None or any(current is s for s in seen):
+            continue
+        seen.append(current)
+        stack += [current.__cause__, current.__context__]
+    return seen
+
+
+def _assert_no_secret(exc: BaseException) -> None:
+    for link in _chain(exc):
+        assert SENTINEL not in repr(link) and SENTINEL not in str(link)
+    assert SENTINEL not in "".join(traceback.format_exception(exc))
+
+
+def _assert_no_chain(exc: BaseException) -> None:
+    assert exc.__cause__ is None and exc.__context__ is None
+    _assert_no_secret(exc)
+
+
+# ----------------------------------------------------------------------------------------------- крок 1: без файла
+
+
+@pytest.mark.parametrize("profile, batches", [("helius_free", [10, 10, 5]), ("rpcfast_start", [25])])
+def test_absent_config_builds_single_default_provider(tmp_path: Path, profile: str, batches: list[int]) -> None:
+    net = Net()
+    pool = _build(net, {"UNMASK_RPC_URL": _url("rpcfast")}, tmp_path / "absent.yaml", fallback_profile=profile)
+    (provider,) = _providers(pool)
+    assert pool.name == "http"  # метадані результату — як сьогодні (R-6)
+    assert provider.name == "default" and net.built == ["default"]
+    assert provider.archival is True and provider.retention_seconds is None  # довіра, як до цієї фічі
+    assert provider.skip_methods == frozenset()
+    assert provider.weight == RPC_PROFILES[profile]["rate_per_second"]
+    # профіль — з аргументу: його max_batch видно в розмірі під-batch
+    assert pool.get_transactions([f"s{i}" for i in range(25)], deadline=_deadline(net)) == [None] * 25
+    assert [r.units for r in net.requests] == batches
+    assert {r.host for r in net.requests} == {"rpcfast.example"}
+
+
+def test_absent_config_default_profile_is_the_module_default(tmp_path: Path) -> None:
+    pool = _build(Net(), {"UNMASK_RPC_URL": _url("rpcfast")}, tmp_path / "absent.yaml")
+    assert _providers(pool)[0].weight == RPC_PROFILES[http_module.DEFAULT_PROFILE]["rate_per_second"]
+
+
+def test_absent_config_ignores_the_other_provider_variables(tmp_path: Path) -> None:
+    net = Net()
+    pool = _build(net, _env(), tmp_path / "absent.yaml")  # всі чотири змінні задано, файла немає
+    assert [p.name for p in _providers(pool)] == ["default"] and net.built == ["default"]
+
+
+@pytest.mark.parametrize("environ", [
+    {},
+    {"UNMASK_RPC_URL": ""},
+    {"UNMASK_RPC_URL_ALT": "https://other.example/?api-key=" + SENTINEL},  # чужа змінна не підміняє UNMASK_RPC_URL
+    {"UNMASK_RPC_URL": " "},
+    {"UNMASK_RPC_URL": f"not a url {SENTINEL}"},
+    {"UNMASK_RPC_URL": f"ftp://h.example/?api-key={SENTINEL}"},
+    {"UNMASK_RPC_URL": f"https://h.example:99999/?api-key={SENTINEL}"},
+])
+def test_absent_config_missing_env_same_error_as_from_env(tmp_path: Path, environ: dict) -> None:
+    with pytest.raises(ConfigError) as expected:
+        HttpRpcSource.from_env(INGEST.rpc, commitment=INGEST.commitment, environ=environ)
+    net = Net()
+    with pytest.raises(ConfigError) as actual:
+        _build(net, environ, tmp_path / "absent.yaml")
+    assert type(actual.value) is type(expected.value) and str(actual.value) == str(expected.value)
+    _assert_no_chain(actual.value)
+    assert sorted(net.closed) == sorted(net.built)  # нічого не лишилось відкритим
+
+
+def test_factory_reads_only_the_given_environ_never_os_environ(tmp_path: Path, monkeypatch) -> None:
+    for var in ENV_VARS.values():
+        monkeypatch.setenv(var, _url("rpcfast"))
+    with pytest.raises(ConfigError, match=r"^UNMASK_RPC_URL: not set$"):
+        _build(Net(), {}, tmp_path / "absent.yaml")
+    with pytest.raises(ConfigError, match=r"^rpc_pool.yaml: no RPC provider available"):
+        _build(Net(), {})
+
+
+def test_absent_config_pool_settings_are_module_constants(tmp_path: Path) -> None:
+    pool = _build(Net(), {"UNMASK_RPC_URL": _url("rpcfast")}, tmp_path / "absent.yaml")
+    assert (pool._cooldown_seconds, pool._age_cache_entries) == (5.0, 1)
+
+
+# ------------------------------------------------------------------------------------------------ кроки 2–5: файл є
+
+
+def test_four_providers_built_when_all_env_set() -> None:
+    net = Net()
+    pool = _build(net, _env())
+    providers = _providers(pool)
+    assert [p.name for p in providers] == NAMES and net.built == NAMES  # порядок файла
+    assert repr(pool) == "PooledRpcSource(providers=('rpcfast', 'helius_1', 'helius_2', 'helius_3'))"
+    assert pool.name == "http"
+    assert [p.weight for p in providers] == [12.0, 4.5, 4.5, 4.5]
+    assert [p.weight for p in providers] == [RPC_PROFILES[PROFILE_OF[n]]["rate_per_second"] for n in NAMES]
+    assert [p.archival for p in providers] == [False, True, True, True]
+    assert [p.retention_seconds for p in providers] == [72000, None, None, None]
+    assert [p.skip_methods for p in providers] == [frozenset({"getTokenAccountsByOwner"})] + [frozenset()] * 3
+    # кожна змінна доходить до СВОГО провайдера: запити кожного транспорту йдуть на його хост
+    assert pool.get_transactions([f"s{i}" for i in range(60)], deadline=_deadline(net)) == [None] * 60
+    for name in NAMES:
+        assert net.of(name), name
+        assert {r.host for r in net.of(name)} == {f"{name.replace('_', '-')}.example"}
+
+
+def test_pool_settings_come_from_the_file(tmp_path: Path) -> None:
+    data = copy.deepcopy(GOLDEN)
+    data.update(rate_limit_cooldown_seconds=7.5, age_cache_entries=33)
+    pool = _build(Net(), _env(), _write(tmp_path, data))
+    assert (pool._cooldown_seconds, pool._age_cache_entries) == (7.5, 33)
+
+
+def test_provider_order_follows_the_file_not_the_environment_order() -> None:
+    environ = dict(reversed(list(_env().items())))
+    assert list(environ)[0] == "UNMASK_RPC_URL_ALT2"
+    assert [p.name for p in _providers(_build(Net(), environ))] == NAMES
+
+
+def test_extra_environment_variables_are_ignored() -> None:
+    pool = _build(Net(), {**_env(), "PATH": "/bin", "UNMASK_RPC_URL_ALT3": _url("helius_3")})
+    assert [p.name for p in _providers(pool)] == NAMES
+
+
+def test_build_without_transport_factory_makes_no_network_call() -> None:
+    pool = build_rpc_source(SHIPPED, INGEST, _env(), clock=FakeClock())
+    try:
+        assert [p.name for p in _providers(pool)] == NAMES
+    finally:
+        for provider in _providers(pool):
+            provider.source.close()
+
+
+def test_build_logs_pool_summary_without_urls(caplog) -> None:
+    caplog.set_level(logging.DEBUG)
+    _build(Net(), _env())
+    infos = [r for r in caplog.records if r.name == "unmask.ingest.rpc.pool_config" and r.levelno == logging.INFO]
+    assert [r.getMessage() for r in infos] == [
+        "rpc pool v1: rpcfast(rpcfast_start, non-archival), helius_1(helius_free, archival), "
+        "helius_2(helius_free, archival), helius_3(helius_free, archival)"
+    ]
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert SENTINEL not in caplog.text and ".example" not in caplog.text
+
+
+@pytest.mark.parametrize("empty", [False, True], ids=["unset", "empty"])
+@pytest.mark.parametrize("missing", [("helius_2",), ("rpcfast",), ("helius_1", "helius_3"), ("rpcfast", "helius_2")])
+def test_missing_env_skipped_with_name_only_warning(caplog, missing: tuple[str, ...], empty: bool) -> None:
+    environ = _env()
+    for name in missing:
+        if empty:
+            environ[ENV_VARS[name]] = ""
+        else:
+            del environ[ENV_VARS[name]]
+    caplog.set_level(logging.DEBUG)
+    net = Net()
+    pool = _build(net, environ)
+    kept = [n for n in NAMES if n not in missing]
+    assert [p.name for p in _providers(pool)] == kept and net.built == kept  # для пропущених нічого не створено
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert [r.getMessage() for r in warnings] == [
+        f"rpc pool: provider {name} skipped: {ENV_VARS[name]} not set" for name in missing
+    ]
+    assert {r.name for r in warnings} == {"unmask.ingest.rpc.pool_config"}
+    assert SENTINEL not in caplog.text and ".example" not in caplog.text
+    # решта працює: усі методи обслуговує хтось із лишених
+    assert pool.get_account_info("A", deadline=_deadline(net)) is None
+
+
+@pytest.mark.parametrize("environ", [
+    {},
+    {"UNRELATED": "x"},
+    {var: "" for var in ENV_VARS.values()},
+], ids=["empty-env", "unrelated-env", "all-empty"])
+def test_no_provider_left_fails_with_all_var_names(caplog, environ: dict) -> None:
+    caplog.set_level(logging.DEBUG)
+    net = Net()
+    with pytest.raises(ConfigError) as err:
+        _build(net, environ)
+    assert str(err.value) == ("rpc_pool.yaml: no RPC provider available (set one of: UNMASK_RPC_URL, "
+                              "UNMASK_RPC_URL_ALT, UNMASK_RPC_URL_ALT1, UNMASK_RPC_URL_ALT2)")
+    _assert_no_chain(err.value)
+    assert net.built == []
+    assert [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING] == [
+        f"rpc pool: provider {name} skipped: {var} not set" for name, var in ENV_VARS.items()
+    ]
+
+
+def test_method_nobody_left_serves_is_config_error_and_closes_what_was_built() -> None:
+    net = Net()
+    with pytest.raises(ConfigError) as err:
+        _build(net, _env("rpcfast"))  # лишився лише RPC Fast, а він пропускає getTokenAccountsByOwner
+    assert str(err.value) == "rpc_pool.yaml: no available provider serves getTokenAccountsByOwner"
+    _assert_no_chain(err.value)
+    assert net.built == ["rpcfast"] and net.closed == ["rpcfast"]  # клієнт не лишився відкритим
+
+
+def test_single_remaining_provider_serving_every_method_is_enough() -> None:
+    pool = _build(Net(), _env("helius_2"))
+    assert [p.name for p in _providers(pool)] == ["helius_2"]
+
+
+BAD_URLS = [
+    f"not a url {SENTINEL}",
+    f"ftp://h.example/?api-key={SENTINEL}",
+    f"https://h.example:99999/?api-key={SENTINEL}",
+    f"https://?api-key={SENTINEL}",
+    f"https://h.example/ {SENTINEL}",
+    SENTINEL,
+    " \t",
+]
+
+
+@pytest.mark.parametrize("bad", BAD_URLS)
+@pytest.mark.parametrize("name", NAMES)
+def test_invalid_url_fails_loud_with_var_name(caplog, name: str, bad: str) -> None:
+    environ = _env()
+    environ[ENV_VARS[name]] = bad
+    caplog.set_level(logging.DEBUG)
+    net = Net()
+    with pytest.raises(ConfigError) as err:
+        _build(net, environ)
+    assert str(err.value) == f"{ENV_VARS[name]}: invalid RPC URL"  # лише ім'я змінної
+    _assert_no_chain(err.value)
+    assert SENTINEL not in caplog.text
+    # не пропущено мовчки й не збудовано «наполовину»: усе вже створене (також транспорт відхиленого) закрито
+    index = NAMES.index(name)
+    assert net.built == NAMES[: index + 1]
+    assert sorted(net.closed) == sorted(NAMES[: index + 1])
+
+
+def test_invalid_url_is_not_treated_like_a_missing_variable(caplog) -> None:
+    caplog.set_level(logging.DEBUG)
+    with pytest.raises(ConfigError, match="invalid RPC URL"):
+        _build(Net(), {**_env(), "UNMASK_RPC_URL_ALT1": "not a url"})
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_malformed_config_file_is_config_error_and_builds_nothing(tmp_path: Path) -> None:
+    bad = tmp_path / "rpc_pool.yaml"
+    bad.write_text(f"version: 1\nproviders: [{SENTINEL}\n", encoding="utf-8")
+    net = Net()
+    with pytest.raises(ConfigError) as err:
+        _build(net, _env(), bad)
+    _assert_no_chain(err.value)  # розбірник YAML тримає уривок файла: у ланцюг він не потрапляє
+    assert net.built == []
+
+
+@pytest.mark.parametrize("content", [
+    f"version: [{SENTINEL}\n  : :",
+    f"version: 1\nproviders: [{SENTINEL}\n",
+    f"!!python/object/apply:os.system ['{SENTINEL}']\n",
+    f"a: &x 1\nb: *x  # {SENTINEL}\n",
+    f"version: 1\nversion: 2  # {SENTINEL}\n",
+], ids=["parse", "unclosed", "tag", "alias", "duplicate"])
+def test_loader_errors_carry_no_exception_chain(tmp_path: Path, content: str) -> None:
+    path = tmp_path / "rpc_pool.yaml"
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(ConfigError) as err:
+        load_rpc_pool_config(path)
+    _assert_no_chain(err.value)
+
+
+def test_loader_io_and_encoding_errors_carry_no_exception_chain(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError) as err:
+        load_rpc_pool_config(tmp_path / "absent.yaml")
+    _assert_no_chain(err.value)
+    binary = tmp_path / "binary.yaml"
+    binary.write_bytes(b"\xff\xfe\x00version: 1\n")
+    with pytest.raises(ConfigError) as err:
+        load_rpc_pool_config(binary)
+    _assert_no_chain(err.value)
+
+
+def test_provider_with_infinite_rate_profile_gets_a_finite_weight(monkeypatch, tmp_path: Path) -> None:
+    unlimited = MappingProxyType({"rate_per_second": math.inf, "burst": 30, "max_batch": 25, "max_tx_version": 1})
+    profiles = MappingProxyType({**RPC_PROFILES, "unlimited": unlimited})
+    monkeypatch.setattr(http_module, "RPC_PROFILES", profiles)
+    monkeypatch.setattr(pool_config_module, "RPC_PROFILES", profiles)
+    pool = _build(Net(), {"UNMASK_RPC_URL": _url("rpcfast")}, tmp_path / "absent.yaml", fallback_profile="unlimited")
+    weight = _providers(pool)[0].weight
+    assert math.isfinite(weight) and weight > 0  # data-model: inf -> 1e6
+
+
+# ------------------------------------------------------------------- кожен провайдер зі своїм профілем і лімітером
+
+
+def _assert_paced(reqs: list[Req], rate: float, burst: int, label: str) -> None:
+    """Токен-кошик: одиниць у будь-якому вікні [t_i, t_j] не більше burst + rate × (t_j − t_i)."""
+    for i in range(len(reqs)):
+        total = 0
+        for j in range(i, len(reqs)):
+            total += reqs[j].units
+            allowed = burst + rate * (reqs[j].at - reqs[i].at)
+            assert total <= allowed + 1e-6, f"{label}: {total} units in window {reqs[i].at:.3f}..{reqs[j].at:.3f}"
+
+
+def test_each_provider_paces_by_own_profile() -> None:
+    net = Net()
+    pool = _build(net, _env(), runner=SequentialRunner())
+    sigs = [f"s{i}" for i in range(300)]
+    deadline = _deadline(net)
+    for _ in range(2):  # другий виклик стартує з кошиків, які лишив перший
+        assert pool.get_transactions(sigs, deadline=deadline) == [None] * 300
+    assert net.clock.monotonic() > 0  # лімітери справді спали (віртуальний час)
+    for name in NAMES:
+        profile = RPC_PROFILES[PROFILE_OF[name]]
+        mine = net.of(name)
+        assert sum(r.units for r in mine) > 2 * profile["burst"], name  # навантаження виходить за кошик
+        assert max(r.units for r in mine) <= profile["max_batch"], name
+        _assert_paced(mine, profile["rate_per_second"], profile["burst"], name)
+
+
+def test_each_provider_paces_independently_of_the_others_traffic() -> None:
+    # Швидкий провайдер не «витрачає» чужий кошик: повільний Helius тримає свій ліміт, навіть коли RPC Fast
+    # у цей час вільний, а єдине джерело часу — спільний годинник.
+    net = Net()
+    pool = _build(net, _env("rpcfast", "helius_1"), runner=SequentialRunner("reverse"))
+    for _ in range(3):
+        pool.get_transactions([f"s{i}" for i in range(200)], deadline=_deadline(net))
+    for name in ("rpcfast", "helius_1"):
+        profile = RPC_PROFILES[PROFILE_OF[name]]
+        _assert_paced(net.of(name), profile["rate_per_second"], profile["burst"], name)
+    assert max(r.units for r in net.of("helius_1")) <= RPC_PROFILES["helius_free"]["max_batch"]
+
+
+# ---------------------------------------------------------------------------------------------------------- секрети
+
+
+def _all_calls(pool, net: Net):
+    """Усі методи пулу: кожен у `RpcError` (режими збоїв) або в нормальну відповідь."""
+    deadline = _deadline(net)
+    calls = [
+        lambda: pool.get_transactions([f"s{i}" for i in range(12)], deadline=deadline),
+        lambda: pool.get_account_info("A", deadline=deadline),
+        lambda: pool.get_signatures_for_address("A", before=None, until=None, limit=10, deadline=deadline),
+        lambda: pool.get_token_accounts_by_owner("A", deadline=deadline),
+    ]
+    return calls
+
+
+@pytest.mark.parametrize("mode", ["ok", "http_503", "http_429", "http_401", "connect_error", "read_timeout",
+                                  "bad_json", "jsonrpc_error"])
+@pytest.mark.parametrize("skip_one", [False, True], ids=["all-set", "one-skipped"])
+def test_secret_sentinel_never_in_logs_errors_repr(caplog, mode: str, skip_one: bool) -> None:
+    caplog.set_level(logging.DEBUG)
+    net = Net(mode=mode)
+    pool = _build(net, _env(*(NAMES[:2] + NAMES[3:] if skip_one else NAMES)))  # пропуск теж пише в лог
+    failures = 0
+    for call in _all_calls(pool, net):
+        try:
+            call()
+        except RpcError as exc:
+            failures += 1
+            _assert_no_chain(exc)
+    assert (failures == 0) == (mode == "ok")
+    assert failures == (0 if mode == "ok" else 4)
+    # repr/str пулу, провайдерів і їхніх джерел — лише імена
+    shown = [repr(pool), str(pool)] + [repr(p) + str(p) + repr(p.source) + str(p.source) for p in _providers(pool)]
+    assert not any(SENTINEL in text or ".example" in text for text in shown)
+    assert SENTINEL not in caplog.text and ".example" not in caplog.text
+    assert all(SENTINEL not in repr(r.__dict__) for r in caplog.records)
+    assert net.requests, "тест нічого не перевірив: жодного запиту"
+
+
+def test_secret_sentinel_in_absent_config_mode(caplog, tmp_path: Path) -> None:
+    caplog.set_level(logging.DEBUG)
+    net = Net(mode="http_503")
+    pool = _build(net, {"UNMASK_RPC_URL": _url("rpcfast")}, tmp_path / "absent.yaml")
+    with pytest.raises(RpcError) as err:
+        pool.get_transactions(["a", "b"], deadline=_deadline(net))
+    _assert_no_chain(err.value)
+    assert SENTINEL not in repr(pool) and SENTINEL not in caplog.text
+
+
+def test_provider_repr_never_contains_the_source_url() -> None:
+    pool = _build(Net(), _env())
+    for provider in _providers(pool):
+        assert repr(provider) == f"Provider(name={provider.name!r})"
+        assert SENTINEL not in repr(provider.source) and "example" not in repr(provider.source)

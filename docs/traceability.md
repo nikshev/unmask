@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **116** · задач: **146** (виконано 122) · вимог у роботі: **28** · порушень: **0**
+Вимог: **116** · задач: **146** (виконано 123) · вимог у роботі: **25** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -130,8 +130,8 @@
 | `FR-007-03` | Розподіл MUST враховувати пропускну здатність кожного провайдера (профіль швидкості фічі 001), а не ділити пор | `T-132`, `T-138` | `src/unmask/ingest/rpc/pool.py`, `src/unmask/ingest/rpc/pool_config.py` | `tests/test_rpc_pool_config.py`, `tests/test_rpc_pool.py` |
 | `FR-007-04` | Результат збору через пул MUST бути побітово рівним результату збору через одного провайдера на тих самих дани | `T-132`, `T-133`, `T-134`, `T-136`, `T-145` | `src/unmask/ingest/rpc/pool.py` | `tests/test_rpc_pool.py`, `tests/test_rpc_pool_equivalence.py` |
 | `FR-007-05` | Інваріанти фічі 001 (`resume` дорівнює свіжому збору, ліміти й бюджети, класифікація помилок) MUST зберігатися | `T-134`, `T-140` | `src/unmask/ingest/rpc/pool.py` | `tests/test_rpc_pool_equivalence.py` |
-| `FR-007-06` | Кожному провайдеру MUST задаватися ознака архівності й, для неархівних, глибина історії; запит, що виходить за | `T-135`, `T-136` | `src/unmask/ingest/rpc/pool.py` | — |
-| `FR-007-07` | Різні провайдери повертають розбіжні дані для одного підпису (форк, різний `commitment`): результат визначаєть | `T-135`, `T-136` | `src/unmask/ingest/rpc/pool.py` | — |
+| `FR-007-06` | Кожному провайдеру MUST задаватися ознака архівності й, для неархівних, глибина історії; запит, що виходить за | `T-135`, `T-136` | `src/unmask/ingest/rpc/pool.py` | `tests/test_rpc_pool_routing.py` |
+| `FR-007-07` | Різні провайдери повертають розбіжні дані для одного підпису (форк, різний `commitment`): результат визначаєть | `T-135`, `T-136` | `src/unmask/ingest/rpc/pool.py` | `tests/test_rpc_pool_routing.py` |
 | `FR-007-08` | Відмова провайдера (перевищення ліміту, таймаут, недоступність, пошкоджена відповідь) MUST переводити запит на | `T-140` | `src/unmask/ingest/rpc/pool.py` | — |
 | `FR-007-09` | Перелік провайдерів, профілі швидкості, архівність і глибина історії MUST зберігатися у версіонованому YAML із | `T-137` | `src/unmask/ingest/rpc/pool_config.py` | `tests/test_rpc_pool_config.py` |
 | `FR-007-10` | Без конфігу пулу (або з єдиним провайдером) система MUST поводитись як до цієї фічі; змінна `UNMASK_RPC_URL` л | `T-138` | `src/unmask/ingest/rpc/pool_config.py` | `tests/test_rpc_pool_config.py` |
@@ -237,7 +237,7 @@
 - `T-135` (007-rpc-provider-pool) — у роботі
 - `T-136` (007-rpc-provider-pool) — у роботі
 - `T-137` (007-rpc-provider-pool) — виконано
-- `T-138` (007-rpc-provider-pool) — у роботі
+- `T-138` (007-rpc-provider-pool) — виконано
 - `T-140` (007-rpc-provider-pool) — у роботі
 - `T-162` (008-api-protection-ops) — у роботі
 - `T-163` (008-api-protection-ops) — у роботі

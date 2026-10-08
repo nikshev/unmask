@@ -1,4 +1,4 @@
-# impl: FR-007-09
+# impl: FR-007-03, FR-007-09, FR-007-10, FR-007-11, FR-007-12
 """Завантаження й валідація `config/rpc_pool.yaml` (принцип III; specs/007-rpc-provider-pool/contracts/rpc-pool-config.md).
 
 Перелік провайдерів, профілі швидкості, архівність і глибина історії визначають, чи дістане пул історію токена,
@@ -11,22 +11,37 @@
 
 Розбір обмежений: файл ≤ 64 КіБ, лише прості мапи, списки й скаляри — анкери, аліаси й дублі ключів відхиляються
 (інакше друге значення мовчки перебило б перше й дайджест журналу описував би не те, що завантажено).
+
+Фабрика `build_rpc_source` (T-138, contracts/rpc-pool-config.md «Фабрика», кроки 1–5) збирає з конфігу й середовища
+`PooledRpcSource`: кожен провайдер — власний `HttpRpcSource` (власний профіль і кошик лімітера, FR-007-03), а зі змінної
+середовища береться лише URL. Без файла — один провайдер `UNMASK_RPC_URL`, як до цієї фічі (FR-007-10). Незадана змінна —
+пропуск провайдера з попередженням (лише імена, FR-007-11); невалідний URL — гучна `ConfigError` з іменем змінної.
+URL і ключі не потрапляють у логи, тексти помилок і `repr`, а помилки піднімаються поза `except` (порожні
+`__cause__`/`__context__`): у середовищі живуть секрети (FR-007-12).
 """
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 import yaml
 
-from unmask.ingest.config import ConfigError
-from unmask.ingest.rpc.http import RPC_PROFILES
+from unmask.ingest.budget import Clock, SystemClock
+from unmask.ingest.config import ConfigError, IngestConfig
+from unmask.ingest.rpc.http import DEFAULT_PROFILE, ENV_URL, RPC_PROFILES, HttpRpcSource
+from unmask.ingest.rpc.pool import PooledRpcSource, Provider, Runner
 
-__all__ = ["ProviderSpec", "RpcPoolConfig", "load_rpc_pool_config", "RPC_METHODS"]
+if TYPE_CHECKING:  # лише для підказки типу: `httpx` імпортує тільки адаптер
+    import httpx
+
+__all__ = ["ProviderSpec", "RpcPoolConfig", "load_rpc_pool_config", "build_rpc_source", "RPC_METHODS"]
+
+logger = logging.getLogger(__name__)
 
 # Методи, які пул розподіляє між провайдерами (data-model.md).
 RPC_METHODS: tuple[str, ...] = ("getAccountInfo", "getSignaturesForAddress", "getTransaction",
@@ -35,6 +50,7 @@ RPC_METHODS: tuple[str, ...] = ("getAccountInfo", "getSignaturesForAddress", "ge
 _MAX_FILE_BYTES = 64 * 1024
 _NAME_RE = re.compile(r"[a-z0-9_]{1,32}")
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")  # як hubs.config._IDENT_RE (hubs тут не імпортується)
 _URL_ENV_ERROR = "must be an environment variable name"
 _PROFILE_ERROR = "unknown provider profile (expected one of: " + ", ".join(RPC_PROFILES) + ")"
 _TOP_KEYS = ("version", "rate_limit_cooldown_seconds", "age_cache_entries", "providers")
@@ -77,26 +93,49 @@ class _StrictLoader(yaml.SafeLoader):
 
 
 def _read_yaml(path: Path) -> Any:
+    # Усі `raise` — поза блоками `except`: `from None` лише ховає контекст у показі, а сам об'єкт (`__context__`)
+    # лишився б досяжним, і розбірник YAML тримає у ньому уривок файла (з помилково вставленим URL чи ключем).
+    failure: str | None = None
+    raw = b""
     try:
         with open(path, "rb") as handle:
             raw = handle.read(_MAX_FILE_BYTES + 1)
     except OSError as exc:
-        raise ConfigError(f"{path}: cannot read config ({type(exc).__name__})") from None
+        failure = f"{path}: cannot read config ({type(exc).__name__})"
+    if failure is not None:
+        raise ConfigError(failure)
     if len(raw) > _MAX_FILE_BYTES:
         raise ConfigError(f"{path}: config is larger than {_MAX_FILE_BYTES} bytes")
+    text = ""
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        raise ConfigError(f"{path}: config is not valid UTF-8") from None
+        failure = f"{path}: config is not valid UTF-8"
+    if failure is not None:
+        raise ConfigError(failure)
+    data: Any = None
     try:
         for event in yaml.parse(text, Loader=yaml.SafeLoader):
             if isinstance(event, yaml.AliasEvent) or getattr(event, "anchor", None) is not None:
-                raise ConfigError(f"{path}: anchors and aliases are not allowed")
-        return yaml.load(text, Loader=_StrictLoader)  # noqa: S506 — SafeLoader-нащадок
-    except ConfigError:
-        raise
+                failure = f"{path}: anchors and aliases are not allowed"
+                break
+        else:
+            data = yaml.load(text, Loader=_StrictLoader)  # noqa: S506 — SafeLoader-нащадок
     except Exception as exc:  # noqa: BLE001 — межа: недовірений текст, контракт — лише ConfigError
-        raise ConfigError(f"{path}: invalid YAML ({type(exc).__name__})") from None
+        failure = f"{path}: invalid YAML ({type(exc).__name__})"
+    if failure is not None:
+        raise ConfigError(failure)
+    return data
+
+
+def _key_name(key: Any) -> str:
+    """Безпечне ім'я невідомого ключа для повідомлення: ідентифікатор як є, інше — лише тип (`<str key>`).
+
+    Ключ мапи — недовірений текст: помилково вставлений `https://…?api-key=…` не має потрапити в повідомлення.
+    """
+    if isinstance(key, str) and _IDENT_RE.fullmatch(key):
+        return key
+    return f"<{type(key).__name__} key>"
 
 
 def _check_keys(data: Any, expected: tuple[str, ...], where: str) -> dict:
@@ -108,8 +147,7 @@ def _check_keys(data: Any, expected: tuple[str, ...], where: str) -> dict:
             raise ConfigError(f"{prefix}{key}: missing required field")
     for key in data:
         if not (isinstance(key, str) and key in expected):
-            label = key if isinstance(key, str) and len(key) <= 64 else f"<{type(key).__name__} key>"
-            raise ConfigError(f"{prefix}{label}: unknown field")
+            raise ConfigError(f"{prefix}{_key_name(key)}: unknown field")
     return data
 
 
@@ -209,3 +247,117 @@ def load_rpc_pool_config(path: Path) -> RpcPoolConfig:
 
     return RpcPoolConfig(version=version, rate_limit_cooldown_seconds=cooldown,
                          age_cache_entries=age_cache_entries, providers=providers)
+
+
+# ------------------------------------------------------------------------------------------------------ фабрика джерела
+
+# Пауза після 429 і розмір кешу віку для режиму «без файла»: на результат не впливають (contracts «Фабрика», крок 1).
+_DEFAULT_COOLDOWN_SECONDS = 5.0
+_DEFAULT_AGE_CACHE_ENTRIES = 1
+_DEFAULT_PROVIDER_NAME = "default"
+_UNLIMITED_WEIGHT = 1e6  # data-model: `rate_per_second = inf` профілю -> скінченна вага
+
+
+def _weight(profile: str) -> float:
+    rate = float(RPC_PROFILES[profile]["rate_per_second"])
+    return rate if math.isfinite(rate) else _UNLIMITED_WEIGHT
+
+
+def _single_default_spec(fallback_profile: str) -> ProviderSpec:
+    """Крок 1: без файла — один архівний провайдер із `UNMASK_RPC_URL` (довіра, як до цієї фічі)."""
+    return ProviderSpec(name=_DEFAULT_PROVIDER_NAME, url_env=ENV_URL, profile=fallback_profile, archival=True,
+                        retention_seconds=None, skip_methods=())
+
+
+def _describe(spec: ProviderSpec) -> str:
+    return f"{spec.name}({spec.profile}, {'archival' if spec.archival else 'non-archival'})"
+
+
+def build_rpc_source(
+    config_path: Path,
+    ingest_cfg: IngestConfig,
+    environ: Mapping[str, str],
+    *,
+    fallback_profile: str = DEFAULT_PROFILE,
+    clock: Clock | None = None,
+    sleep: Callable[[float], None] | None = None,
+    transport_factory: Callable[[str], httpx.BaseTransport] | None = None,
+    runner: Runner | None = None,
+) -> PooledRpcSource:
+    """Зібрати `PooledRpcSource` за `config/rpc_pool.yaml` і середовищем (кроки 1–5 контракту).
+
+    `environ` читається лише як переданий мапінг (`os.environ` не чіпається). `transport_factory(name)` — шов для
+    тестів: транспорт кожного провайдера за його іменем з конфігу. Усі помилки — `ConfigError` з іменем змінної чи
+    правилом, без значень; клієнти вже збудованих провайдерів при цьому закриваються.
+    """
+    config_path = Path(config_path)
+    if config_path.exists():
+        cfg = load_rpc_pool_config(config_path)  # `ConfigError` піднімається звідси ж: нічого ще не збудовано
+        specs = cfg.providers
+        cooldown, cache_entries, version = cfg.rate_limit_cooldown_seconds, cfg.age_cache_entries, cfg.version
+        single = False
+    else:
+        specs = (_single_default_spec(fallback_profile),)
+        cooldown, cache_entries, version = _DEFAULT_COOLDOWN_SECONDS, _DEFAULT_AGE_CACHE_ENTRIES, 0
+        single = True
+    clock = clock if clock is not None else SystemClock()
+
+    built: list[tuple[ProviderSpec, HttpRpcSource]] = []
+    try:
+        for spec in specs:
+            if not single and not environ.get(spec.url_env):
+                # лише імена: значення змінної (воно і є секретом) у повідомлення не потрапляє
+                logger.warning("rpc pool: provider %s skipped: %s not set", spec.name, spec.url_env)
+                continue
+            # Режим «без файла»: відсутня/невалідна змінна дає ТУ САМУ `ConfigError`, що й `HttpRpcSource.from_env`.
+            transport = transport_factory(spec.name) if transport_factory is not None else None
+            try:
+                source = HttpRpcSource.from_env(
+                    ingest_cfg.rpc,
+                    commitment=ingest_cfg.commitment,
+                    environ=environ,
+                    url_var=spec.url_env,
+                    profile=spec.profile,
+                    clock=clock,
+                    sleep=sleep,
+                    transport=transport,
+                )
+            except BaseException:
+                if transport is not None:  # URL не прийнято: клієнта немає, транспорт не лишаємо відкритим
+                    transport.close()
+                raise
+            built.append((spec, source))
+        if not built:
+            raise ConfigError(
+                "rpc_pool.yaml: no RPC provider available (set one of: "
+                + ", ".join(spec.url_env for spec in specs)
+                + ")"
+            )
+        for method in RPC_METHODS:
+            if all(method in spec.skip_methods for spec, _ in built):
+                raise ConfigError(f"rpc_pool.yaml: no available provider serves {method}")
+        providers = [
+            Provider(
+                name=spec.name,
+                source=source,
+                weight=_weight(spec.profile),
+                archival=spec.archival,
+                retention_seconds=spec.retention_seconds,
+                skip_methods=frozenset(spec.skip_methods),
+            )
+            for spec, source in built
+        ]
+        pool = PooledRpcSource(
+            providers,
+            clock=clock,
+            rate_limit_cooldown_seconds=cooldown,
+            age_cache_entries=cache_entries,
+            runner=runner,
+        )
+    except BaseException:
+        for _, source in built:  # не лишати відкритих клієнтів, коли збірка не вдалась
+            source.close()
+        raise
+    if not single:
+        logger.info("rpc pool v%d: %s", version, ", ".join(_describe(spec) for spec, _ in built))
+    return pool

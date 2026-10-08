@@ -120,7 +120,7 @@ T-131 → T-132 → T-133 → T-134 → T-135 → T-136 → T-137 → T-138 → 
   `src/unmask/ingest/rpc/pool_config.py` (`# impl:` за `plan.md`), `tests/test_rpc_pool_config.py`
   (`# verifies: FR-007-09`), `tests/test_hubs_config.py` (один рядок переліку + довжина).
 
-- [ ] T-138 [FR-007-03, FR-007-10, FR-007-11, FR-007-12] critical: Фабрика `build_rpc_source`. `pool_config.py`
+- [x] T-138 [FR-007-03, FR-007-10, FR-007-11, FR-007-12] critical: Фабрика `build_rpc_source`. `pool_config.py`
   — кроки 1–5 контракту. — тест: `tests/test_rpc_pool_config.py::test_absent_config_builds_single_default_provider`
   (ім'я `http`, архівний, профіль з аргументу), `::test_absent_config_missing_env_same_error_as_from_env`,
   `::test_four_providers_built_when_all_env_set` (US4-1), `::test_missing_env_skipped_with_name_only_warning`
