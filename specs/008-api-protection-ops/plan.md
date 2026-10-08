@@ -97,7 +97,7 @@ tests/
 | FR-008-10 | `http.py` + `contracts/overload-error.schema.json` | `test_delivery_http_protection.py` | T-166 |
 | FR-008-11 | `deploy/unmask.service` (+носій `smoke.sh`) | `test_deploy_artifacts.py` | T-170 |
 | FR-008-12 | `deploy/nginx-unmask.conf.example` | `test_deploy_artifacts.py` | T-171 |
-| FR-008-13 | `README.md` «Deploy», `deploy/smoke.sh` | `test_deploy_artifacts.py` | T-172 |
+| FR-008-13 | `README.md` «Deploy», `deploy/smoke.sh` | `test_readme_deploy.py` | T-172 |
 | FR-008-14 | `limits.py` (інжектований годинник) | `test_delivery_limits.py`, e2e | T-162, T-173 |
 
 ## Маркери трасування
