@@ -13,6 +13,7 @@ PKG = Path(__file__).resolve().parents[1] / "src" / "unmask" / "delivery"
 CORE = ["config", "report", "render", "cache", "limits", "service", "http", "bot", "main"]
 
 ALLOWED_UNMASK = {
+    "unmask.ingest.addresses",
     "unmask.ingest.model",
     "unmask.ingest.config",
     "unmask.ingest.service",
@@ -44,7 +45,6 @@ FORBIDDEN_SUBSTRINGS = [
     "unmask.ingest.parse",
     "unmask.ingest.purchases",
     "unmask.ingest.delegated",
-    "unmask.ingest.addresses",
     "unmask.ingest.budget",
     "unmask.ingest.rpc.fixture",
     "unmask.ingest.rpc.protocol",
