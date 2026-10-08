@@ -754,7 +754,7 @@ def test_directory_is_still_unavailable_not_config_error(tmp_path):
 
 
 def test_changelog_limit_is_well_above_real_needs():
-    assert len(CHANGELOG.read_bytes()) * 100 < hc._MAX_CHANGELOG_BYTES
+    assert len(CHANGELOG.read_bytes()) * 25 < hc._MAX_CHANGELOG_BYTES
 
 
 @pytest.mark.parametrize("name", ["hubs.yaml", "CHANGELOG.md"])

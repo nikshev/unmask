@@ -1,0 +1,31 @@
+# Версіонований пул RPC-провайдерів (принцип III). Схема: specs/007-rpc-provider-pool/contracts/rpc-pool-config.md
+# Лише ІМЕНА змінних середовища — жодних URL і ключів.
+# Будь-яка зміна: підняти version і додати запис із sha256 у config/CHANGELOG.md (розділ "# config/rpc_pool.yaml").
+version: 1
+rate_limit_cooldown_seconds: 5
+age_cache_entries: 200000
+providers:
+  - name: rpcfast
+    url_env: UNMASK_RPC_URL
+    profile: rpcfast_start
+    archival: false
+    retention_seconds: 72000          # виміряно ≈ 77400 (≈ 21,5 год); запас ≈ 7%
+    skip_methods: [getTokenAccountsByOwner]   # заблоковано на тарифі Start
+  - name: helius_1
+    url_env: UNMASK_RPC_URL_ALT
+    profile: helius_free
+    archival: true
+    retention_seconds: null
+    skip_methods: []
+  - name: helius_2
+    url_env: UNMASK_RPC_URL_ALT1
+    profile: helius_free
+    archival: true
+    retention_seconds: null
+    skip_methods: []
+  - name: helius_3
+    url_env: UNMASK_RPC_URL_ALT2
+    profile: helius_free
+    archival: true
+    retention_seconds: null
+    skip_methods: []

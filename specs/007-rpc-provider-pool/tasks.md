@@ -41,11 +41,10 @@ T-131 → T-132 → T-133 → T-134 → T-135 → T-136 → T-137 → T-138 → 
   `NotImplementedError`. — тест: `tests/test_rpc_pool.py::test_apportion_largest_remainder_and_ties`
   (`(25,[1,1,1])→[9,8,8]`, `(25,[12,4.5,4.5,4.5])→[12,5,4,4]`, `(0,…)→нулі`),
   `::test_order_preserved_across_two_providers` (50 підписів, кожен провайдер отримав непорожню частку),
-  `::test_faster_provider_gets_proportionally_more` (ваги 12 і 4.5 → 37/13 із 50),
+  `::test_faster_provider_gets_proportionally_more` (ваги 12 і 4.5 → 36/14 із 50 за методом найбільших залишків; «37/13» арифметично неможливе),
   `::test_completion_order_does_not_change_result` (`SequentialRunner` forward/reverse/перестановка → однакові
   списки), `::test_providers_run_concurrently` (`ThreadRunner` + `Barrier(3, timeout=5)` — без вимірювання
-  часу), `::test_virtual_makespan_three_equal_providers_at_most_half` (SC-001: max частки ≤ 0,5 × сума на
-  кожному виклику basic), `::test_expired_deadline_raises_budget_timeout_with_zero_calls`,
+  часу), `::test_virtual_makespan_three_equal_providers_at_most_half` (SC-001: для кожного виклику basic з n ≥ 2 підписів max частки == ceil(n/3) ≤ 0,5·n; сумарно по basic ≈ 0,53, бо підпис, що йде самотнім, неподільний; реплей реальних пакетів, не через IngestService до T-133), `::test_expired_deadline_raises_budget_timeout_with_zero_calls`,
   `::test_empty_signatures_zero_calls`; мутація: порівну замість за вагами → червоний
   `test_faster_provider_gets_proportionally_more`; збирати в порядку завершення → червоний
   `test_completion_order_does_not_change_result`; файли: `src/unmask/ingest/rpc/pool.py`
@@ -103,7 +102,7 @@ T-131 → T-132 → T-133 → T-134 → T-135 → T-136 → T-137 → T-138 → 
 
 ## Phase 3: Конфіг і підключення (US4, P2 — у зрізі)
 
-- [ ] T-137 [FR-007-09] critical: `config/rpc_pool.yaml` v1, журнал, завантажувач. Файл — дослівно з
+- [x] T-137 [FR-007-09] critical: `config/rpc_pool.yaml` v1, журнал, завантажувач. Файл — дослівно з
   `contracts/rpc-pool-config.md`; `config/CHANGELOG.md`: розділ `# config/rpc_pool.yaml` **ПЕРЕД**
   `# config/ingest.yaml`, запис `## 1 — <дата>` з останнім рядком `sha256: <content_digest>`, інші розділи
   не чіпати. `src/unmask/ingest/rpc/pool_config.py`: `ProviderSpec`, `RpcPoolConfig`,
@@ -222,3 +221,9 @@ T-131 → T-132 → T-133 → T-134 → T-135 → T-136 → T-137 → T-138 → 
 T-131 → T-132 → T-133 → T-134; T-133 → T-135 → T-136; T-137 → T-138 → T-139 (T-137 можна паралельно з
 T-132…T-136); T-136 + T-139 → кінець зрізу; T-140, T-141 після T-136; T-142, T-143, T-144 — після T-139
 і паралельно; T-145 — останнім.
+
+## Нотатки ревʼю (2026-10-08)
+
+- **T-138 (вимога з ревʼю T-137):** завантажувач `pool_config.py` (~рядок 111) повертає для невідомого ключа ім'я ключа до 64 символів (ключ `https://x.io/?api-key=…` попав би в текст помилки). Узгодити з `hubs.config._key_name`: показувати ім'я лише якщо воно ідентифікатор `[A-Za-z_][A-Za-z0-9_]{0,63}`, інакше `<str key>`; додати тест-сторож (FR-007-12).
+- **Спільний файл (зроблено в 007):** запас розміру журналу в `tests/test_hubs_config_robustness.py:757` змінено з ×100 на ×25 (журнал ≈ 10 КБ, ліміт 1 МіБ). 008/T-161 цього не повторює.
+- **T-132:** `None` від будь-якого провайдера поки остаточний (усі провайдери в T-132/T-134 архівні); підтвердження «не знайдено» архівним — T-135/T-136. Заглушки `NotImplementedError` у `name` і одиночних методах заміняє T-133.

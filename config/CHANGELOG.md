@@ -53,6 +53,15 @@ sha256: f04bbf8c32271c8d8389357ddf478973266b7ea99f8a7e7074b11fb541c65f86
 Початкова версія (фіча 004; research R-3): лише показові й операційні сталі, жодна не змінює висновок аналізу — http_port=8080, png_width=1200, png_height=800, cluster_palette (8 кольорів #rrggbb), address_prefix_len=6, evidence_preview_limit=4000. Пороги й ваги лишаються в YAML 001/002/003.
 sha256: 74dae8a76af17497df61b0f029e2afd27bdf4298ad8da8e6d6be7e1fc095e778
 
+# config/rpc_pool.yaml
+
+## 1 — 2026-10-08
+Початкова версія (фіча 007, T-137): пул із 4 RPC-провайдерів, лише імена змінних (url_env), без URL і ключів.
+cooldown=5 с, age_cache_entries=200000. rpcfast (UNMASK_RPC_URL, rpcfast_start, неархівний, retention 72000 с при виміряних
+≈ 77400, skip getTokenAccountsByOwner) + helius_1..3 (UNMASK_RPC_URL_ALT/_ALT1/_ALT2, helius_free, архівні).
+Чому: набір провайдерів і горизонт історії визначають, що побачить аналіз (принцип III). Горизонт — один вимір.
+sha256: 3f8c9d6b546f96ed2bbc4332c15fef598037f3e36eabf62e47e6305c7bc6202f
+
 # config/ingest.yaml
 
 ## 1 — 2026-10-03
