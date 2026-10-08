@@ -166,7 +166,7 @@ Responses when a limit is hit:
 - `429 Too Many Requests`, error kind `rate_limited`, with a `Retry-After` header:
   the client sent more requests than the per-IP limit allows.
 - `503 Service Unavailable`, error kind `busy`, with a `Retry-After` header: all
-  heavy-analysis slots are taken and the mint is not cached or already being analysed.
+  heavy-analysis slots are taken and the mint is neither cached nor already being analysed.
   Cached results and joining an analysis already running for the same mint are not
   rejected.
 
@@ -196,6 +196,10 @@ the Start tier, so the service exits with code 2. Set at least one `UNMASK_RPC_U
   `--host` the service listens on all interfaces (`0.0.0.0`, the default): when you run it
   by hand, pass `--host 127.0.0.1` or block the port from outside, for example
   `sudo ufw deny 18080`.
+- The per-client limit keys on the exact client address. Do not enable an IPv6 listener in
+  nginx (`listen [::]:443`) until the limiter groups IPv6 clients by /64: a single /64 owner
+  would otherwise get a separate window per address. A client can also hold all heavy-analysis
+  slots with cold requests for up to the time budget; the per-client limit does not prevent that.
 
 Demo instance: `<DEMO_URL>` (added by the operator)
 
