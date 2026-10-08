@@ -17,6 +17,7 @@ ALLOWED_UNMASK = {
     "unmask.ingest.config",
     "unmask.ingest.service",
     "unmask.ingest.rpc.http",
+    "unmask.ingest.rpc.pool_config",
     "unmask.graph.model",
     "unmask.graph.service",
     "unmask.hubs.config",

@@ -1,7 +1,8 @@
-# impl: FR-004-10
+# impl: FR-004-10, FR-007-14
 """Точка входу доставки: env → YAML → сервіси → HTTP-потік + polling-бот.
 
-Секрети — лише з оточення (`UNMASK_RPC_URL`, `UNMASK_BOT_TOKEN`); відсутня змінна —
+Секрети — лише з оточення (`UNMASK_BOT_TOKEN` і змінні RPC-провайдерів з `config/rpc_pool.yaml`,
+а без нього `UNMASK_RPC_URL`); відсутня змінна —
 fail-fast із назвою змінної ДО відкриття портів. У репозиторії секретів немає.
 """
 
@@ -27,7 +28,7 @@ from unmask.hubs.config import ConfigError as HubConfigError
 from unmask.hubs.config import load_hub_config
 from unmask.ingest.config import ConfigError as IngestConfigError
 from unmask.ingest.config import load_config
-from unmask.ingest.rpc.http import HttpRpcSource
+from unmask.ingest.rpc.pool_config import build_rpc_source
 from unmask.ingest.service import IngestService
 
 __all__ = ["main"]
@@ -54,15 +55,14 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
     except (HubConfigError, IngestConfigError) as exc:
         print(f"serve: bad config: {exc}", file=sys.stderr)
         return 2
-    try:
-        source = HttpRpcSource.from_env(ingest_cfg.rpc, commitment=ingest_cfg.commitment,
-                                        environ=dict(env))
-    except (HubConfigError, IngestConfigError) as exc:
-        print(f"serve: {exc}", file=sys.stderr)
-        return 2
     bot_token = env.get(BOT_TOKEN_VAR)
     if not args.no_bot and not bot_token:
         print(f"serve: {BOT_TOKEN_VAR}: not set", file=sys.stderr)
+        return 2
+    try:
+        source = build_rpc_source(config_dir / "rpc_pool.yaml", ingest_cfg, dict(env))
+    except (HubConfigError, IngestConfigError) as exc:
+        print(f"serve: {exc}", file=sys.stderr)
         return 2
 
     service = DeliveryService(

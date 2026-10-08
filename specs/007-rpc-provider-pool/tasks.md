@@ -132,7 +132,7 @@ T-131 → T-132 → T-133 → T-134 → T-135 → T-136 → T-137 → T-138 → 
   всіх → червоний `test_each_provider_paces_by_own_profile`; логувати значення змінної → червоний сторож;
   файли: `pool_config.py`, `tests/test_rpc_pool_config.py` (`# verifies: FR-007-03, FR-007-09, FR-007-10, FR-007-11, FR-007-12`).
 
-- [ ] T-139 [FR-007-14] Сервіс доставки через пул (**спільний файл з 008 — 007 першою**).
+- [x] T-139 [FR-007-14] Сервіс доставки через пул (**спільний файл з 008 — 007 першою**).
   `src/unmask/delivery/main.py`: замінити `HttpRpcSource.from_env(...)` на
   `build_rpc_source(config_dir / "rpc_pool.yaml", ingest_cfg, dict(env))` з `unmask.ingest.rpc.pool_config`;
   `ConfigError` → `serve: <текст>`, код 2 (як зараз); до рядка `# impl:` додати `FR-007-14`.

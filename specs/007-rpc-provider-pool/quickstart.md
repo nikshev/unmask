@@ -20,7 +20,7 @@ UNMASK_RPC_URL_ALT1=<Helius free #2>
 UNMASK_RPC_URL_ALT2=<Helius free #3>
 ```
 
-Будь-яку змінну можна не задавати — провайдер пропускається з попередженням. Без `config/rpc_pool.yaml`
+Змінну провайдера можна не задавати — провайдер пропускається з попередженням, але після пропусків мусить лишитись набір, що обслуговує всі методи: з поставленим `config/rpc_pool.yaml` v1 лише `UNMASK_RPC_URL` (RPC Fast) НЕ запустить сервіс (код 2, rpcfast не обслуговує `getTokenAccountsByOwner`) — потрібна хоча б одна `UNMASK_RPC_URL_ALT*`. Без `config/rpc_pool.yaml`
 працює старий режим (лише `UNMASK_RPC_URL`, довіра як раніше). Зміна YAML — нова `version` + запис у
 `config/CHANGELOG.md` (розділ `# config/rpc_pool.yaml`), інакше тест журналу червоний.
 
