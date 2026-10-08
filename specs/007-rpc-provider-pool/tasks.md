@@ -60,7 +60,7 @@ T-131 → T-132 → T-133 → T-134 → T-135 → T-136 → T-137 → T-138 → 
   мутація: прибрати лок провайдера → червоний `test_concurrent_calls_never_overlap_on_one_provider`;
   файли: `pool.py`, `tests/test_rpc_pool.py`.
 
-- [ ] T-134 [FR-007-01, FR-007-04, FR-007-05] critical: Еквівалентність пулу одиночному джерелу.
+- [x] T-134 [FR-007-01, FR-007-04, FR-007-05] critical: Еквівалентність пулу одиночному джерелу.
   Лише тести (код — T-132/T-133). `IngestService(cfg, source, FakeClock(...))`: одиночний `FixtureRpcSource`
   vs пул із трьох `ScriptedProvider` (власні `FixtureRpcSource`, усі архівні, ваги 12/4.5/4.5,
   `SequentialRunner("reverse")`) на сценаріях `basic`, `hub`, `corrupt`, `swapsend` → `to_json` результату
