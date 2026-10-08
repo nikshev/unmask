@@ -1,0 +1,44 @@
+# systemd-юніт сервера доставки unmask (FR-008-11, research R-8).
+#
+# Файл лише в репозиторії: сюди він НЕ встановлюється автоматично. Встановлення оператором:
+#   cp /opt/unmask/deploy/unmask.service /etc/systemd/system/unmask.service
+#   systemctl daemon-reload
+#   systemctl enable --now unmask
+#
+# Передумови (оператор, один раз):
+#   cd /opt/unmask && uv sync --frozen --no-dev     # створює /opt/unmask/.venv
+#   /opt/unmask/.env                                 # секрети й налаштування — лише у цьому файлі,
+#                                                    # права 600; у юніт і в git вони не потрапляють
+#
+# Чому пряма команда з .venv, а не `uv run`: uv може синхронізувати оточення під час старту
+# (мережа, зміна lock-файла), а його немає в PATH systemd.
+#
+# Чому немає User=/DynamicUser: інтерпретатор, встановлений uv, зазвичай лежить під
+# /root/.local/share/uv/…, і недоступний іншому користувачеві. Юніт працює від root; для
+# звуження прав окремий користувач потребує перенесення venv (відкрите питання R-8, Q5).
+#
+# Залежність від іншої задачі фічі 008: прапорець `--host 127.0.0.1` (прив'язка лише до
+# локального інтерфейсу, щоб трафік ішов тільки через nginx) додає задача з --host у
+# serve_unmask.py / delivery/main.py. Доки його немає, порт 18080 слухає за замовчуванням
+# сервера — закрийте його фаєрволом назовні або додайте `--host 127.0.0.1` сюди після
+# того, як прапорець з'явиться.
+
+[Unit]
+Description=unmask: сервер доставки аналізу інсайдерських кластерів
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/unmask
+# Змінні з файла оператора. Значення змінних тут не вбудовуються.
+EnvironmentFile=/opt/unmask/.env
+ExecStart=/opt/unmask/.venv/bin/python scripts/serve_unmask.py --port 18080
+# Перезапуск після будь-якого збою (зокрема, аварійного виходу), з паузою 5 с.
+Restart=always
+RestartSec=5
+# Процес не може підвищити привілеї через setuid-бінарники після старту.
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
