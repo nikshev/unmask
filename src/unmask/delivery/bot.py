@@ -25,15 +25,15 @@ __all__ = [
 ]
 
 BAND_WORDS = {
-    "clean": "чисто",
-    "suspicious": "підозріло",
-    "high_concentration": "висока концентрація",
-    "insufficient_data": "недостатньо даних",
+    "clean": "clean",
+    "suspicious": "suspicious",
+    "high_concentration": "high concentration",
+    "insufficient_data": "insufficient data",
 }
 
-_EVIDENCE_BUTTON = "докази"
-_STALE_TEXT = "запит застарів, надішліть /check ще раз"
-_START_HINT = "Надішліть /check <mint>, щоб перевірити токен."
+_EVIDENCE_BUTTON = "evidence"
+_STALE_TEXT = "request expired, send /check again"
+_START_HINT = "Send /check <mint> to analyze a token."
 
 
 class BotTransport(Protocol):
@@ -125,13 +125,13 @@ def format_check(doc: dict[str, Any], request_id: str | None) -> tuple[str, Any]
     """`(caption, reply_markup)`: один рядок ризику, топ-3 кластери, походження, кнопка."""
     if doc.get("error") is not None:
         return _format_error(doc["error"]), None
-    lines = [f"ризик {doc['risk_score']}/100 — {BAND_WORDS.get(doc['band'], doc['band'])}"]
+    lines = [f"risk {doc['risk_score']}/100 — {BAND_WORDS.get(doc['band'], doc['band'])}"]
     for i, cluster in enumerate(doc["clusters"][:3]):
-        lines.append(f"#{i + 1}: {len(cluster['wallets'])} гаманців, частка {cluster['supply_share']}")
+        lines.append(f"#{i + 1}: {len(cluster['wallets'])} wallets, share {cluster['supply_share']}")
     if not doc["clusters"]:
-        lines.append("повʼязаних груп не знайдено")
+        lines.append("no related groups found")
     prov = doc.get("provenance", {})
-    lines.append(f"дані: ingest v{prov.get('ingest_config_version')} hubs v{prov.get('hub_config_version')} "
+    lines.append(f"data: ingest v{prov.get('ingest_config_version')} hubs v{prov.get('hub_config_version')} "
                  f"clusters v{prov.get('cluster_config_version')}, {prov.get('graph_status')}")
     markup = None
     if doc["clusters"] and request_id is not None:
@@ -142,32 +142,32 @@ def format_check(doc: dict[str, Any], request_id: str | None) -> tuple[str, Any]
 
 def _format_error(error: Any) -> str:
     if not isinstance(error, dict):
-        return "не вдалося проаналізувати токен"
+        return "could not analyze the token"
     kind = error.get("kind", "")
     if kind == "invalid_address":
-        return "не схоже на адресу Solana — перевірте mint"
+        return "doesn't look like a Solana address — check the mint"
     if kind == "token_not_found":
-        return "токен не знайдено"
+        return "token not found"
     detail = error.get("detail", "")
-    return f"даних неповно: {detail}" if detail else "не вдалося проаналізувати токен"
+    return f"incomplete data: {detail}" if detail else "could not analyze the token"
 
 
 def format_evidence(doc: dict[str, Any], limit: int) -> list[str]:
     """Повний текст доказів, нарізаний шматками ≤ `limit` (R-8)."""
     blocks: list[str] = []
     for i, cluster in enumerate(doc.get("clusters", [])):
-        rows = [f"Кластер #{i + 1} (частка {cluster['supply_share']}, "
-                f"впевненість {cluster['confidence']})"]
+        rows = [f"Cluster #{i + 1} (share {cluster['supply_share']}, "
+                f"confidence {cluster['confidence']})"]
         for ev in cluster["evidence"]:
             shown = [_short(s) for s in ev["source"][:4]]
             if len(ev["source"]) > 4:
-                shown.append(f"+{len(ev['source']) - 4} ще")
+                shown.append(f"+{len(ev['source']) - 4} more")
             window = ev["window"]
-            rows.append(f"• {ev['type']}: {', '.join(shown)}, вікно {window['start']}–{window['end']} ({window['basis']})")
+            rows.append(f"• {ev['type']}: {', '.join(shown)}, window {window['start']}–{window['end']} ({window['basis']})")
         blocks.append("\n".join(rows))
     full = "\n\n".join(blocks)
     if len(full) <= limit:
-        return [full] if full else ["доказів немає"]
+        return [full] if full else ["no evidence"]
     total = sum(len(c["evidence"]) for c in doc.get("clusters", []))
     chunks: list[str] = []
     current: list[str] = []
@@ -183,7 +183,7 @@ def format_evidence(doc: dict[str, Any], limit: int) -> list[str]:
     if current:
         chunks.append("\n".join(current))
     in_first = chunks[0].count("• ")
-    chunks[0] += f"\n…і ще {total - in_first} доказів (далі)"
+    chunks[0] += f"\n…and {total - in_first} more pieces of evidence (continued)"
     return chunks
 
 
@@ -202,7 +202,7 @@ def handle_check(text: str, service, transport: BotTransport, chat_id: Any,
     try:
         doc = service.analyze(mint, progress=lambda msg: transport.send_message(chat_id, msg))
     except Exception as exc:
-        transport.send_message(chat_id, f"помилка аналізу: {type(exc).__name__}")
+        transport.send_message(chat_id, f"analysis error: {type(exc).__name__}")
         return None
     if doc.get("error") is not None:
         caption, _ = format_check(doc, None)
@@ -234,7 +234,7 @@ def handle_evidence(callback_data: str, callback_id: str, service, transport: Bo
     try:
         doc = service.analyze(mint)
     except Exception as exc:
-        transport.send_message(chat_id, f"помилка аналізу: {type(exc).__name__}")
+        transport.send_message(chat_id, f"analysis error: {type(exc).__name__}")
         return
     if doc.get("error") is not None:
         transport.send_message(chat_id, _format_error(doc["error"]))
@@ -295,7 +295,7 @@ def run_polling(transport: BotTransport, service, *, render=None, evidence_limit
                 try:
                     chat = update.get("message", {}).get("chat", {}).get("id")
                     if chat is not None:
-                        transport.send_message(chat, f"помилка аналізу: {type(exc).__name__}")
+                        transport.send_message(chat, f"analysis error: {type(exc).__name__}")
                 except Exception:
                     pass
             processed += 1

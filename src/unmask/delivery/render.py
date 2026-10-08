@@ -129,7 +129,7 @@ def render_png(doc: dict[str, Any], config: DeliveryConfig) -> GraphImage:
         x0 = _MARGIN + lx * 260
         y0 = 34 + ly * 22
         if y0 + 14 > _LEGEND_HEIGHT or x0 + 250 > width:
-            draw.text((_MARGIN, y0), f"…і ще {len(clusters) - i} кластерів у легенді",
+            draw.text((_MARGIN, y0), f"…{len(clusters) - i} more clusters in legend",
                       fill=_INK, font=font)
             break
         draw.rectangle([x0, y0, x0 + 14, y0 + 14], fill=color, outline=_INK)
@@ -169,7 +169,7 @@ def render_png(doc: dict[str, Any], config: DeliveryConfig) -> GraphImage:
         draw.text((cx - (box[2] - box[0]) / 2, cy + _NODE_RADIUS + 2), label, fill=_INK, font=font)
         drawn += 1
     if drawn < len(nodes):
-        draw.text((_MARGIN, height - 24), f"+{len(nodes) - drawn} вершин поза полотном",
+        draw.text((_MARGIN, height - 24), f"+{len(nodes) - drawn} nodes off canvas",
                   fill=_INK, font=font)
 
     buf = io.BytesIO()

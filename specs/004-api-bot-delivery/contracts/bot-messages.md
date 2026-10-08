@@ -1,48 +1,50 @@
-# Contract: повідомлення Telegram-бота (FR-004-03, FR-004-04)
+# Contract: Telegram bot messages (FR-004-03, FR-004-04)
 
-Транспорт — Bot API напряму (research R-2). Формати нижче — те, що бачить користувач
-і що перевіряють тести з несправжнім транспортом; назви методів Bot API — властивість
-платформи.
+Bot language: English (all user-visible texts). Transport — straight Bot API
+(research R-2). The formats below are what the user sees and what the
+fake-transport tests check; Bot API method names are platform property.
 
-## Вхід: `/check <mint>`
+## Input: `/check <mint>`
 
-- Текст рівно `/check`, пробіл, адреса. Порожній аргумент або сміття → відповідь-помилка
-  (див. «Помилки»), не мовчання.
-- Інші повідомлення бот ігнорує мовчки (демо не потребує help-меню; `/start` відповідає
-  одним рядком-підказкою з форматом команди).
+- Text exactly `/check`, space, address. Empty argument or garbage → error reply
+  (see "Errors"), not silence.
+- The bot silently ignores other messages (the demo needs no help menu; `/start`
+  answers with a one-line hint showing the command format).
 
-## Вихід: одне повідомлення з оцінкою
+## Output: one assessment message
 
-1. `sendPhoto`: PNG-байтівки + caption:
-   - рядок 1: `ризик <число>/100 — <смуга словами>` (смуги: «чисто» / «підозріло» /
-     «висока концентрація» / «недостатньо даних»);
-   - далі по рядку на топ-3 кластери: `#<i>: <n> гаманців, частка <share>`;
-   - останній рядок: походження одним рядком (`v-версії конфігів`, статус повноти).
-2. `reply_markup`: одна inline-кнопка `«докази»` з `callback_data = "evidence:<request_id>"`,
-   де `request_id` — ключ запису кешу, за яким лежить повний документ.
+1. `sendPhoto`: PNG bytes + caption:
+   - line 1: `risk <number>/100 — <band words>` (bands: "clean" / "suspicious" /
+     "high concentration" / "insufficient data");
+   - then one line per top-3 cluster: `#<i>: <n> wallets, share <share>`;
+   - last line: provenance on one line (`v` config versions, completeness status).
+2. `reply_markup`: one inline button `"evidence"` with
+   `callback_data = "evidence:<request_id>"`, where `request_id` is the cache-entry
+   key holding the full document.
 
-Без кластерів: caption прямо каже «повʼязаних груп не знайдено» + рядок повноти;
-кнопка «докази» не додається (показувати нічого).
+No clusters: the caption says "no related groups found" + the completeness line;
+no "evidence" button (nothing to show).
 
-## Callback кнопки «докази»
+## "evidence" button callback
 
-1. `answerCallbackQuery` (порожній текст — прибирає «годинник» у клієнті).
-2. `sendMessage` (новим повідомленням у той самий чат, не редагуванням фото):
-   по блоку на кластер — `Кластер #<i> (частка, впевненість)` і рядки доказів
-   `• <тип>: <джерела-скорочено>, вікно <start>–<end> (<basis>)`.
-3. Обрізання (R-8): якщо текст перевищує ~4000 символів — перші докази повністю +
-   рядок `…і ще K доказів (повний перелік — файл)`; повний текст — другим повідомленням
-   або `.txt`-документом за тим самим callback.
+1. `answerCallbackQuery` (empty text — dismisses the spinner in the client).
+2. `sendMessage` (a new message into the same chat, not a photo edit):
+   one block per cluster — `Cluster #<i> (share, confidence)` and evidence rows
+   `• <type>: <shortened sources>, window <start>–<end> (<basis>)`.
+3. Truncation (R-8): if the text exceeds ~4000 chars — first evidence items in full +
+   a line `…and K more pieces of evidence (continued)`; the full text goes as
+   a second message or a `.txt` document on the same callback.
 
-## Помилки
+## Errors
 
-- Невалідний `mint` / токен не знайдено / обірваний збір: `sendMessage` з людським текстом
-  (`«не схоже на адресу Solana»`, `«токен не знайдено»`, `«даних неповно: <причини>»`).
-  Жодного стеку; процес і polling-цикл живі.
+- Invalid `mint` / token not found / cut-off ingest: `sendMessage` with human text
+  (`"doesn't look like a Solana address"`, `"token not found"`,
+  `"incomplete data: <reasons>"`). No stack traces; the process and polling loop
+  stay alive.
 - Помилка середовища (немає ключа RPC/бота): таке повідомлення ніколи не відправляється
   користувачу як відповідь — процес падає голосно на старті з назвою змінної (fail-fast).
 
 ## `request_id`
 
-Непрозорий ідентифікатор запиту (`mint` + лічильник процесу), живе лише в памʼяті разом
-із кешем; після перезапуску старі кнопки дають відповідь «запит застарів, надішліть /check ще раз».
+Opaque request id (`mint` + process counter), lives only in memory next to the
+cache; after a restart, old buttons get "request expired, send /check again".

@@ -64,13 +64,18 @@ def build_report(ingest_result: IngestResult, graph_result: GraphResult,
     if not reasons:
         reasons.append("complete_data")
 
-    # coordination_category: none | weak | moderate | strong | high_concentration
+    # coordination_category: none | weak | moderate | strong | high_concentration.
+    # Пороги смуг — зі знімка thresholds результату 003 (той самий YAML, що дав
+    # risk_score і band), жодного хардкоду: калібрування смуг застосовується само.
+    th = md["thresholds"]
+    clean_max = th["band_clean_max"]
+    susp_max = th["band_suspicious_max"]
     risk = doc003["risk_score"]
     if not clusters:
         coord = "none"
-    elif risk >= 50:
+    elif risk > susp_max:
         coord = "strong"
-    elif risk >= 20:
+    elif risk > clean_max:
         coord = "moderate"
     elif any(c["supply_share"] > 0.5 for c in clusters):
         coord = "high_concentration"

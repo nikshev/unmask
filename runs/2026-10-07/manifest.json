@@ -1,0 +1,65 @@
+{
+ "experiment": "006-live-cohort-experiment",
+ "date": "2026-10-07",
+ "profile": {
+  "first_buyers_n": 30,
+  "funding_depth": 2,
+  "max_signatures_per_wallet": 30,
+  "collect_spl_inbound": false,
+  "time_budget_seconds": 600,
+  "commitment": "finalized",
+  "rpc_adapter_profile": "helius_free"
+ },
+ "configs": {
+  "ingest.yaml": "v3",
+  "hubs.yaml": "v3",
+  "hub_addresses.yaml": "v1",
+  "clusters.yaml": "v2",
+  "config_dir_digest_note": "versions recorded; digests in config/CHANGELOG.md"
+ },
+ "rpc_keys": {
+  "count": 3,
+  "env_vars": [
+   "UNMASK_RPC_URL_ALT",
+   "UNMASK_RPC_URL_ALT1",
+   "UNMASK_RPC_URL_ALT2"
+  ],
+  "rotation": "shard i -> key i (values never stored)"
+ },
+ "pool": {
+  "source": "MELT label.csv (public git-disl/MELT), label=high, 34890 rows",
+  "selection": "deterministic spread: every 290th high row -> 120",
+  "file": "data/cohort_pool.jsonl"
+ },
+ "control_v1_rejected": {
+  "cohort": "30 mega-liquid (SOL/USDC/BONK/...)",
+  "reason": "all 30 have >100k lifetime signatures (measured); first-buyer scan needs oldest page -> full 600s budget burned, 0 buyers; 2 workers died silently on USDC/RAY",
+  "evidence": "depth probe log (not committed)"
+ },
+ "control_v2": {
+  "source": "MELT label.csv, label=low (price-clean), 1878 rows",
+  "selection": "deterministic spread: every 62nd low row -> 30",
+  "file": "data/cohort_b.jsonl"
+ },
+ "fixes_during_run": [
+  "confidence=1.0 saturation crashed ClusterService on 3 pool tokens (noisy-OR openUnit): fixed in score.confidence + model._noisy_or (clamp to 4-decimal open interval), tests test_clusters_score/test_clusters_model; refilled rows: risks 71/80/21"
+ ],
+ "gaps": [
+  "per-token rpc_calls not captured by screening harness (elapsed_s recorded; budget respected per-token 600s)",
+  "run start/end wall times not logged (per-token elapsed_s in summaries)",
+  "evidence-type histogram not computed (raw docs not committed by design)"
+ ],
+ "committed_artifacts": [
+  "data/cohort_pool.jsonl",
+  "data/cohort_a.jsonl",
+  "data/cohort_b.jsonl",
+  "summaries/cohort_a.csv",
+  "summaries/cohort_b.csv",
+  "runs/2026-10-07/manifest.json"
+ ],
+ "not_committed": [
+  "raw per-token JSON docs",
+  "RPC key values",
+  "MELT label.csv (3.8MB source)"
+ ]
+}

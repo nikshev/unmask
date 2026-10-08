@@ -54,7 +54,7 @@ class DeliveryService:
 
     def _build(self, mint: str, *, progress: Optional[Callable[[str], None]] = None) -> dict[str, Any]:
         if progress:
-            progress("🔄 Збираю дані...")
+            progress("🔄 Collecting data...")
         outcome = self._ingest.collect(mint)
         if isinstance(outcome, Rejection):
             raise _ErrorDoc({
@@ -62,11 +62,11 @@ class DeliveryService:
                 "error": {"kind": outcome.kind.value, "detail": outcome.detail},
             })
         if progress:
-            progress("🔄 Будую граф фінансування...")
+            progress("🔄 Building funding graph...")
         graph_result = self._graph.analyze(outcome)
         if progress:
-            progress("🔄 Знаходжу кластери...")
+            progress("🔄 Finding clusters...")
         cluster_result = self._clusters.analyze(graph_result, outcome)
         if progress:
-            progress("🔄 Формую звіт...")
+            progress("🔄 Building report...")
         return build_report(outcome, graph_result, cluster_result)

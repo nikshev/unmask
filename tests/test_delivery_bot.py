@@ -59,8 +59,8 @@ def test_check_returns_photo_message_with_evidence_button() -> None:
     photos = [c for c in transport.calls if c[0] == "send_photo"]
     assert len(photos) == 1
     _, (_, _, caption), kwargs = photos[0]
-    assert "54/100" in caption and "висока концентрація" in caption
-    assert kwargs["reply_markup"]["inline_keyboard"][0][0]["text"] == "докази"
+    assert "54/100" in caption and "high concentration" in caption
+    assert kwargs["reply_markup"]["inline_keyboard"][0][0]["text"] == "evidence"
     assert _check_id(transport) == f"evidence:{request_id}"
 
 
@@ -97,7 +97,7 @@ def test_evidence_overflow_is_truncated_with_remainder_count() -> None:
     assert len(format_evidence(doc, 4000)) == 1
     chunks = format_evidence(doc, 50)
     assert len(chunks) > 1
-    assert "і ще" in chunks[0]
+    assert "more" in chunks[0]
     assert "".join(chunks).count("• ") >= sum(len(c["evidence"]) for c in doc["clusters"])
 
 
@@ -109,7 +109,7 @@ def test_no_clusters_message_says_so_without_evidence_button() -> None:
     photos = [c for c in transport.calls if c[0] == "send_photo"]
     assert len(photos) == 1
     _, (_, _, caption), kwargs = photos[0]
-    assert "не знайдено" in caption
+    assert "no related groups" in caption
     assert kwargs["reply_markup"] is None
 
 
@@ -129,8 +129,8 @@ def test_invalid_mint_replies_error_and_stays_alive() -> None:
     texts = [c[1][1] for c in transport.calls if c[0] == "send_message"]
     # 1 progress + 1 error per check = 2 per check, 2 checks = 4 messages
     assert len(texts) == 4
-    error_texts = [t for t in texts if "адресу" in t]
-    assert len(error_texts) == 2 and all("адресу" in t for t in error_texts)
+    error_texts = [t for t in texts if "Solana address" in t]
+    assert len(error_texts) == 2 and all("Solana address" in t for t in error_texts)
 
 
 def test_unknown_command_is_ignored_silently() -> None:
@@ -148,7 +148,7 @@ def test_stale_callback_answers_expired_rerun_check() -> None:
     handle_evidence("evidence:dead:0", "q9", service, transport, 123, {}, limit=4000)
     kinds = [c[0] for c in transport.calls]
     assert kinds == ["answer_callback", "send_message"]
-    assert "застарів" in transport.calls[1][1][1]
+    assert "expired" in transport.calls[1][1][1]
 
 
 class FlakyTransport(JournalTransport):
@@ -192,7 +192,7 @@ def test_evidence_limit_comes_from_config_not_code_default() -> None:
     callback_id = _check_id(transport)
     handle_evidence(callback_id, "q1", service, transport, 123, requests, limit=50)
     texts = [c[1][1] for c in transport.calls if c[0] == "send_message"]
-    assert len(texts) > 1 and "і ще" in texts[0]
+    assert len(texts) > 1 and "more" in texts[0]
 
 
 def test_insufficient_data_caption_names_band_and_never_clean() -> None:
@@ -203,8 +203,8 @@ def test_insufficient_data_caption_names_band_and_never_clean() -> None:
     transport = JournalTransport()
     handle_check(f"/check {mint}", service, transport, 123, {}, render=_render())
     caption = next(c[1][2] for c in transport.calls if c[0] == "send_photo")
-    assert "недостатньо даних" in caption
-    assert "чисто" not in caption
+    assert "insufficient data" in caption
+    assert "clean" not in caption
 
 
 def test_long_source_lists_show_remainder_count() -> None:
@@ -214,7 +214,7 @@ def test_long_source_lists_show_remainder_count() -> None:
                                        "source": [f"A{i}" + "1" * 31 for i in range(7)],
                                        "window": {"basis": "block_time", "start": 1, "end": 2}}]}]}
     (text,) = format_evidence(doc, 4000)
-    assert "+3 ще" in text
+    assert "+3 more" in text
 
 
 def test_request_registry_is_bounded() -> None:
@@ -223,10 +223,10 @@ def test_request_registry_is_bounded() -> None:
     class Canned:
         def analyze(self, mint: str, progress=None):
             if progress:
-                progress("🔄 Збираю дані...")
-                progress("🔄 Будую граф фінансування...")
-                progress("🔄 Знаходжу кластери...")
-                progress("🔄 Формую звіт...")
+                progress("🔄 Collecting data...")
+                progress("🔄 Building funding graph...")
+                progress("🔄 Finding clusters...")
+                progress("🔄 Building report...")
             return {"mint": mint, "analyzed_at": 1, "wallets_analyzed": 1, "clusters": [],
                     "risk_score": 0, "band": "insufficient_data", "band_reasons": ["empty_input"],
                     "provenance": {}, "error": None}

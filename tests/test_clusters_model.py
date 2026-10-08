@@ -73,7 +73,7 @@ def _cluster(wallets=("w1", "w2"), received=(100, 200), denom: int = 600,
     prod = 1.0
     for w in weights:
         prod *= 1.0 - w
-    conf = round(1.0 - prod, 4)
+    conf = min(max(round(1.0 - prod, 4), 10**-4), 1.0 - 10**-4)  # як прод: межа насичення
     num = sum(received)
     return Cluster(
         cluster_id=cluster_id(wallets), members=members,
@@ -228,6 +228,13 @@ def test_cluster_confidence_noisy_or_with_two_evidences() -> None:
     c = _cluster(weights=(0.6, 0.5), etype=EvidenceType.DIRECT_TRANSFER)
     # direct_transfer via must be empty — helper used shared via; rebuild properly
     assert c.confidence == round(1 - 0.4 * 0.5, 4)
+
+
+def test_cluster_validates_saturated_confidence_below_1() -> None:
+    """Перевищення доказів насичує noisy-OR: кластер валідується з 0.9999,
+    а не падає (реальні токени скринінгу 006)."""
+    c = _cluster(weights=tuple([0.6] * 20))
+    assert c.confidence == 0.9999
 
 
 def test_cluster_slot_fallback_warning_parity() -> None:

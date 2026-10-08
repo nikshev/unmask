@@ -91,6 +91,15 @@ def test_confidence_strictly_between_0_and_1() -> None:
     assert 0 < c < 1
 
 
+def test_confidence_saturates_below_1_on_overwhelming_evidence() -> None:
+    """Noisy-OR насичується в 1.0 при ~11+ сильних доказах — контракт 003.1
+    (openUnit) вимагає строгого < 1, інакше Cluster падає на реальних токенах."""
+    many = [_ev(EvidenceType.SHARED_FUNDER, 0.6) for _ in range(20)]
+    c = confidence(many, CFG, artifact=False)
+    assert 0 < c < 1
+    assert c == 0.9999
+
+
 def test_weights_come_from_config_not_constants() -> None:
     from dataclasses import replace
     from unmask.clusters.config import EvidenceWeights

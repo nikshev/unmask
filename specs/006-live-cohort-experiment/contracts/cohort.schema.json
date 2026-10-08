@@ -1,0 +1,23 @@
+# Contract: cohort mint lists (FR-006-01)
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unmask.local/schemas/006/cohort-1.json",
+  "title": "unmask cohort list v1 (feature 006)",
+  "description": "Mint lists for the 30+30 live experiment: screening pool, selected cohort A, liquid control B.",
+  "type": "object",
+  "required": ["version", "mint", "cohort", "source"],
+  "properties": {
+    "version": { "const": 1 },
+    "mint": { "type": "string", "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$" },
+    "cohort": { "enum": ["pool_a", "a", "b"] },
+    "source": { "enum": ["melt_high", "liquid", "liquid_draft", "screen_rank"] },
+    "notes": { "type": "string" }
+  }
+}
+```
+
+One JSON object per line (JSONL). File-level rules (checked by
+`scripts/cohort_check.py`, not by this schema): pool files hold ≥100 rows,
+`cohort_b` files hold exactly 30 rows; mints unique within a file.

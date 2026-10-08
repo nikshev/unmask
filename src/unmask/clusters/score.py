@@ -58,14 +58,19 @@ def evidence_from_link(link: Link, config: ClusterConfig) -> Evidence:
 
 
 def confidence(evidence: Sequence[Evidence], config: ClusterConfig, *, artifact: bool) -> float:
-    """Noisy-OR ваг: `round(1 − Π(1 − w), 4)`; з артефактом — `× artifact_confidence_multiplier`."""
+    """Noisy-OR ваг: `round(1 − Π(1 − w), 4)`; з артефактом — `× artifact_confidence_multiplier`.
+
+    Контракт 003.1 (`openUnit`): строга нерівність `0 < c < 1`. Noisy-OR насичується
+    в рівно 1.0 при ~11+ сильних доказах — межа зрізається до найближчого
+    4-знакового значення всередині інтервалу (похибка ≤ 10**-4 на risk_score ≤ 0.01).
+    """
     prod = 1.0
     for e in evidence:
         prod *= 1.0 - e.weight
     value = round(1.0 - prod, 4)
     if artifact:
         value = round(value * float(config.artifact_confidence_multiplier), 4)
-    return value
+    return min(max(value, 10**-4), 1.0 - 10**-4)
 
 
 def share_of(members_received: Sequence[int], denominator: int) -> tuple[int, int, float]:

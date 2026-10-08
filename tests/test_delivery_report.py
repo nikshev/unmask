@@ -112,3 +112,33 @@ def test_wrong_input_types_raise_type_error() -> None:
         build_report(ingest, object(), result)
     with pytest.raises(TypeError):
         build_report(ingest, graph, object())
+
+
+def test_coordination_category_follows_003_thresholds_not_hardcoded_bands() -> None:
+    """Синхронізація з clusters.yaml: категорія йде за band_*_max зі знімка
+    порогів результату 003, а не за хардкодом 50/20 (калібрування 005)."""
+    import dataclasses
+
+    from conftest import load_cluster_expected, load_cluster_fixture
+    from test_clusters_service import _cluster_config, _hub_config
+    from unmask.clusters.service import ClusterService
+    from unmask.graph.service import GraphService
+
+    expected = load_cluster_expected("c_two_clusters")
+    ingest = load_cluster_fixture("c_two_clusters")
+    graph = GraphService(_hub_config(expected)).analyze(ingest)
+
+    def _category_with(clean_max: int, susp_max: int) -> str:
+        cfg = dataclasses.replace(_cluster_config(expected),
+                                  band_clean_max=clean_max,
+                                  band_suspicious_max=susp_max)
+        result = ClusterService(cfg).analyze(graph, ingest)
+        assert result.risk_score == 29  # пороги не чіпають risk_score
+        return build_report(ingest, graph, result)["coordination_category"]
+
+    # risk=29: між каліброваними смугами (18, 48] → moderate
+    assert _category_with(18, 48) == "moderate"
+    # ті самі дані, ширша «чиста» смуга (30, 60]: 29 — не підозрілий → weak
+    assert _category_with(30, 60) == "weak"
+    # вужчі смуги (10, 20]: 29 — висока концентрація → strong
+    assert _category_with(10, 20) == "strong"

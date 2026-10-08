@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **79** · задач: **109** (виконано 109) · вимог у роботі: **0** · порушень: **0**
+Вимог: **87** · задач: **118** (виконано 118) · вимог у роботі: **0** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -108,6 +108,19 @@
 | `FR-005-05` | Бенчмарк MUST підтримувати `--live` режим (живий збір нових токенів) і `--fixtures` режим (офлайн на записаних | `T-113` | `src/unmask/benchmark/runner.py` | `tests/test_benchmark_runner.py`, `tests/test_benchmark_e2e.py` |
 | `FR-005-06` | Всі константи, що впливають на метрики, MUST бути в YAML (clusters.yaml v2), не в коді (принцип III). | `T-119`, `T-120` | `src/unmask/benchmark/calibrate.py` | `tests/test_benchmark_boundaries.py` |
 
+## 006-live-cohort-experiment
+
+| Вимога | Опис | Задачі | Імплементація | Тести |
+|---|---|---|---|---|
+| `FR-006-01` | Cohort lists MUST be versioned JSONL (`version: 1`) with fields | `T-122`, `T-126` | `scripts/cohort_check.py` | `tests/test_cohort_lists.py` |
+| `FR-006-02` | Screening MUST use the frozen fixture profile (N=30, depth=2, | `T-126`, `T-127` | `scripts/screen_worker.py` | `tests/test_cohort_lists.py` |
+| `FR-006-03` | Selection MUST be top-30 by `risk_score` desc, tie-breaks | `T-124`, `T-128` | `scripts/cohort_select.py` | `tests/test_cohort_lists.py` |
+| `FR-006-04` | Control cohort MUST be exactly the 30 committed liquid mints; | `T-123` | `scripts/cohort_check.py` | `tests/test_cohort_lists.py` |
+| `FR-006-05` | Committed artifacts per token MUST be limited to: mint, rank, | `T-127`, `T-128` | `scripts/screen_worker.py` | `tests/test_cohort_lists.py` |
+| `FR-006-06` | Comparison MUST report preregistered expectations vs outcome | `T-125`, `T-129` | `scripts/cohort_compare.py` | `tests/test_cohort_lists.py` |
+| `FR-006-07` | README MUST gain a section with the cohort table + caveats, | `T-125`, `T-129` | `scripts/cohort_compare.py` | `tests/test_cohort_lists.py` |
+| `FR-006-08` | Live steps MUST be manual gate tasks (`--live` runner), never | `T-130` | `scripts/cohort_check.py` | `tests/test_cohort_lists.py` |
+
 ## Критичні задачі
 
 - `T-003` (001-onchain-data-ingest) — виконано
@@ -177,3 +190,5 @@
 - `T-094` (004-api-bot-delivery) — виконано
 - `T-113` (005-benchmark-funding-coordination) — виконано
 - `T-115` (005-benchmark-funding-coordination) — виконано
+- `T-125` (006-live-cohort-experiment) — виконано
+- `T-129` (006-live-cohort-experiment) — виконано

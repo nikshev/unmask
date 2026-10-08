@@ -275,7 +275,10 @@ def _noisy_or(weights: Iterable[float]) -> float:
     prod = 1.0
     for w in weights:
         prod *= 1.0 - w
-    return round(1.0 - prod, 4)
+    value = round(1.0 - prod, 4)
+    # Та сама межа насичення, що в `score.confidence`: контракт 003.1 (openUnit)
+    # вимагає строгого < 1, а перевірка рівності нижче звіряє з цією формулою.
+    return min(max(value, 10**-4), 1.0 - 10**-4)
 
 
 @dataclass(frozen=True)
