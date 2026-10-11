@@ -1,4 +1,4 @@
-# impl: FR-004-10, FR-007-13, FR-007-14, FR-008-07, FR-008-08
+# impl: FR-004-03, FR-004-10, FR-007-13, FR-007-14, FR-008-07, FR-008-08
 """Точка входу доставки: env → YAML → сервіси → HTTP-потік + polling-бот.
 
 Секрети — лише з оточення (`UNMASK_BOT_TOKEN` і змінні RPC-провайдерів з `config/rpc_pool.yaml`,
@@ -24,7 +24,7 @@ from typing import Mapping
 
 from unmask.clusters.config import load_cluster_config
 from unmask.clusters.service import ClusterService
-from unmask.delivery.bot import HttpxBotTransport, run_polling
+from unmask.delivery.bot import BOT_COMMANDS, HttpxBotTransport, run_polling
 from unmask.delivery.cache import DeliveryCache
 from unmask.delivery.config import load_delivery_config, load_protection_config
 from unmask.delivery.http import serve
@@ -72,6 +72,21 @@ def _stats_loop(source, interval: float, stop: threading.Event) -> None:
             if not warned:
                 _LOG.warning("stats_line failed (%s); will retry in %s s", type(exc).__name__, interval)
                 warned = True
+
+
+def _register_bot_commands(transport) -> None:
+    """Меню команд (FR-004-03): один виклик до потоку опитування. Збій не фатальний і не друкує токен.
+
+    Транспорт без `set_my_commands` (журнальний, тести) — тихо пропускаємо. Винятки ловимо всі: текст винятку
+    може містити URL з токеном, тому в лог іде лише назва типу.
+    """
+    register = getattr(transport, "set_my_commands", None)
+    if register is None:
+        return
+    try:
+        register(BOT_COMMANDS)
+    except Exception as exc:  # noqa: BLE001 — реєстрація меню не має права зупинити сервіс
+        _LOG.warning("setMyCommands failed (%s); bot starts without the command menu", type(exc).__name__)
 
 
 def _ensure_logging() -> None:
@@ -126,6 +141,7 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
 
     if not args.no_bot:
         transport = HttpxBotTransport(bot_token or "")
+        _register_bot_commands(transport)
         thread = threading.Thread(
             target=run_polling, args=(transport, service),
             kwargs={"render": render, "evidence_limit": delivery_cfg.evidence_preview_limit,

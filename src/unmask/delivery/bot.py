@@ -50,6 +50,13 @@ _STALE_TEXT = "request expired, send /check again"
 _START_HINT = "Send /check <mint> to analyze a token."
 _IN_PROGRESS_TEXT = "your previous check is still running — please wait for its result"
 
+# Меню команд (FR-004-03, `setMyCommands`): (ім'я без «/», опис). Імена — `^[a-z0-9_]{1,32}$`, опис — 3–256 символів.
+BOT_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("start", "Show what this bot does"),
+    ("help", "How to read the result"),
+    ("check", "Check a Solana token: /check <mint>"),
+)
+
 
 class BotTransport(Protocol):
     """Межа Bot API: живе й несправжнє втілення взаємозамінні."""
@@ -104,6 +111,15 @@ class HttpxBotTransport:
 
     def answer_callback(self, callback_id: str, text: str = "") -> None:
         self._call("answerCallbackQuery", callback_query_id=callback_id, text=text)
+
+    def set_my_commands(self, commands: list[tuple[str, str]]) -> None:
+        """POST `setMyCommands`. Лише цей транспорт: `BotTransport` і журнал SC-006 його не знають.
+
+        Викликається з `main` один раз до потоку опитування. Помилка піднімається як є; текст винятку може містити
+        URL з токеном, тож логує її лише `main` і лише за назвою типу.
+        """
+        self._call("setMyCommands",
+                   commands=[{"command": name, "description": desc} for name, desc in commands])
 
 
 class JournalTransport:
