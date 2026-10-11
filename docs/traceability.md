@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **116** · задач: **150** (виконано 148) · вимог у роботі: **4** · порушень: **0**
+Вимог: **116** · задач: **150** (виконано 149) · вимог у роботі: **3** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -227,7 +227,7 @@
 - `T-091` (004-api-bot-delivery) — виконано
 - `T-093` (004-api-bot-delivery) — виконано
 - `T-094` (004-api-bot-delivery) — виконано
-- `T-099` (004-api-bot-delivery) — у роботі
+- `T-099` (004-api-bot-delivery) — виконано
 - `T-113` (005-benchmark-funding-coordination) — виконано
 - `T-115` (005-benchmark-funding-coordination) — виконано
 - `T-125` (006-live-cohort-experiment) — виконано
