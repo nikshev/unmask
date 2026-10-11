@@ -121,8 +121,8 @@ curl -s -o /dev/null -w '%{http_code}\n' https://<DOMAIN>/healthz   # prints 200
 The example redirects port 80 to HTTPS and proxies to `127.0.0.1:18080`. It overwrites
 `X-Forwarded-For` with the connection address. The application trusts that header only
 from the addresses in `proxy.trusted` (`127.0.0.1`, `::1`, see `config/protection.yaml`),
-so nginx must run on the same host as the service. `proxy_read_timeout 660s` is above the
-600 s analysis budget; a shorter timeout would turn cold analyses into 504 responses.
+so nginx must run on the same host as the service. `proxy_read_timeout 1830s` is above the
+1800 s analysis budget; a shorter timeout would turn cold analyses into 504 responses.
 The example uses `listen 443 ssl http2;`, which works on nginx 1.24 and later.
 
 ### 6. Smoke check
@@ -305,7 +305,7 @@ score, so "100% with clusters" is selection, not discovery; the finding is the
 exploratory, no accuracy claims. One control token is `insufficient_data`
 (budget-exhausted ingest). Live reruns vary slightly (one token scored 64 then 71).
 Mega-liquid tokens (SOL/USDC/…) were tried as control first and rejected: all 30
-have >100k lifetime signatures, so first-buyer scan burns the full 600 s budget
+have >100k lifetime signatures, so first-buyer scan burns the full 600 s budget (the then-current ingest v3 budget)
 with zero buyers (see `plan.md` note). A saturated-`confidence` crash on the 3
 strongest pool tokens was fixed mid-run (`score.py` + `model.py`, tests included)
 and their rows refilled. Raw per-token JSON and RPC keys are not committed.

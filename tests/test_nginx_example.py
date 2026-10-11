@@ -5,7 +5,7 @@
 - обслуговує HTTPS (`listen 443 ssl`) з плейсхолдерами домену й сертифікатів;
 - блок порту 80 лише перенаправляє на HTTPS, без `proxy_pass`;
 - перезаписує `X-Forwarded-For` адресою з'єднання (`$remote_addr`), а не доклеює;
-- має `proxy_read_timeout 660s` (холодний аналіз до 600 с);
+- має `proxy_read_timeout`/`proxy_send_timeout` ≥ time_budget_seconds + 30 с (бюджет 1800 с → 1830 с);
 - проксіює на loopback-порт юніта (18080);
 - не містить секретів і реальних адрес оператора.
 """
@@ -127,6 +127,14 @@ def test_read_timeout_exceeds_analysis_budget() -> None:
             f"{directive} {seconds}s має бути ≥ time_budget_seconds ({budget}) + "
             f"{TIMEOUT_MARGIN_SECONDS}s, інакше холодний аналіз отримає 504"
         )
+
+
+def test_shipped_budget_1800_is_covered_by_nginx_timeouts() -> None:
+    # ingest.yaml v4: time_budget_seconds 1800; nginx має 1830s (бюджет + 30 с), а не старі 660s.
+    assert _time_budget_seconds() == 1800
+    tls = _tls_block()
+    for directive in ("proxy_read_timeout", "proxy_send_timeout"):
+        assert re.search(rf"\b{directive}\s+1830s;", tls), f"{directive} має бути 1830s"
 
 
 def test_proxies_to_loopback_unit_port() -> None:

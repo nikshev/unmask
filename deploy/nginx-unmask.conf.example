@@ -13,7 +13,7 @@
 # з цих адрес. Тому тут заголовок ПЕРЕЗАПИСУЄТЬСЯ адресою з'єднання ($remote_addr), а не
 # доклеюється: інакше клієнт міг би підставити власну адресу на початок ланцюга.
 #
-# proxy_read_timeout 660s: холодний аналіз триває до time_budget_seconds (600 с, config/ingest.yaml),
+# proxy_read_timeout 1830s: холодний аналіз триває до time_budget_seconds (1800 с, config/ingest.yaml),
 # тож таймаут має перевищувати бюджет із запасом. Типове 60 с nginx давало б 504 на кожен холодний запит.
 #
 # Версії nginx: `listen 443 ssl http2;` працює на nginx 1.24 (Ubuntu 24.04) і на новіших.
@@ -41,7 +41,7 @@ server {
         # Перезапис, не додавання: адреса клієнта береться лише з з'єднання nginx.
         proxy_set_header X-Forwarded-For $remote_addr;
 
-        proxy_read_timeout 660s;
-        proxy_send_timeout 660s;
+        proxy_read_timeout 1830s;
+        proxy_send_timeout 1830s;
     }
 }

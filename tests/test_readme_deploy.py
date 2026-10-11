@@ -21,6 +21,7 @@ NGINX = ROOT / "deploy" / "nginx-unmask.conf.example"
 UNIT = ROOT / "deploy" / "unmask.service"
 SMOKE = ROOT / "deploy" / "smoke.sh"
 RPC_POOL = ROOT / "config" / "rpc_pool.yaml"
+INGEST = ROOT / "config" / "ingest.yaml"
 RPC_QUICKSTART = ROOT / "specs" / "007-rpc-provider-pool" / "quickstart.md"
 
 # Ключові елементи розділу Deploy (FR-008-13 і нотатки T-172).
@@ -56,7 +57,7 @@ REQUIRED_TERMS = [
     "%{http_code}",
     "smoke.sh --local",
     "Restart=always",
-    "proxy_read_timeout 660s",
+    "proxy_read_timeout 1830s",
     "code 2",
     "--host 127.0.0.1",
 ]
@@ -236,3 +237,12 @@ def test_readme_does_not_claim_host_flag_is_missing():
     for line in deploy.splitlines():
         if "scripts/serve_unmask.py" in line and "--port 18080" in line:
             assert "--host 127.0.0.1" in line, f"ручний запуск без --host: {line!r}"
+
+
+def test_readme_deploy_states_analysis_budget_from_ingest_yaml() -> None:
+    """Бюджет аналізу в README береться з config/ingest.yaml, а не вшивається (T-budget, ingest v4)."""
+    budget = int(yaml.safe_load(INGEST.read_text(encoding="utf-8"))["time_budget_seconds"])
+    deploy = _deploy_section(_read_readme())
+    assert f"{budget} s analysis budget" in deploy, "README Deploy має називати актуальний time_budget_seconds"
+    m = re.search(r"proxy_read_timeout\s+(\d+)s", NGINX.read_text(encoding="utf-8"))
+    assert m and int(m.group(1)) >= budget + 30

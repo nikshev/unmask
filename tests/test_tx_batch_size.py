@@ -58,6 +58,9 @@ SIZES = (1, 2, 7, 25, 1000)
 VOLATILE = ("analyzed_at", "elapsed_seconds", "rpc_calls", "resumed", "served_from_cache", "time_budget_seconds")
 
 
+VERSION = load_config(SHIPPED).version  # версія поставленого ingest.yaml: CollectionState мусить збігатися з конфігом
+
+
 def _cfg(config: dict | None = None, *, page_size: int | None = None, tx_batch_size: int | None = None,
          **overrides):
     cfg = load_config(SHIPPED)
@@ -160,15 +163,18 @@ def _changelog_entries(text: str) -> dict[int, str]:
 
 def test_config_version_2_changelog_digest_matches(tmp_path):
     cfg = load_config(SHIPPED)
-    assert cfg.version == 3
+    assert cfg.version == 4
     entries = _changelog_entries(CHANGELOG.read_text(encoding="utf-8"))
-    assert set(entries) >= {1, 2, 3}
+    assert set(entries) >= {1, 2, 3, 4}
+    assert max(entries) == cfg.version, "останній запис журналу має відповідати version у ingest.yaml"
+    # version 4: time_budget_seconds 600 -> 1800 (повний профіль не вкладається в 600 с)
+    assert "time_budget_seconds" in entries[4] and "600" in entries[4] and "1800" in entries[4]
     # version 2 introduced tx_batch_size; verify its entry has the keywords
     entry_v2 = entries[2]
     assert "tx_batch_size" in entry_v2 and "25" in entry_v2 and "page_size" in entry_v2
-    # version 3 is current; verify its entry ends with sha256 of current config
-    entry_v3 = entries[cfg.version]
-    lines = [line for line in entry_v3.splitlines() if line.strip()]
+    # the current version's entry ends with sha256 of current config
+    entry_current = entries[cfg.version]
+    lines = [line for line in entry_current.splitlines() if line.strip()]
     assert lines[-1].startswith("sha256: "), "останній рядок запису — sha256 канонічного вмісту"
     assert lines[-1] == f"sha256: {_canonical_digest(SHIPPED)}"
     # дайджест канонічний: коментар і форматування його не змінюють, значення — змінює (тож зміна без нового
@@ -190,8 +196,8 @@ def test_page_size_no_longer_controls_transaction_batches():
 
     # сторінка підписів по 1, пачка транзакцій 1000: усі 7 транзакцій mint — одним викликом
     source = FixtureRpcSource(BASIC)
-    collect(CollectionState(mint=M, config_version=3), source, _cfg(page_size=1, tx_batch_size=1000,
-                                                                     first_buyers_n=300), FakeClock())
+    collect(CollectionState(mint=M, config_version=VERSION), source, _cfg(page_size=1, tx_batch_size=1000,
+                                                                       first_buyers_n=300), FakeClock())
     pages = [p for method, p in source.calls if method == "getSignaturesForAddress"]
     assert pages and all(p["limit"] == 1 for p in pages)
     batches = _tx_calls(source.calls)
@@ -199,14 +205,14 @@ def test_page_size_no_longer_controls_transaction_batches():
 
     # сторінка підписів 1000, пачка транзакцій 1: кожен виклик — одна транзакція
     source = FixtureRpcSource(BASIC)
-    collect(CollectionState(mint=M, config_version=3), source, _cfg(page_size=1000, tx_batch_size=1), FakeClock())
+    collect(CollectionState(mint=M, config_version=VERSION), source, _cfg(page_size=1000, tx_batch_size=1), FakeClock())
     pages = [p for method, p in source.calls if method == "getSignaturesForAddress"]
     assert pages and all(p["limit"] == 1000 for p in pages)
     assert all(len(b) == 1 for b in _tx_calls(source.calls))
 
     # funding: хаб H (1200 підписів) при page_size=1000 і tx_batch_size=25 — пачки рівно по 25
     source = FixtureRpcSource(HUB)
-    collect(CollectionState(mint=HUB_MINT, config_version=3), source,
+    collect(CollectionState(mint=HUB_MINT, config_version=VERSION), source,
             _cfg(HUB_CASES["hub_control"], page_size=1000, tx_batch_size=25), FakeClock())
     sizes = [len(b) for b in _tx_calls(source.calls)]
     assert max(sizes) == 25 and sizes.count(25) >= 40  # ≈ 1200 транзакцій H (частина вже в кеші від інших вершин)

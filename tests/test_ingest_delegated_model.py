@@ -462,12 +462,17 @@ def test_to_dict_without_delegated_key_is_byte_identical_to_pre_change_snapshot(
         del doc["delegated"]
         for key in VOLATILE:
             doc["metadata"].pop(key, None)
+        # Знімок зняли при поставленому ingest.yaml version 3; з підняттям до 4 (time_budget_seconds 600 -> 1800)
+        # змінюється лише metadata.config_version — звіряємо з версією знімка (хеші з 3 збігаються).
+        assert doc["metadata"]["config_version"] == load_config(SHIPPED).version, name
+        doc["metadata"]["config_version"] = 3
         assert _canonical_sha256(doc) == PRE_CHANGE_TO_DICT_SHA256[name], name
         # те саме через канонічний текст to_json
         reparsed = json.loads(to_json(outcome))
         del reparsed["delegated"]
         for key in VOLATILE:
             reparsed["metadata"].pop(key, None)
+        reparsed["metadata"]["config_version"] = 3  # див. вище: знімок зняли на version 3
         assert _canonical_sha256(reparsed) == PRE_CHANGE_TO_DICT_SHA256[name], name
 
 

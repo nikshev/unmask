@@ -207,6 +207,11 @@ def test_basic_hub_corrupt_results_identical_to_pre_change_except_delegated_key(
     directory, mint, values = CASES[name]
     _state, source, result = _collect(SCENARIOS / directory, mint, _cfg(values))
     doc = _stable(result)  # removes delegated and volatile fields
+    # Знімки зняті, коли поставлений ingest.yaml мав version 3; metadata.config_version — єдине, що змінилось
+    # з підняттям до 4 (time_budget_seconds 600 -> 1800 летючий і вже прибраний). Звіряємо з версією знімка,
+    # щоб наступні підняття версії не вимагали перезйомки (перевірено: з config_version=3 хеші збігаються).
+    assert doc["metadata"]["config_version"] == load_config(SHIPPED).version
+    doc["metadata"]["config_version"] = 3
     got = (_canonical_sha256(doc), result.metadata.rpc_calls, result.metadata.transactions_scanned,
            _canonical_sha256([list(call) for call in source.calls]))
     assert got == PRE_CHANGE[name]

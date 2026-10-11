@@ -27,6 +27,8 @@
 
 **Мітигація:** `resume` продовжує з того ж місця; повторний запит кешується.
 
+**Оновлення 2026-10-11:** бюджет піднято 600 → 1800 с (`config/ingest.yaml` v4, запис `## 4` у `config/CHANGELOG.md`): на повному профілі й ключах free-tier (≈13 запитів/с) 600 с не вистачало (≈450 історій без завантаження → `insufficient_data`). `proxy_read_timeout`/`proxy_send_timeout` nginx → 1830s. Текст вище описує стан на v3.
+
 ## 4. `computed_band` = `null` для incomplete графів
 
 У доставці 004 поле `computed_band` повертається `null`, якщо `graph_status != "complete"`. Це чесно (немає повного графа — негадаю), але клієнти можуть не очікувати `null`.
@@ -55,7 +57,7 @@ Long-polling (`getUpdates` timeout=60) — просто, але не масшт�
 
 PRD: «жодної авторизації». Бот і API відкриті. Спам — захований через `DeliveryCache` (повторний запит = кеш) і `evidence_preview_limit=4000` у Telegram.
 
-**Ризик:** Зловмисник може DoS-ити RPC (нові minти → збір). `time_budget_seconds=600` і `single_flight` обмежують шкоду одним токеном.
+**Ризик:** Зловмисник може DoS-ити RPC (нові minти → збір). `time_budget_seconds` (600 на v3; з 2026-10-11 — 1800, ingest v4) і `single_flight` обмежують шкоду одним токеном.
 
 ## 9. `hub_addresses.yaml` v1 — порожні exchange/MM списки
 

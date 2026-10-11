@@ -49,17 +49,18 @@ def _variant(**changes):
 
 def test_shipped_config_loads_with_version_1():
     # Назва — з T-002 (на неї посилається tasks.md); з T-052 поставлено версію 2 (rpc.tx_batch_size).
-    # З T-095 версія 3 (time_budget_seconds=600 для живого бота).
+    # З T-095 версія 3 (time_budget_seconds=600 для живого бота); версія 4 — time_budget_seconds=1800
+    # (повний профіль на free-tier ключах не вкладається в 600 с; впливає на повноту, не на пороги).
     cfg = load_config(SHIPPED)
 
     assert isinstance(cfg, IngestConfig)
-    assert cfg.version == 3
+    assert cfg.version == 4
     assert cfg.first_buyers_n == 300
     assert cfg.funding_depth == 2
     assert cfg.counterparty_threshold == 200
     assert cfg.max_signatures_per_wallet == 300
     assert cfg.collect_spl_inbound is True
-    assert cfg.time_budget_seconds == 600
+    assert cfg.time_budget_seconds == 1800
     assert cfg.commitment == "finalized"
     assert cfg.rpc.page_size == 1000
     assert cfg.rpc.tx_batch_size == 25
@@ -71,6 +72,7 @@ def test_shipped_config_loads_with_version_1():
     assert "## 1 " in CHANGELOG.read_text(encoding="utf-8")
     assert "## 2 " in CHANGELOG.read_text(encoding="utf-8")
     assert "## 3 " in CHANGELOG.read_text(encoding="utf-8")
+    assert "## 4 " in CHANGELOG.read_text(encoding="utf-8")
 
 
 def test_each_field_round_trips_from_yaml(tmp_path):
