@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **116** · задач: **148** (виконано 147) · вимог у роботі: **3** · порушень: **0**
+Вимог: **116** · задач: **150** (виконано 147) · вимог у роботі: **5** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -86,9 +86,9 @@
 |---|---|---|---|---|
 | `FR-004-01` | Система MUST надавати `GET /api/token/{mint}`, що повертає `mint`, `analyzed_at`, `wallets_analyzed`, `cluster | `T-089`, `T-092` | `src/unmask/delivery/http.py`, `src/unmask/delivery/report.py` | `tests/test_delivery_http.py`, `tests/test_delivery_report.py` |
 | `FR-004-02` | Запит MUST проганяти живий конвеєр 001→002→003 тими самими версіями конфігів і порогів, що й бібліотека; жодни | `T-090` | `src/unmask/delivery/service.py` | `tests/test_delivery_service.py` |
-| `FR-004-03` | Telegram-бот MUST відповідати на `/check <mint>` одним повідомленням: смуга й число ризику, частки найбільших  | `T-094` | `src/unmask/delivery/bot.py` | `tests/test_delivery_bot.py` |
+| `FR-004-03` | Telegram-бот MUST відповідати на `/check <mint>` одним повідомленням: смуга й число ризику, частки найбільших  | `T-094`, `T-100` | `src/unmask/delivery/main.py`, `src/unmask/delivery/bot.py` | `tests/test_delivery_bot_commands.py`, `tests/test_delivery_bot.py` |
 | `FR-004-04` | Кнопка «докази» MUST показувати перелік доказів по кластерах, на яких побудовано число (тип, джерело, вікно);  | `T-094` | `src/unmask/delivery/bot.py` | `tests/test_delivery_bot.py` |
-| `FR-004-05` | PNG MUST рендеритися на сервері зі результату аналізу (статичне зображення, без інтерактивності); кластери MUS | `T-093` | `src/unmask/delivery/render.py` | `tests/test_delivery_render.py` |
+| `FR-004-05` | PNG MUST рендеритися на сервері зі результату аналізу (статичне зображення, без інтерактивності); кластери MUS | `T-093`, `T-099` | `src/unmask/delivery/render.py` | `tests/test_delivery_render_graph.py`, `tests/test_delivery_render.py` |
 | `FR-004-06` | Результат MUST кешуватися за адресою токена: повторний запит повертає збережений документ без повторного збору | `T-090`, `T-091`, `T-098` | `src/unmask/delivery/service.py`, `src/unmask/delivery/cache.py` | `tests/test_delivery_cache.py`, `tests/test_delivery_perf.py` |
 | `FR-004-07` | Невалідний або неіснуючий `mint` MUST давати явну помилку (API — статус 4xx з поясненням; бот — зрозуміле пові | `T-090`, `T-092`, `T-094` | `src/unmask/delivery/service.py`, `src/unmask/delivery/http.py`, `src/unmask/delivery/bot.py` | `tests/test_delivery_http.py`, `tests/test_delivery_service.py` |
 | `FR-004-08` | API і бот MUST працювати без авторизації (PRD: «жодної авторизації»). | `T-092` | `src/unmask/delivery/http.py` | `tests/test_delivery_http.py` |
@@ -157,7 +157,7 @@
 | `FR-008-10` | Контракт відповіді API MUST описувати нові види помилок (`rate_limited`, `busy`) і заголовок `Retry-After`; чи | `T-166` | `src/unmask/delivery/http.py` | `tests/test_delivery_http_protection.py` |
 | `FR-008-11` | Репозиторій MUST містити юніт автозапуску з перезапуском при збої й змінними середовища з файлу оператора (без | `T-170` | `deploy/smoke.sh` | `tests/test_deploy_artifacts.py` |
 | `FR-008-12` | Репозиторій MUST містити приклад конфігурації зворотного проксі з TLS, що передає адресу клієнта довіреним заг | `T-170`, `T-171` | `deploy/smoke.sh` | `tests/test_nginx_example.py` |
-| `FR-008-13` | README MUST описувати розгортання (запуск, змінні, перезапуск, перевірка `/healthz`, ліміти) без секретів; URL | `T-170`, `T-172` | `deploy/smoke.sh` | `tests/test_deploy_artifacts.py`, `tests/test_ingest_profile_v5.py`, `tests/test_readme_deploy.py` |
+| `FR-008-13` | README MUST описувати розгортання (запуск, змінні, перезапуск, перевірка `/healthz`, ліміти) без секретів; URL | `T-170`, `T-172` | `deploy/smoke.sh` | `tests/test_deploy_artifacts.py`, `tests/test_ingest_profile_v5.py`, `tests/test_readme_no_vendor_names.py`, `tests/test_readme_deploy.py` |
 | `FR-008-14` | Тести MUST працювати без мережі й годинника реального часу (контрольований годинник у тестах лімітів) (принцип | `T-162`, `T-173` | `src/unmask/delivery/limits.py` | `tests/test_delivery_protection_e2e.py`, `tests/test_delivery_limits.py` |
 
 ## Критичні задачі
@@ -227,6 +227,7 @@
 - `T-091` (004-api-bot-delivery) — виконано
 - `T-093` (004-api-bot-delivery) — виконано
 - `T-094` (004-api-bot-delivery) — виконано
+- `T-099` (004-api-bot-delivery) — у роботі
 - `T-113` (005-benchmark-funding-coordination) — виконано
 - `T-115` (005-benchmark-funding-coordination) — виконано
 - `T-125` (006-live-cohort-experiment) — виконано

@@ -25,7 +25,7 @@ Live server and bot (operator keys required, not stored in the repository):
 
 ```bash
 export UNMASK_RPC_URL='https://…rpcfast key…'          # RPC Fast (non-archival)
-export UNMASK_RPC_URL_ALT='https://…helius key…'       # at least one archival provider is required
+export UNMASK_RPC_URL_ALT='https://…archival provider key…'  # at least one archival provider is required
 export UNMASK_BOT_TOKEN='123:ABC…'
 uv run python scripts/serve_unmask.py --port 8080
 curl localhost:8080/api/token/<mint> | python3 -m json.tool
@@ -179,8 +179,8 @@ The service uses the pool defined in `config/rpc_pool.yaml`. Only variable names
 in that file; the values go in `.env`:
 
 - `UNMASK_RPC_URL`: RPC Fast Start. Not archival: about 21.5 hours of history.
-- `UNMASK_RPC_URL_ALT`, `UNMASK_RPC_URL_ALT1`, `UNMASK_RPC_URL_ALT2`: Helius free
-  keys. Archival.
+- `UNMASK_RPC_URL_ALT`, `UNMASK_RPC_URL_ALT1`, `UNMASK_RPC_URL_ALT2`: free-tier
+  keys of additional archival providers.
 
 A provider whose variable is unset is skipped with a warning. Setting only
 `UNMASK_RPC_URL` is not enough: RPC Fast does not serve `getTokenAccountsByOwner` on
@@ -188,7 +188,7 @@ the Start tier, so the service exits with code 2. Set at least one `UNMASK_RPC_U
 
 ### Analysis profile
 
-The shipped ingest profile (v5) is the calibrated one: first 30 buyers, funding depth 2, 30 signatures per wallet, no SPL inbound — the profile on which hubs v3 / clusters v2 were calibrated and the cohort results above were produced. The PRD's 200–500 buyers need paid RPC throughput (the full 300-buyer profile did not finish in 1800 s on three free-tier Helius keys: 846 histories missing).
+The shipped ingest profile (v5) is the calibrated one: first 30 buyers, funding depth 2, 30 signatures per wallet, no SPL inbound — the profile on which hubs v3 / clusters v2 were calibrated and the cohort results above were produced. The PRD's 200–500 buyers need paid RPC throughput (the full 300-buyer profile did not finish in 1800 s on three free-tier archival keys: 846 histories missing).
 
 The values live in `config/ingest.yaml`; the version and the reason for each change are recorded in `config/CHANGELOG.md`. Results produced under different ingest versions are not comparable.
 
@@ -232,7 +232,7 @@ A fair comparison must use **ground truth** (`data/label/label.csv`):
 - MELT `low` (clean) — 1,878 tokens
 
 Ingest profile = the `tests/fixtures/real` fixture profile (first 30 buyers,
-depth 2, cap 30, no SPL, Helius): configs ingest.yaml v3, hubs.yaml v3,
+depth 2, cap 30, no SPL, free-tier archival RPC): configs ingest.yaml v3, hubs.yaml v3,
 clusters.yaml v1. Raw JSON was not committed to the repository.
 
 ### 4-token ground truth check (2026-10-07)
@@ -266,7 +266,7 @@ these are actually MELT high tokens the model missed).
 ## Cohort experiment 30+30 (2026-10-07)
 
 Screened 120 MELT `high` tokens live (fixture profile: first 30 buyers, depth 2,
-cap 30, no SPL; ingest v3 / hubs v3 / clusters v2; 3 Helius keys in rotation),
+cap 30, no SPL; ingest v3 / hubs v3 / clusters v2; 3 free-tier archival keys in rotation),
 took the top 30 by `risk_score`, and ran the same profile over a control of 30
 MELT `low` (price-clean) tokens. Lists: `data/cohort_pool.jsonl`,
 `data/cohort_a.jsonl`, `data/cohort_b.jsonl`; per-token summaries:
