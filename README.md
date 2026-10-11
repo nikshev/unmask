@@ -186,6 +186,12 @@ A provider whose variable is unset is skipped with a warning. Setting only
 `UNMASK_RPC_URL` is not enough: RPC Fast does not serve `getTokenAccountsByOwner` on
 the Start tier, so the service exits with code 2. Set at least one `UNMASK_RPC_URL_ALT*`.
 
+### Analysis profile
+
+The shipped ingest profile (v5) is the calibrated one: first 30 buyers, funding depth 2, 30 signatures per wallet, no SPL inbound — the profile on which hubs v3 / clusters v2 were calibrated and the cohort results above were produced. The PRD's 200–500 buyers need paid RPC throughput (the full 300-buyer profile did not finish in 1800 s on three free-tier Helius keys: 846 histories missing).
+
+The values live in `config/ingest.yaml`; the version and the reason for each change are recorded in `config/CHANGELOG.md`. Results produced under different ingest versions are not comparable.
+
 ### Known limitations
 
 - Limit state (request windows and busy slots) is kept in the memory of the service

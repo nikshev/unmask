@@ -163,12 +163,14 @@ def _changelog_entries(text: str) -> dict[int, str]:
 
 def test_config_version_2_changelog_digest_matches(tmp_path):
     cfg = load_config(SHIPPED)
-    assert cfg.version == 4
+    assert cfg.version == 5
     entries = _changelog_entries(CHANGELOG.read_text(encoding="utf-8"))
-    assert set(entries) >= {1, 2, 3, 4}
+    assert set(entries) >= {1, 2, 3, 4, 5}
     assert max(entries) == cfg.version, "останній запис журналу має відповідати version у ingest.yaml"
     # version 4: time_budget_seconds 600 -> 1800 (повний профіль не вкладається в 600 с)
     assert "time_budget_seconds" in entries[4] and "600" in entries[4] and "1800" in entries[4]
+    # version 5: відкалібрований профіль 300/300/SPL -> 30/30/без SPL (докладно: tests/test_ingest_profile_v5.py)
+    assert all(k in entries[5] for k in ("first_buyers_n", "max_signatures_per_wallet", "collect_spl_inbound"))
     # version 2 introduced tx_batch_size; verify its entry has the keywords
     entry_v2 = entries[2]
     assert "tx_batch_size" in entry_v2 and "25" in entry_v2 and "page_size" in entry_v2

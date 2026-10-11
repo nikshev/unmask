@@ -2700,6 +2700,9 @@ def test_helius_profile_core_collect_over_emulator_completes_without_rate_limit(
     rpc = json.loads((directory / "rpc.json").read_text())
     expected = json.loads((directory / "expected.json").read_text())
     config = load_config(Path(__file__).parent.parent / "config" / "ingest.yaml")
+    # Сценарій hub має >2 пачок по 10 лише з SPL-збором і cap 300 (профіль до ingest v5); тест про ліміт швидкості,
+    # а не про поставлений профіль, тож ці два поля закріплено явно (expected["config"] може їх не задавати).
+    config = dataclasses.replace(config, collect_spl_inbound=True, max_signatures_per_wallet=300)
     if "config" in expected:
         config = dataclasses.replace(config, **expected["config"])
     assert config.rpc.tx_batch_size == 25

@@ -59,6 +59,8 @@ PRD: «жодної авторизації». Бот і API відкриті. С
 
 **Ризик:** Зловмисник може DoS-ити RPC (нові minти → збір). `time_budget_seconds` (600 на v3; з 2026-10-11 — 1800, ingest v4) і `single_flight` обмежують шкоду одним токеном.
 
+**Примітка (2026-10-11, ingest v5):** поставлений профіль збору тепер відкалібрований — `first_buyers_n=30`, `max_signatures_per_wallet=30`, `collect_spl_inbound=false`, `funding_depth=2` (було 300/300/true у v1–v4). Повний профіль не завершувався навіть за 1800 с на free-tier ключах (846 історій бракувало → `insufficient_data`). Глибина вибірки менша за PRD (200–500 покупців) — відоме обмеження поточних ключів; див. `config/CHANGELOG.md`, запис `## 5`.
+
 ## 9. `hub_addresses.yaml` v1 — порожні exchange/MM списки
 
 Списки `exchanges` і `market_makers` у `hub_addresses.yaml` порожні (v1). Хаби не відсікаються, крім системних програм і DEX.

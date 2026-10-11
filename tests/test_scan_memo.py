@@ -489,7 +489,11 @@ def _call_log_cases():
     yield "basic_caps|2", BASIC, M, _cfg(counterparty_threshold=1, max_signatures_per_wallet=2, page_size=2)
     for name, config in hub_cfg.items():
         yield f"hub|{name}|7", HUB, HUB_MINT, _cfg(config, page_size=7)
-    yield "corrupt|1000", CORRUPT, CORRUPT_MINT, _cfg({"first_buyers_n": 3, "funding_depth": 2}, page_size=1000)
+    # sha256 знято з профілем «SPL увімкнено, cap 300» (поставлений ingest.yaml до v5): ці два поля не задані
+    # в наборі — тож закріплені явно, інакше журнал викликів залежав би від поставленого файла (v5: false/30)
+    yield "corrupt|1000", CORRUPT, CORRUPT_MINT, _cfg(
+        {"first_buyers_n": 3, "funding_depth": 2, "collect_spl_inbound": True, "max_signatures_per_wallet": 300},
+        page_size=1000)
 
 
 def _log_hash(calls) -> str:
