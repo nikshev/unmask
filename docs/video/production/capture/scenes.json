@@ -1,0 +1,34 @@
+{
+ "s04_menu": {
+  "start": 0.0,
+  "end": 5.18
+ },
+ "s05_send": {
+  "start": 5.18,
+  "end": 7.43
+ },
+ "s06_result": {
+  "start": 7.43,
+  "end": 19.2
+ },
+ "s09_second": {
+  "start": 19.2,
+  "end": 23.63
+ },
+ "s11_clean": {
+  "start": 23.64,
+  "end": 30.35
+ },
+ "s12_cold": {
+  "start": 30.35,
+  "end": 38.22
+ },
+ "s13_evidence": {
+  "start": 38.23,
+  "end": 41.85
+ },
+ "s14_evidence2": {
+  "start": 41.85,
+  "end": 52.78
+ }
+}

@@ -5,6 +5,9 @@ Submission for Crypto World's Fair (Colosseum + Superteam Earn): Superteam Ukrai
 RPC Fast Infrastructure tracks, and — time-wise — Solami and Panta API. Deadline:
 October 13, 06:59 UTC.
 
+**Demo video (2:47): https://youtu.be/twOhTTLxAYE** — live run on a real token,
+all numbers from the bot's own response.
+
 ## How it works
 
 Pipeline: `001 on-chain data ingest` → `002 funding graph without hubs` → `003 clusters

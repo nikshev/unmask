@@ -37,8 +37,8 @@ rate limits, and never reports a truncated history as complete. Per-provider cou
 
 ## Links
 
-- Demo video: `<VIDEO_URL>`
-- Bot: `<@BOT_USERNAME>` (try `/check GnQUsLcyZ3NXUAPXymWoefMYfCwmJazBVkko4vb7pump`)
+- Demo video: `https://youtu.be/twOhTTLxAYE`
+- Bot: `@unmask123_bot` (try `/check GnQUsLcyZ3NXUAPXymWoefMYfCwmJazBVkko4vb7pump`)
 - API: `<DEMO_URL>/api/token/<mint>`
 - Repository: https://github.com/nikshev/unmask
 

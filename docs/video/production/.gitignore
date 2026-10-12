@@ -1,0 +1,14 @@
+# Reproducible from the scripts in this directory — the sources are the narration text,
+# the slide code and the recorded scene boundaries, not the rendered media.
+# NB: gitignore has no trailing comments; a "pattern  # note" line matches nothing.
+
+# tts_segments.py (cached: re-synth costs ElevenLabs credits)
+voice/
+# slides.py
+slides/
+# assemble_video.py intermediates
+capture/clips/
+capture/video_silent.mp4
+capture/mix_raw.wav
+qc/
+__pycache__/

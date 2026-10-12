@@ -1,0 +1,199 @@
+1
+00:00:00,000 --> 00:00:05,248
+A new Solana token shows hundreds of early
+buyers. It looks like organic demand.
+
+2
+00:00:05,548 --> 00:00:11,531
+But often it is one actor. One wallet
+funds dozens of fresh addresses, they all
+
+3
+00:00:11,531 --> 00:00:15,393
+buy in the first seconds, and later sell
+to retail.
+
+4
+00:00:15,693 --> 00:00:20,437
+Trackers show you who bought. They almost
+never show who stands behind them. Unmask
+
+5
+00:00:20,437 --> 00:00:21,637
+answers exactly that.
+
+6
+00:00:21,937 --> 00:00:26,813
+The whole interface is a Telegram bot.
+Type slash, and the commands appear.
+
+7
+00:00:27,113 --> 00:00:28,971
+Check, then a token address.
+
+8
+00:00:29,271 --> 00:00:34,708
+Risk seventy-two out of a hundred. High
+concentration. Two clusters. The first one
+
+9
+00:00:34,708 --> 00:00:40,012
+is six wallets that received ninety-two
+percent of everything the analysed early
+
+10
+00:00:40,012 --> 00:00:40,742
+buyers got.
+
+11
+00:00:41,042 --> 00:00:46,550
+Here is the graph the bot sends with it.
+Each circle is a cluster. The grey dots
+
+12
+00:00:46,550 --> 00:00:51,645
+are wallets outside the cluster that
+connect to it. Here, a common funder.
+
+13
+00:00:51,645 --> 00:00:54,881
+Thick red lines: one funder paying many
+buyers.
+
+14
+00:00:55,181 --> 00:00:59,737
+The diamonds are a single piece of
+evidence tying a group of addresses
+
+15
+00:00:59,737 --> 00:01:03,447
+together. They are not transfers between
+those addresses.
+
+16
+00:01:03,747 --> 00:01:07,880
+Another token. Three clusters, and one
+funder feeding all three.
+
+17
+00:01:08,180 --> 00:01:11,988
+Look at the red fan spreading out of a
+single grey wallet.
+
+18
+00:01:12,288 --> 00:01:17,415
+And for contrast, a clean token. Risk
+zero. No related groups found. Unmask does
+
+19
+00:01:17,415 --> 00:01:18,697
+not invent clusters.
+
+20
+00:01:18,997 --> 00:01:24,620
+A token it has not seen takes about two
+minutes, with progress messages. After
+
+21
+00:01:24,620 --> 00:01:26,567
+that, the result is cached.
+
+22
+00:01:26,867 --> 00:01:29,978
+Every claim comes with evidence. Tap
+Evidence.
+
+23
+00:01:30,278 --> 00:01:35,322
+For each cluster you get the type. Shared
+funder, identical amounts, the same slot,
+
+24
+00:01:35,322 --> 00:01:39,880
+an indirect link. Which wallets are
+involved. And the time window, in block
+
+25
+00:01:39,880 --> 00:01:40,913
+time or in slots.
+
+26
+00:01:41,213 --> 00:01:46,721
+The same data is in the public API.
+Clusters, confidence, supply share, and
+
+27
+00:01:46,721 --> 00:01:50,687
+the full evidence list. Anyone can replay
+it on chain.
+
+28
+00:01:50,987 --> 00:01:56,084
+And if the data is incomplete, Unmask says
+so. It never shows incomplete data as
+
+29
+00:01:56,084 --> 00:01:56,467
+clean.
+
+30
+00:01:56,767 --> 00:02:02,291
+How it works. We take the first buyers of
+a token and pull each wallet's funding
+
+31
+00:02:02,291 --> 00:02:07,332
+history through an RPC pool. RPC Fast
+serves the recent history, archival
+
+32
+00:02:07,332 --> 00:02:09,956
+providers back it up for older tokens.
+
+33
+00:02:10,256 --> 00:02:14,578
+We build a funding graph and prune the
+hubs. Exchanges, routers, program
+
+34
+00:02:14,578 --> 00:02:17,640
+accounts. Otherwise everything glues into
+one blob.
+
+35
+00:02:17,940 --> 00:02:23,520
+Wallets sharing a funder inside a narrow
+time window get merged. Indirect links are
+
+36
+00:02:23,520 --> 00:02:28,764
+added. Behavioural signals, like identical
+amounts in the same slot, raise the
+
+37
+00:02:28,764 --> 00:02:29,503
+confidence.
+
+38
+00:02:29,803 --> 00:02:35,140
+This is a signal about financial links. It
+is not proof of insider trading, and not
+
+39
+00:02:35,140 --> 00:02:38,162
+financial advice. The limits are in the
+README.
+
+40
+00:02:38,462 --> 00:02:43,614
+What is next. Deeper buyer samples on
+faster RPC, and monitoring of new
+
+41
+00:02:43,614 --> 00:02:44,267
+launches.
+
+42
+00:02:44,567 --> 00:02:47,586
+Unmask. See who is behind the buyers.
+

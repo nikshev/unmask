@@ -1,0 +1,33 @@
+model=small  dir=
+
+clip                   lang     p   sim  verdict  transcript-snippet
+----------------------------------------------------------------------------------------------------
+s01_hook               bg    0.55  0.00  ❌ BAD    Невържава Солана токен се показа много ерлиб
+s02_problem            en    0.95  1.00  ok       But often it is one actor.  One wallet funds
+s03_gap                en    0.66  0.99  ok       Shrackers show you who bought, they almost n
+s04_menu               en    0.58  1.00  ok       The whole interface is a telegram bot type s
+s05_send               en    0.95  1.00  ok       Check then a token address.
+s06_result             en    0.86  0.82  ok       Risk 72 out of 100, high concentration, 2 cl
+s07_graph              en    0.77  0.99  ok       Like here is the graph the bot sends with it
+s08_diamonds           en    0.81  1.00  ok       The diamonds are a single piece of evidence.
+s09_second             en    0.86  1.00  ok       Another token, three clusters and one funder
+s10_fan                en    0.81  1.00  ok       Look at the red fan spreading out of a singl
+s11_clean              en    0.85  1.00  ok       And for contrast, a clean token risk zero no
+s12_cold               bg    0.45  0.00  ❌ BAD    Циклата на към не има нето време се да се из
+s13_evidence           en    0.48  1.00  ok       Every claim comes with evidence.  Tap Eviden
+s14_evidence2          en    0.87  1.00  ok       For each cluster you get the type, shared fu
+s15_api                en    0.69  1.00  ok       The same data is in the public API, clusters
+s16_complete           bg    0.50  0.00  ❌ BAD    и това е да това е възмъзгъл и не е възмъзгъ
+s17_method1            en    0.95  1.00  ok       How it works? We take the first buyers of a 
+s18_method2            en    0.96  1.00  ok       We build a funding graph and prune the hubs,
+s19_method3            en    0.91  0.98  ok       While it's sharing a funder inside a narrow 
+s20_limits             bg    0.54  0.00  ❌ BAD    Това е сигнал за финансиите линкси, не е пре
+s21_next               en    0.37  1.00  ok       What is next?  Deeper buyer samples on faste
+s22_outro              en    0.76  1.00  ok       Unmask, see who is behind the buyers?
+----------------------------------------------------------------------------------------------------
+
+FLAGGED (4/22): ['s01_hook', 's12_cold', 's16_complete', 's20_limits']
+   ('s01_hook', 'bg', 0.55, 0.0)
+   ('s12_cold', 'bg', 0.45, 0.0)
+   ('s16_complete', 'bg', 0.5, 0.0)
+   ('s20_limits', 'bg', 0.54, 0.0)
