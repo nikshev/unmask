@@ -16,3 +16,6 @@ node_modules/
 
 # OS
 .DS_Store
+
+# Окремий репозиторій, не частина проєкту
+/sdd-init/
