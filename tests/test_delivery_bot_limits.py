@@ -1090,7 +1090,7 @@ def test_worker_calling_on_busy_many_times_refunds_once() -> None:
 
     original = bot_module.handle_check
 
-    def noisy(text, service, transport, chat_id, requests, *, render=None, on_busy=None):
+    def noisy(text, service, transport, chat_id, requests, *, render=None, on_busy=None, **_log_kw):  # T-175: +user=
         assert on_busy is not None
         on_busy()
         on_busy()

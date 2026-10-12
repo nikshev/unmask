@@ -176,6 +176,61 @@ Responses when a limit is hit:
 A 429 or 503 never means "clean" or "no data". It is an overload answer only, and the
 body of a successful response is unchanged.
 
+### Access log
+
+The service writes one INFO line per HTTP response and one per Telegram `/check` to the
+logger `unmask.access`. Where to look: the stderr of the process. Under systemd that is the
+journal: `journalctl -u unmask -f` (add `| grep unmask.access` to filter). When the service is
+run by hand, the lines appear in the terminal.
+
+Format (the timestamp and logger name come from the logging setup of the entry point):
+
+```text
+<timestamp> unmask.access ACCESS <METHOD> <PATH> <STATUS> client=<IP> [retry_after=<N>]
+<timestamp> unmask.access BOT check mint=<first 8 chars> user=<6 hex> outcome=<outcome>
+```
+
+Examples:
+
+```text
+2026-10-12 10:15:02,114 unmask.access ACCESS GET /healthz 200 client=2001:db8::7
+2026-10-12 10:15:09,870 unmask.access ACCESS GET /api/token/So11111111111111111111111111111111111111112 429 client=2001:db8::9 retry_after=35
+2026-10-12 10:15:31,402 unmask.access BOT check mint=So111111 user=3f9a1c outcome=ok
+```
+
+HTTP lines:
+
+- Every response is logged, rejected ones included: 200, 400, 404, 405, 429, 503, 500 and
+  `/healthz`. A request with a method the service does not implement (for example `HEAD` or
+  `OPTIONS`) is logged with the status 501. The status is `-` when no response could be sent.
+- `PATH` has no query string and no fragment. Control characters, spaces and non-ASCII
+  characters are written as escapes (`\xNN`, `\uNNNN`), so a request cannot forge a log line.
+  It is cut to 64 characters; a cut path ends with `...`.
+- `client` is the client address resolved by the same rule as the per-client limit: the
+  `X-Forwarded-For` header counts only when the connection comes from an address in
+  `proxy.trusted` (`config/protection.yaml`); otherwise it is the connection address.
+- `retry_after` appears on 429 and 503 only and equals the `Retry-After` header.
+- Request headers and bodies are never written.
+
+Bot lines (one per `/check`):
+
+- `mint` is the first 8 characters of the text sent after `/check`, with anything outside
+  letters, digits, `_` and `-` replaced by `?`.
+- `user` is the first 6 hex digits of the SHA-256 of the Telegram user id (the chat id when the
+  message has no sender). The raw id and the message text are not logged. This tag is a
+  pseudonym, not anonymisation: Telegram ids are short numbers, so anyone who knows an id can
+  compute its tag.
+- `outcome` is one of: `ok` (a new analysis was run for this request), `cached` (answered
+  without a new analysis: a cached result, or joining an analysis already running), `busy`
+  (all analysis slots taken), `rate_limited` (the user is over the bot limit), `in_progress`
+  (the user's previous check is still running), `invalid` (not a Solana address, token not
+  found, or `/check` without an address), `error` (any other failure).
+
+Client IP addresses are written only to this operator log, so they are covered by the
+retention settings of the server's journal. The log contains no keys, no bot token, no
+request headers and no request bodies. A failure while writing the log never changes or
+blocks a response.
+
 ### RPC provider pool
 
 The service uses the pool defined in `config/rpc_pool.yaml`. Only variable names are

@@ -1,4 +1,4 @@
-# impl: FR-004-03, FR-004-04, FR-004-07, FR-004-09, FR-008-07, FR-008-09
+# impl: FR-004-03, FR-004-04, FR-004-07, FR-004-09, FR-008-07, FR-008-09, FR-008-15
 """Telegram-бот доставки: polling-цикл, `/check`, callback «докази» (R-2, контракт `bot-messages.md`).
 
 Транспорт — межа (`BotTransport`): живий на сирих викликах Bot API через `httpx`,
@@ -14,12 +14,22 @@
 не на рахунку користувача. Воркер, побачивши `error.kind == "busy"`, викликає `gate.refund` рівно раз і лише
 для допуску, що списав квоту (`counts=True`), — ПЕРЕД `leave`; для покинутого воркера й кеш-хіту нічого не
 повертається.
+
+Журнал оператора (T-175, FR-008-15): після кожного `/check` один INFO-рядок логера `unmask.access`:
+`BOT check mint=<≤8 символів> user=<6 hex від sha256 від id> outcome=<ok|busy|rate_limited|in_progress|invalid|error|cached>`.
+Сирий id і текст повідомлення не логуються; mint очищений (усе поза `[A-Za-z0-9_-]` -> `?`). `outcome` виводиться з
+наявних відповідей без зміни поведінки: `ok` — цей запит сам виконав аналіз (сервіс надіслав повідомлення прогресу),
+`cached` — відповідь без власного аналізу (кеш-хіт або приєднання до вже виконуваного), `busy`/`rate_limited` — за
+`error.kind` (або рішенням воріт), `invalid` — `invalid_address`, `token_not_found` і `/check` без mint, `in_progress` —
+рішення воріт, решта (інші види помилок, виняток сервісу чи транспорту) — `error`. Збій журналювання ковтається.
 """
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
+import logging
 import threading
 import time
 from typing import Any, Protocol
@@ -49,6 +59,11 @@ _EVIDENCE_BUTTON = "evidence"
 _STALE_TEXT = "request expired, send /check again"
 _START_HINT = "Send /check <mint> to analyze a token."
 _IN_PROGRESS_TEXT = "your previous check is still running — please wait for its result"
+
+# Операційний журнал запитів (не результат аналізу, тож не в YAML — принцип III).
+_ACCESS_LOG = logging.getLogger("unmask.access")
+_MINT_TAG_LENGTH = 8
+_USER_TAG_LENGTH = 6
 
 # Меню команд (FR-004-03, `setMyCommands`): (ім'я без «/», опис). Імена — `^[a-z0-9_]{1,32}$`, опис — 3–256 символів.
 BOT_COMMANDS: tuple[tuple[str, str], ...] = (
@@ -280,21 +295,92 @@ def _is_busy(error: Any) -> bool:
     return isinstance(error, dict) and error.get("kind") == "busy"
 
 
+class _CheckTrace:
+    """Що відомо про `/check` для рядка журналу; `outcome` за умовчанням `error` і міняється лише після відповіді."""
+
+    __slots__ = ("mint", "outcome", "started")
+
+    def __init__(self) -> None:
+        self.mint: str | None = None
+        self.outcome = "error"  # дійде до кінця без винятку — стане точним; виняток лишає `error`
+        self.started = False  # сервіс надіслав прогрес = цей запит сам виконав аналіз
+
+
+def _mint_tag(mint: str | None) -> str:
+    """Перші 8 символів mint для журналу: усе, крім `[A-Za-z0-9_-]`, стає `?` (ширина не росте, інʼєкції нема)."""
+    if not mint:
+        return "-"
+    return "".join(c if c.isascii() and (c.isalnum() or c in "_-") else "?"
+                   for c in mint[:_MINT_TAG_LENGTH]) or "-"
+
+
+def _user_tag(user: Any) -> str:
+    """6 hex від sha256(str(id)): стабільна мітка користувача без сирого Telegram-id; без id — `-`."""
+    if user is None:
+        return "-"
+    return hashlib.sha256(str(user).encode("utf-8", "replace")).hexdigest()[:_USER_TAG_LENGTH]
+
+
+def _log_check(mint: str | None, user: Any, outcome: str) -> None:
+    """Один INFO-рядок `BOT check …`. Збій (поля чи хендлера) ковтається: журнал не змінює поведінку бота."""
+    try:
+        if not _ACCESS_LOG.isEnabledFor(logging.INFO):
+            return
+        try:
+            mint_tag = _mint_tag(mint)
+        except Exception:  # noqa: BLE001
+            mint_tag = "-"
+        try:
+            user_tag = _user_tag(user)
+        except Exception:  # noqa: BLE001
+            user_tag = "-"
+        _ACCESS_LOG.info("BOT check mint=%s user=%s outcome=%s", mint_tag, user_tag, outcome)
+    except Exception:  # noqa: BLE001 — тексту винятку не пишемо
+        pass
+
+
+def _error_outcome(error: Any) -> str:
+    """`outcome` для документа-помилки за `error.kind` (не за текстом)."""
+    kind = error.get("kind") if isinstance(error, dict) else None
+    if kind in ("busy", "rate_limited"):
+        return kind
+    if kind in ("invalid_address", "token_not_found"):
+        return "invalid"
+    return "error"
+
+
 def handle_check(text: str, service, transport: BotTransport, chat_id: Any,
-                 requests: dict[str, str], *, render=None, on_busy=None) -> str | None:
+                 requests: dict[str, str], *, render=None, on_busy=None, user: Any = None) -> str | None:
     """Обробка `/check <mint>`: фото + caption + кнопка. Повертає `request_id` або `None`.
 
     `render` — виклик `render_png(doc, config)` (інжектований точкою входу); без нього
     надсилається лише текст із кнопкою. `on_busy` — виклик без аргументів, коли відповідь сервісу —
     `busy` (аналіз не запускався): викликається ДО відповіді користувачу й не повинен кидати.
+    `user` — ключ користувача лише для рядка журналу (T-175); на поведінку не впливає.
     """
+    trace = _CheckTrace()
+    try:
+        return _handle_check(text, service, transport, chat_id, requests, render, on_busy, trace)
+    finally:
+        _log_check(trace.mint, user, trace.outcome)
+
+
+def _handle_check(text: str, service, transport: BotTransport, chat_id: Any,
+                  requests: dict[str, str], render, on_busy, trace: _CheckTrace) -> str | None:
     parts = text.strip().split()
     if len(parts) < 2 or not parts[0].startswith("/check"):
         transport.send_message(chat_id, _START_HINT)
+        trace.outcome = "invalid"
         return None
     mint = parts[1]
+    trace.mint = mint
+
+    def progress(msg: str) -> Any:
+        trace.started = True
+        return transport.send_message(chat_id, msg)
+
     try:
-        doc = service.analyze(mint, progress=lambda msg: transport.send_message(chat_id, msg))
+        doc = service.analyze(mint, progress=progress)
     except Exception as exc:
         transport.send_message(chat_id, f"analysis error: {type(exc).__name__}")
         return None
@@ -303,6 +389,7 @@ def handle_check(text: str, service, transport: BotTransport, chat_id: Any,
             on_busy()
         caption, _ = format_check(doc, None)
         transport.send_message(chat_id, caption)
+        trace.outcome = _error_outcome(doc["error"])
         return None
     request_id = _register(requests, mint)
     caption, markup = format_check(doc, request_id)
@@ -310,6 +397,7 @@ def handle_check(text: str, service, transport: BotTransport, chat_id: Any,
         transport.send_message(chat_id, caption, reply_markup=markup)
     else:
         transport.send_photo(chat_id, render(doc).png, caption, reply_markup=markup)
+    trace.outcome = "ok" if trace.started else "cached"
     return request_id
 
 
@@ -414,7 +502,7 @@ def _check_gated(text: str, message: dict[str, Any], service, transport: BotTran
     """`/check` з воротами: допуск — тут (потік опитування), аналіз — у воркері через `spawn`."""
     parts = text.strip().split()
     if len(parts) < 2:  # `/check` без mint — не перевірка: підказка, як у 004, без воріт і аналізу
-        handle_check(text, service, transport, chat_id, requests, render=render)
+        handle_check(text, service, transport, chat_id, requests, render=render, user=_user_key(message))
         return
     user = _user_key(message)
     if user is None:  # ні від кого, ні з якого чату: нема ключа, щоб лімітувати, і куди відповісти
@@ -422,9 +510,11 @@ def _check_gated(text: str, message: dict[str, Any], service, transport: BotTran
     counts = bool(service.needs_analysis(parts[1]))  # лише валідний холодний mint їсть вікно; тип — строго bool
     decision = gate.try_enter(user, counts=counts)
     if decision.kind == "in_progress":
+        _log_check(parts[1], user, "in_progress")
         transport.send_message(chat_id, _IN_PROGRESS_TEXT)
         return
     if decision.kind == "rate_limited":
+        _log_check(parts[1], user, "rate_limited")
         transport.send_message(chat_id, _rate_limited_text(decision.retry_after_seconds))
         return
     if decision.kind != "ok":
@@ -438,7 +528,7 @@ def _check_gated(text: str, message: dict[str, Any], service, transport: BotTran
         try:
             try:
                 handle_check(text, service, transport, chat_id, requests, render=render,
-                             on_busy=ticket.refund)
+                             on_busy=ticket.refund, user=user)
             except Exception as exc:  # як у 004: збій перевірки не лишає користувача без відповіді
                 try:
                     if chat_id is not None:
@@ -501,7 +591,8 @@ def run_polling(transport: BotTransport, service, *, render=None, evidence_limit
                     chat_id = message.get("chat", {}).get("id")
                     if text.startswith("/check"):
                         if gate is None:
-                            handle_check(text, service, transport, chat_id, requests, render=render)
+                            handle_check(text, service, transport, chat_id, requests, render=render,
+                                         user=_user_key(message))
                         else:
                             _check_gated(text, message, service, transport, chat_id, requests,
                                          render, gate, spawn)

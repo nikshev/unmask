@@ -246,3 +246,73 @@ def test_readme_deploy_states_analysis_budget_from_ingest_yaml() -> None:
     assert f"{budget} s analysis budget" in deploy, "README Deploy має називати актуальний time_budget_seconds"
     m = re.search(r"proxy_read_timeout\s+(\d+)s", NGINX.read_text(encoding="utf-8"))
     assert m and int(m.group(1)) >= budget + 30
+
+
+# --------------------------------------------------------------------------- T-175: підрозділ «Access log»
+
+ACCESS_LOG_TERMS = [
+    "unmask.access",
+    "ACCESS <METHOD> <PATH> <STATUS> client=<IP>",
+    "BOT check mint=",
+    "journalctl -u unmask",
+    "stderr",
+    "retry_after",
+    "Retry-After",
+    "proxy.trusted",
+    "X-Forwarded-For",
+    "query string",
+    "64 characters",
+    "SHA-256",
+    "not anonymisation",
+    "never written",
+    "retention",
+    "501",
+    "HEAD",
+]
+BOT_OUTCOMES = ("ok", "cached", "busy", "rate_limited", "in_progress", "invalid", "error")
+
+
+def _access_log_section(deploy: str) -> str:
+    """Підрозділ `### Access log` усередині розділу Deploy."""
+    m = re.search(r"^### Access log[ \t]*$", deploy, re.MULTILINE)
+    assert m, "у розділі Deploy немає підрозділу `### Access log`"
+    rest = deploy[m.end():]
+    nxt = re.search(r"^#{2,3} ", rest, re.MULTILINE)
+    return rest[: nxt.start()] if nxt else rest
+
+
+def test_readme_has_access_log_subsection_describing_format_and_privacy():
+    section = _access_log_section(_deploy_section(_read_readme()))
+    missing = [term for term in ACCESS_LOG_TERMS if term not in section]
+    assert not missing, f"в Access log немає: {missing}"
+    for outcome in BOT_OUTCOMES:
+        assert f"`{outcome}`" in section, f"Access log не пояснює outcome {outcome}"
+
+
+def test_readme_access_log_has_no_secret_like_content():
+    import ipaddress
+
+    section = _access_log_section(_deploy_section(_read_readme()))
+    assert not API_KEY_RE.search(section) and not BOT_TOKEN_RE.search(section)
+    assert OPERATOR_IP not in section
+    for needle in ("Bearer ", "Authorization:", "Cookie:", "UNMASK_BOT_TOKEN=", "UNMASK_RPC_URL="):
+        assert needle not in section, f"Access log містить {needle!r}"
+    for ip in IPV4_RE.findall(section):
+        assert ip in LOOPBACK_IPS, f"Access log містить IPv4-адресу, що не є loopback: {ip}"
+    doc_net = ipaddress.ip_network("2001:db8::/32")
+    clients = re.findall(r"client=(\S+)", section)
+    examples = [c for c in clients if not c.startswith("<")]
+    assert examples, "у прикладах Access log немає client=..."
+    for client in examples:
+        addr = ipaddress.ip_address(client)
+        assert addr in doc_net or addr.is_loopback, f"приклад client={client} не з документаційного діапазону"
+    for user in re.findall(r"user=(\S+)", section):
+        assert user.startswith("<") or re.fullmatch(r"[0-9a-f]{6}", user), user
+    for mint in re.findall(r"mint=(\S+)", section):
+        assert mint.startswith("<") or len(mint) <= 8, mint
+
+
+def test_readme_access_log_sits_inside_deploy_before_known_limitations():
+    deploy = _deploy_section(_read_readme())
+    assert deploy.index("### Access log") < deploy.index("### Known limitations")
+    assert deploy.index("### Limits") < deploy.index("### Access log")

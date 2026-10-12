@@ -1,4 +1,4 @@
-# impl: FR-004-01, FR-004-07, FR-004-08, FR-008-01, FR-008-03, FR-008-04, FR-008-05, FR-008-09, FR-008-10
+# impl: FR-004-01, FR-004-07, FR-004-08, FR-008-01, FR-008-03, FR-008-04, FR-008-05, FR-008-09, FR-008-10, FR-008-15
 """HTTP-шар доставки: чисті функції маршруту й сокетна обгортка (R-1).
 
 Жодної авторизації: гілок 401/403 не існує (FR-004-08). Логіка тестується без сокетів.
@@ -8,12 +8,22 @@
 не викликається). `/healthz`, `404`, `405` поза лімітом. `503 busy` приходить документом від сервісу
 (слот важкого аналізу). Ключ ліміту — лише адреса клієнта (FR-008-04): з заголовків читається єдиний
 `X-Forwarded-For`, і то лише від довіреного проксі. Без `protection` відповіді як до фічі (FR-008-09).
+
+Журнал запитів оператора (T-175, FR-008-15): кожна відповідь `_Handler` (і наші, і стандартні помилки
+`send_error`: 400/414/501…) дає РІВНО ОДИН INFO-рядок логера `unmask.access`:
+`ACCESS <метод> <шлях> <статус> client=<адреса> [retry_after=N]`. Хук — `log_request`, який `send_response` стандартної
+бібліотеки викликає рівно раз на відповідь; `log_message` лишається порожнім, тож `send_error` не дає другого рядка.
+Шлях — без query/фрагмента, екранований (керувальні, не-ASCII, пробіл, зворотна скісна риска; див. `_log_text`) і не
+довший за `ACCESS_PATH_LIMIT` символів: рядок не можна підробити через CR/LF. Заголовки й тіла не логуються;
+`client` — за тим самим правилом R-4, що й ключ ліміту. Збій журналювання ковтається (без тексту винятку) й не змінює
+відповідь.
 """
 
 from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 from collections.abc import Iterable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -34,6 +44,12 @@ _ERROR_STATUS = {
 }
 
 _RETRY_AFTER_KINDS = ("rate_limited", "busy")
+
+# Операційний журнал (не результат аналізу, тож не в YAML — принцип III): довжина поля `шлях` у рядку журналу.
+ACCESS_PATH_LIMIT = 64
+_ACCESS_METHOD_LIMIT = 16
+_ACCESS_CLIENT_LIMIT = 64
+_ACCESS_LOG = logging.getLogger("unmask.access")
 
 
 def route(method: str, path: str) -> str | None:
@@ -207,18 +223,104 @@ def handle_get(path: str, peer: str, forwarded_for: str | None, service,
     return status, doc, _retry_after_headers(doc)
 
 
+def _escape_char(char: str) -> str:
+    code = ord(char)
+    if char == "\\":
+        return "\\\\"
+    if 0x21 <= code <= 0x7E:
+        return char
+    if code <= 0xFF:
+        return f"\\x{code:02x}"
+    if code <= 0xFFFF:
+        return f"\\u{code:04x}"
+    return f"\\U{code:08x}"
+
+
+def _log_text(text: str, limit: int) -> str:
+    """Безпечне для одного рядка журналу поле ≤ `limit` символів (захист від log injection).
+
+    Лишається тільки друкований ASCII без пробілу й `\\`; усе інше (керувальні, `\\r\\n\\t`, нуль, DEL, пробіл,
+    не-ASCII, сурогати) стає `\\xNN`/`\\uNNNN`/`\\UNNNNNNNN`, а `\\` подвоюється: екранований символ відрізняється
+    від буквального. Задовге поле обрізається по межі екранованого символу й закінчується `...` (разом ≤ `limit`).
+    Порожнє поле — `-`, щоб поля рядка лишалися відокремлюваними.
+    """
+    tokens: list[str] = []
+    used = 0
+    budget = max(limit - 3, 0)
+    cut = 0  # скільки токенів вміщується разом із `...`
+    for char in text:
+        token = _escape_char(char)
+        used += len(token)
+        tokens.append(token)
+        if used <= budget:
+            cut = len(tokens)
+        if used > limit:  # далі нема сенсу: рядок точно задовгий
+            return "".join(tokens[:cut]) + "..."
+    return "".join(tokens) if tokens else "-"
+
+
+def _access_path(raw: str) -> str:
+    """Шлях запиту для журналу: без query і фрагмента, екранований, обрізаний до `ACCESS_PATH_LIMIT`."""
+    return _log_text(raw.split("?", 1)[0].split("#", 1)[0], ACCESS_PATH_LIMIT)
+
+
+def _field(make, default: str = "-") -> str:
+    """Поле рядка журналу; збій обчислення дає `-`, а не втрату всього рядка (і не пропускає виняток)."""
+    try:
+        return make()
+    except Exception:  # noqa: BLE001 — журнал не має права ламати запит
+        return default
+
+
 class _Handler(BaseHTTPRequestHandler):
     """Тонка сокетна обгортка; у тестах не використовується (гард мережі)."""
 
     service = None  # призначає serve() (у підкласі)
     protection = None  # те саме; `None` — поведінка до фічі 008
+    _access_retry_after: str | None = None  # `Retry-After` відповіді, що йде; для рядка журналу
+    _access_logged = False  # протокол HTTP/1.0: один запит на екземпляр обробника
 
-    def log_message(self, *args: Any) -> None:  # тихіше за умовчанням
+    def log_message(self, *args: Any) -> None:  # тихіше за умовчанням; журнал — у `log_request`
         pass
+
+    def log_request(self, code: Any = "-", size: Any = "-") -> None:
+        """Єдина точка журналу запитів: `send_response` кличе її рівно раз на кожну відповідь."""
+        self._log_access(code)
+
+    def _forwarded_for(self) -> str | None:
+        forwarded = self.headers.get_all("X-Forwarded-For")
+        return ", ".join(forwarded) if forwarded else None
+
+    def _access_client(self) -> str:
+        """Адреса клієнта за правилом R-4 (та сама `client_address`, що й ключ ліміту); не змінює лічильників."""
+        peer = self.client_address[0]
+        forwarded = self._forwarded_for() if getattr(self, "headers", None) is not None else None
+        trusted = self.protection.trusted_proxies if self.protection is not None else ()
+        return _log_text(client_address(peer, forwarded, trusted), _ACCESS_CLIENT_LIMIT)
+
+    def _log_access(self, code: Any) -> None:
+        """Один INFO-рядок `ACCESS …`. Виняток (формування чи хендлера) ковтається: відповідь важливіша."""
+        self._access_logged = True
+        retry, self._access_retry_after = self._access_retry_after, None
+        try:
+            if not _ACCESS_LOG.isEnabledFor(logging.INFO):
+                return
+            method = _field(lambda: _log_text(self.command or "", _ACCESS_METHOD_LIMIT))
+            path = _field(lambda: _access_path(getattr(self, "path", None) or ""))
+            status = _field(lambda: str(int(code)))
+            client = _field(self._access_client)
+            line = f"ACCESS {method} {path} {status} client={client}"
+            if retry is not None and retry.isascii() and retry.isdigit():
+                line += f" retry_after={retry}"
+            _ACCESS_LOG.info("%s", line)
+        except Exception:  # noqa: BLE001 — журнал не має права ламати запит; тексту винятку не пишемо
+            pass
 
     def _send(self, status: int, doc: dict[str, Any],
               headers: Iterable[tuple[str, str]] = ()) -> None:
         body = to_json(doc).encode("utf-8")
+        headers = list(headers)
+        self._access_retry_after = next((v for k, v in headers if k.lower() == "retry-after"), None)
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -228,11 +330,14 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:
-        forwarded = self.headers.get_all("X-Forwarded-For")
-        status, doc, headers = handle_get(
-            self.path, self.client_address[0], ", ".join(forwarded) if forwarded else None,
-            self.service, self.protection)
-        self._send(status, doc, headers)
+        try:
+            status, doc, headers = handle_get(
+                self.path, self.client_address[0], self._forwarded_for(), self.service, self.protection)
+            self._send(status, doc, headers)
+        except Exception:
+            if not self._access_logged:  # відповіді не було (виняток поза сервісом): рядок зі статусом `-`
+                self._log_access("-")
+            raise
 
     def _method_not_allowed(self) -> None:
         self._send(405, {"mint": "", "error": {"kind": "method_not_allowed", "detail": "use GET"}})
