@@ -2,7 +2,7 @@
 
 <!-- ГЕНЕРУЄТЬСЯ scripts/trace.py — не редагувати вручну -->
 
-Вимог: **116** · задач: **150** (виконано 149) · вимог у роботі: **3** · порушень: **0**
+Вимог: **117** · задач: **151** (виконано 149) · вимог у роботі: **6** · порушень: **0**
 
 ## 001-onchain-data-ingest
 
@@ -153,12 +153,13 @@
 | `FR-008-06` | Слот важкого аналізу MUST звільнятися за будь-якого завершення (успіх, помилка, таймаут бюджету, виняток). | `T-162`, `T-163`, `T-164` | `src/unmask/delivery/service.py`, `src/unmask/delivery/limits.py` | `tests/test_delivery_limits.py`, `tests/test_delivery_service_slots.py` |
 | `FR-008-07` | Для бота MUST діяти обмеження на користувача (кількість важких аналізів за вікно та один одночасний аналіз) і  | `T-162`, `T-168`, `T-169`, `T-174` | `src/unmask/delivery/limits.py`, `src/unmask/delivery/main.py`, `src/unmask/delivery/bot.py` | `tests/test_delivery_main.py`, `tests/test_delivery_limits.py`, `tests/test_delivery_bot_limits.py` |
 | `FR-008-08` | Усі межі (запитів на вікно, довжина вікна, одночасних аналізів, значення `Retry-After`, довірені адреси проксі | `T-161`, `T-167` | `config/protection.yaml`, `src/unmask/delivery/limits.py`, `src/unmask/delivery/main.py`, `src/unmask/delivery/config.py` | `tests/test_delivery_main.py`, `tests/test_delivery_limits.py`, `tests/test_protection_config.py` |
-| `FR-008-09` | Відповіді про перевантаження MUST бути чесними: `429`/`503` ніколи не маскуються під результат аналізу («чисто | `T-164`, `T-166`, `T-169`, `T-173` | `src/unmask/delivery/service.py`, `src/unmask/delivery/http.py`, `src/unmask/delivery/bot.py` | `tests/test_delivery_http_protection.py`, `tests/test_delivery_protection_e2e.py`, `tests/test_delivery_bot_limits.py`, `tests/test_delivery_service_slots.py` |
+| `FR-008-09` | Відповіді про перевантаження MUST бути чесними: `429`/`503` ніколи не маскуються під результат аналізу («чисто | `T-164`, `T-166`, `T-169`, `T-173`, `T-175` | `src/unmask/delivery/service.py`, `src/unmask/delivery/http.py`, `src/unmask/delivery/bot.py` | `tests/test_delivery_http_protection.py`, `tests/test_delivery_protection_e2e.py`, `tests/test_delivery_bot_limits.py`, `tests/test_delivery_service_slots.py` |
 | `FR-008-10` | Контракт відповіді API MUST описувати нові види помилок (`rate_limited`, `busy`) і заголовок `Retry-After`; чи | `T-166` | `src/unmask/delivery/http.py` | `tests/test_delivery_http_protection.py` |
 | `FR-008-11` | Репозиторій MUST містити юніт автозапуску з перезапуском при збої й змінними середовища з файлу оператора (без | `T-170` | `deploy/smoke.sh` | `tests/test_deploy_artifacts.py` |
 | `FR-008-12` | Репозиторій MUST містити приклад конфігурації зворотного проксі з TLS, що передає адресу клієнта довіреним заг | `T-170`, `T-171` | `deploy/smoke.sh` | `tests/test_nginx_example.py` |
-| `FR-008-13` | README MUST описувати розгортання (запуск, змінні, перезапуск, перевірка `/healthz`, ліміти) без секретів; URL | `T-170`, `T-172` | `deploy/smoke.sh` | `tests/test_deploy_artifacts.py`, `tests/test_ingest_profile_v5.py`, `tests/test_readme_no_vendor_names.py`, `tests/test_readme_deploy.py` |
+| `FR-008-13` | README MUST описувати розгортання (запуск, змінні, перезапуск, перевірка `/healthz`, ліміти) без секретів; URL | `T-170`, `T-172`, `T-175` | `deploy/smoke.sh` | `tests/test_deploy_artifacts.py`, `tests/test_ingest_profile_v5.py`, `tests/test_readme_no_vendor_names.py`, `tests/test_readme_deploy.py` |
 | `FR-008-14` | Тести MUST працювати без мережі й годинника реального часу (контрольований годинник у тестах лімітів) (принцип | `T-162`, `T-173` | `src/unmask/delivery/limits.py` | `tests/test_delivery_protection_e2e.py`, `tests/test_delivery_limits.py` |
+| `FR-008-15` | Сервіс MUST вести журнал запитів для оператора без секретів: для кожного HTTP-запиту один рядок (метод, очищен | `T-175` | `src/unmask/delivery/http.py`, `src/unmask/delivery/bot.py` | `tests/test_delivery_access_log.py` |
 
 ## Критичні задачі
 
@@ -249,3 +250,4 @@
 - `T-168` (008-api-protection-ops) — виконано
 - `T-169` (008-api-protection-ops) — виконано
 - `T-174` (008-api-protection-ops) — виконано
+- `T-175` (008-api-protection-ops) — у роботі
